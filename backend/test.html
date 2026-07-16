@@ -42,7 +42,22 @@
     const statusEl = document.getElementById('status');
     let mediaRecorder, chunks = [], recording = false;
 
+    const MIC_HELP =
+      'Микрофон недоступен в этом контексте. Открой страницу по адресу ' +
+      'http://localhost:8000/ (а не двойным кликом по файлу и не по IP). ' +
+      'Браузер даёт доступ к микрофону только на localhost или https.';
+
+    // Проверка при загрузке: если нет mediaDevices — значит контекст небезопасный
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      statusEl.textContent = MIC_HELP;
+      btn.disabled = true;
+    }
+
     btn.onclick = async () => {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        statusEl.textContent = MIC_HELP;
+        return;
+      }
       if (!recording) {
         let stream;
         try {
