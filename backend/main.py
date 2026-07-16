@@ -5,9 +5,10 @@ Non-streaming, push-to-talk. Цель — «петля живёт» и заме�
 Стек (API-путь, без GPU):
   STT — Groq Whisper (free tier, OpenAI-совместимый endpoint)
   LLM — provod.ai (оплата из РФ рублями, OpenAI-совместимый)
-  TTS — Windows SAPI через pyttsx3 (спайк); на Этапе 2 меняем на Kokoro/Qwen3-TTS
+  TTS — Windows SAPI / macOS через pyttsx3 (спайк); позже — Kokoro/Qwen3-TTS
 
 Открой http://localhost:8000/ — там страница записи микрофона (test.html).
+Сервер стартует даже без ключей: страница откроется, а /talk скажет, чего не хватает.
 """
 
 import base64
@@ -16,7 +17,7 @@ import time
 
 import pyttsx3
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from openai import OpenAI
@@ -29,15 +30,6 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
-# STT — Groq (OpenAI-совместимый endpoint)
-stt_client = OpenAI(
-    base_url="https://api.groq.com/openai/v1", api_key=os.environ["GROQ_API_KEY"]
-)
-# LLM — provod.ai (OpenAI-совместимый)
-llm_client = OpenAI(
-    base_url=os.environ["PROVOD_BASE_URL"], api_key=os.environ["PROVOD_API_KEY"]
-)
-
 SYSTEM_PROMPT = (
     "You are a friendly but strict English tutor for the Russian EGE exam. "
     "Reply in 2-3 short sentences. Gently correct the student's mistakes and keep "
@@ -45,12 +37,22 @@ SYSTEM_PROMPT = (
 )
 
 
+def _require(name: str) -> str:
+    val = os.environ.get(name)
+    if not val:
+        raise HTTPException(
+            status_code=500,
+            detail=f"{name} не задан. Заполни backend/.env (см. .env.example).",
+        )
+    return val
+
+
 def synthesize(text: str, path: str = "reply.wav") -> bytes:
-    """TTS через Windows SAPI (спайк). Пробуем выбрать английский голос."""
+    """TTS через системный движок (Windows SAPI / macOS). Пробуем англ. голос."""
     engine = pyttsx3.init()
     for v in engine.getProperty("voices"):
         name = (v.name or "").lower()
-        if any(k in name for k in ("english", "david", "zira", "mark")):
+        if any(k in name for k in ("english", "david", "zira", "mark", "samantha", "alex")):
             engine.setProperty("voice", v.id)
             break
     engine.save_to_file(text, path)
@@ -64,8 +66,26 @@ def index():
     return FileResponse("test.html")
 
 
+@app.get("/health")
+def health():
+    return {
+        "ok": True,
+        "groq_key": bool(os.environ.get("GROQ_API_KEY")),
+        "provod_key": bool(os.environ.get("PROVOD_API_KEY")),
+        "provod_url": bool(os.environ.get("PROVOD_BASE_URL")),
+    }
+
+
 @app.post("/talk")
 async def talk(audio: UploadFile = File(...)):
+    # Клиенты создаём здесь (лениво), чтобы сервер стартовал и без ключей
+    stt_client = OpenAI(
+        base_url="https://api.groq.com/openai/v1", api_key=_require("GROQ_API_KEY")
+    )
+    llm_client = OpenAI(
+        base_url=_require("PROVOD_BASE_URL"), api_key=_require("PROVOD_API_KEY")
+    )
+
     t0 = time.time()
     data = await audio.read()
 
