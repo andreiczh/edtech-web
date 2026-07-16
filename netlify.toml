@@ -1,0 +1,11 @@
+# Конфиг деплоя для Netlify
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA-фолбэк: любой путь отдаёт index.html.
+# Сейчас маршрут один, но пригодится, когда добавим клиентский роутинг.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

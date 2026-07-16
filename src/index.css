@@ -1,0 +1,419 @@
+:root {
+  /* Палитра из макета */
+  --bg: #544e88;
+  --sidebar-bg: #443f6e;
+  --orb-1: #ffebd3; /* крем */
+  --orb-2: #67a2c5; /* голубой */
+  --orb-3: #9bcec1; /* мятный */
+  --orb-4: #ffb6a6; /* коралловый */
+  --mic-bg: #f8f3fc;
+  --mic-icon: #534e89;
+
+  --line: rgba(255, 255, 255, 0.1);
+  --text: #f8f3fc;
+  --text-dim: rgba(248, 243, 252, 0.66);
+
+  --orb-size: clamp(64px, 9vw, 96px);
+  --orb-gap: clamp(16px, 2vw, 24px);
+
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
+    Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* --------------------------------------------------------- App / Sidebar */
+
+.app {
+  display: flex;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+  transition: background 0.4s ease;
+}
+
+/* Темы фона по режимам — одна палитра (S≈27%, L≈42%), меняется только оттенок.
+   Круги/кнопка/текст остаются прежними — они читаются на всех трёх фонах. */
+.app[data-theme='blue'] {
+  --bg: #544e88;
+  --sidebar-bg: #443f6e;
+}
+.app[data-theme='green'] {
+  --bg: #4e8870;
+  --sidebar-bg: #3f6e5b;
+}
+.app[data-theme='red'] {
+  --bg: #884e55;
+  --sidebar-bg: #6e3f45;
+}
+
+.sidebar {
+  width: 264px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  padding: 22px 16px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--line);
+  transition: background 0.4s ease;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+}
+
+.brand__dots {
+  display: inline-flex;
+  gap: 4px;
+}
+.brand__dots i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.brand__dots i:nth-child(1) { background: var(--orb-1); }
+.brand__dots i:nth-child(2) { background: var(--orb-2); }
+.brand__dots i:nth-child(3) { background: var(--orb-3); }
+.brand__dots i:nth-child(4) { background: var(--orb-4); }
+
+.brand__name {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.nav__item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+.nav__item--active {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  font-weight: 600;
+}
+.nav__item:focus-visible {
+  outline: 2px solid rgba(248, 243, 252, 0.85);
+  outline-offset: 2px;
+}
+
+.badge {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* ----------------------------------------------------------- Main / Tabs */
+
+.main {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* Сплошной цвет (анимируется при смене темы) + мягкий блик по центру */
+  background-color: var(--bg);
+  background-image: radial-gradient(120% 80% at 50% 22%, rgba(255, 255, 255, 0.07), transparent 60%);
+  transition: background-color 0.4s ease;
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 60px;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.tab:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+.tab--active {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.12);
+  font-weight: 600;
+}
+.tab:focus-visible {
+  outline: 2px solid rgba(248, 243, 252, 0.85);
+  outline-offset: 2px;
+}
+
+.content {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* --------------------------------------------------------- Placeholder */
+
+.placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+}
+.placeholder__title {
+  margin: 0;
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 600;
+}
+.placeholder__note {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 15px;
+}
+
+/* ------------------------------------------------------- Trainer / Stage */
+
+.stage {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(44px, 7vh, 84px);
+  padding: 24px;
+  user-select: none;
+}
+
+/* Подпись + кнопка — строго по центру, друг под другом */
+.controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+}
+
+/* ------------------------------------------------------------------- Orbs */
+
+.orbs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--orb-gap);
+  /* Высота = размеру круга (без фантомных отступов в покое).
+     При «эквалайзере» круги растягиваются за пределы бокса — это ок,
+     ничего не обрезается, композиция при этом не «прыгает». */
+  height: var(--orb-size);
+}
+
+.orb {
+  width: var(--orb-size);
+  height: var(--orb-size);
+  border-radius: 50%;
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+
+.orb--1 { background: var(--orb-1); }
+.orb--2 { background: var(--orb-2); }
+.orb--3 { background: var(--orb-3); }
+.orb--4 { background: var(--orb-4); }
+
+/* idle — лёгкое «дыхание», почти неподвижно */
+.orbs--idle .orb {
+  animation: idle-breathe 3.8s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 0.25s);
+}
+
+/* listening — «эквалайзер»: круги растягиваются по вертикали упорядоченной
+   «бегущей волной» (одна скорость, сдвиг по фазе) — ввод речи/текста */
+.orbs--listening .orb {
+  animation: eq 1.3s ease-in-out infinite;
+  animation-delay: calc(var(--i) * -0.2s);
+}
+
+/* processing — синхронный быстрый пульс («думает») */
+.orbs--processing .orb {
+  animation: think-pulse 0.9s ease-in-out infinite;
+}
+
+/* speaking — «волна»: плавно пульсируют со сдвигом по фазе (ответ ИИ) */
+.orbs--speaking .orb {
+  animation: wave 1.5s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 0.16s);
+}
+
+@keyframes idle-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+@keyframes eq {
+  0%, 100% { transform: scaleY(0.5); }
+  25% { transform: scaleY(1.9); }
+  50% { transform: scaleY(0.75); }
+  75% { transform: scaleY(1.5); }
+}
+
+@keyframes think-pulse {
+  0%, 100% { transform: scale(0.9); opacity: 0.65; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+
+@keyframes wave {
+  0%, 100% { transform: scale(0.82); opacity: 0.85; }
+  50% { transform: scale(1.28); opacity: 1; }
+}
+
+/* ---------------------------------------------------------------- Caption */
+
+.caption {
+  margin: 0;
+  min-height: 1.4em;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  color: rgba(248, 243, 252, 0.72);
+  transition: color 0.3s ease;
+}
+.caption--listening { color: var(--orb-4); }
+.caption--speaking { color: var(--orb-3); }
+
+/* ------------------------------------------------------------- Mic button */
+
+.mic {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: clamp(80px, 11vw, 97px);
+  height: clamp(80px, 11vw, 97px);
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--mic-bg);
+  color: var(--mic-icon);
+  cursor: pointer;
+  /* Чистая симметричная тень (без жёсткого «уступа» снизу) */
+  box-shadow: 0 14px 30px rgba(20, 16, 45, 0.38);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mic:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 38px rgba(20, 16, 45, 0.45);
+}
+
+.mic:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.mic:focus-visible {
+  outline: 3px solid rgba(248, 243, 252, 0.9);
+  outline-offset: 4px;
+}
+
+/* нажат — чуть «утоплен», тень мягче */
+.mic--active {
+  transform: translateY(1px);
+  box-shadow: 0 8px 20px rgba(20, 16, 45, 0.34);
+}
+
+/* ИИ говорит — мягкое свечение вокруг кнопки */
+.mic--speaking {
+  box-shadow: 0 0 0 6px rgba(155, 206, 193, 0.22), 0 12px 26px rgba(20, 16, 45, 0.35);
+}
+
+.mic:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.mic__icon {
+  width: 42%;
+  height: 42%;
+  position: relative;
+  z-index: 1;
+}
+
+/* пульсирующие кольца во время записи */
+.mic__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(248, 243, 252, 0.5);
+  animation: ring 1.8s ease-out infinite;
+}
+.mic__ring--delay {
+  animation-delay: 0.9s;
+}
+
+@keyframes ring {
+  0% { transform: scale(1); opacity: 0.55; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+
+/* --------------------------------------------------- Доступность / motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .orb,
+  .mic__ring {
+    animation: none !important;
+  }
+  .orbs--processing .orb,
+  .orbs--speaking .orb {
+    opacity: 1;
+  }
+}
