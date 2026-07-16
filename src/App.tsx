@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { TrainerScreen } from './components/TrainerScreen'
 import { Placeholder } from './components/Placeholder'
+import { EgeFormat } from './ege/EgeFormat'
 import type { Mode, EgeTab } from './types'
 
 const EGE_TABS: { id: EgeTab; label: string }[] = [
@@ -18,7 +19,7 @@ const THEME: Record<Mode, 'blue' | 'green' | 'red'> = {
 
 export default function App() {
   const [mode, setMode] = useState<Mode>('conversation')
-  const [tab, setTab] = useState<EgeTab>('trainer')
+  const [tab, setTab] = useState<EgeTab>('format')
 
   return (
     <div className="app" data-theme={THEME[mode]}>
@@ -50,9 +51,9 @@ export default function App() {
 
             <div className="content">
               {tab === 'trainer' ? (
-                <TrainerScreen />
+                <Placeholder title="Тренажёр" note="soon…" />
               ) : (
-                <Placeholder title="Ответ в формате ЕГЭ" note="Скоро — набросаем функционал." />
+                <EgeFormat />
               )}
             </div>
           </>
