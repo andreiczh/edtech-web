@@ -41,6 +41,7 @@ body {
 
 .app {
   display: flex;
+  flex-direction: column;
   height: 100dvh;
   overflow: hidden;
   background: var(--bg);
@@ -165,6 +166,7 @@ body {
 .tabs {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   height: 60px;
   padding: 0 22px;
@@ -1043,4 +1045,531 @@ body {
 .vcard__meta {
   font-size: 13px;
   color: var(--text-dim);
+}
+
+/* ==================================================================
+   Liquid Glass · акцентные кнопки · экран результата (обновление)
+   ================================================================== */
+
+.glass {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.05));
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  backdrop-filter: blur(18px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 12px 34px rgba(0, 0, 0, 0.16);
+}
+
+/* --- Кнопки: крупнее и акцентнее --- */
+.exam-btn {
+  padding: 13px 26px;
+  font-size: 15px;
+}
+.exam-btn--primary {
+  background: #ffffff;
+  color: #23232e;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+.exam-btn--primary:hover {
+  background: #ffffff;
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+/* Hero — самый акцентный белый CTA */
+.exam-btn--hero {
+  background: #ffffff;
+  color: #23232e;
+  padding: 16px 32px;
+  font-size: 16px;
+  font-weight: 650;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.14), 0 12px 34px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+.exam-btn--hero:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.2), 0 18px 44px rgba(0, 0, 0, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+/* Стеклянная — второстепенное действие */
+.exam-btn--glass {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.06));
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
+  backdrop-filter: blur(14px) saturate(1.5);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+.exam-btn--glass:hover {
+  transform: translateY(-1px);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.1));
+}
+
+/* --- Карточки вариантов: стекло + отметка «пройдено» --- */
+.vcard {
+  gap: 8px;
+  padding: 17px 19px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.035));
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.vcard:hover {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.07));
+}
+.vcard__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+}
+.vcard__check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--orb-3);
+  color: var(--bg);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.vcard__done {
+  font-size: 12px;
+  color: var(--orb-3);
+  letter-spacing: 0.02em;
+}
+.vcard.is-done {
+  border-color: rgba(155, 206, 193, 0.4);
+}
+.vcard.is-done .vcard__num {
+  color: var(--text-dim);
+}
+
+/* --- Бейдж «ИИ» --- */
+.ai-badge {
+  display: inline-grid;
+  place-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #23232e;
+  background: linear-gradient(135deg, var(--orb-1), var(--orb-3));
+  flex-shrink: 0;
+}
+.ai-badge--sm {
+  padding: 2px 7px;
+  font-size: 10px;
+}
+
+/* --- Экран результата (ИИ-ответ) --- */
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.results__ai {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.results__summary {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.45;
+}
+.results__score {
+  border-radius: 16px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.score-total {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.score-total span {
+  font-size: 18px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.score-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.score-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-dim);
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.score-table th:last-child {
+  text-align: right;
+}
+.score-table td {
+  padding: 9px 0;
+  color: var(--text);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.score-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.score-table tr:last-child td {
+  border-bottom: none;
+}
+.results__errors {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.results__errors h3 {
+  margin: 6px 0 2px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+.errcard {
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.errcard__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.errtag {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #23232e;
+}
+.errtag--lex { background: var(--orb-1); }
+.errtag--gram { background: var(--orb-2); }
+.errtag--phon { background: var(--orb-3); }
+.errtag--logic { background: var(--orb-4); }
+.errcard__task {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.errcard__desc {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+}
+.errcard__fb {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+/* ==================================================================
+   Каркас: топбар (лого по центру) + рейл (слайдер режимов + профиль)
+   ================================================================== */
+
+.topbar {
+  height: 60px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  backdrop-filter: blur(16px) saturate(1.4);
+}
+
+.shell {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.rail {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px 16px;
+  border-right: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  backdrop-filter: blur(16px) saturate(1.3);
+  transition: background 0.4s ease;
+}
+.rail__center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --- Круговой слайдер режимов --- */
+.wheel {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  outline: none;
+}
+.wheel:focus-visible {
+  outline: 2px solid rgba(248, 243, 252, 0.6);
+  outline-offset: 6px;
+  border-radius: 18px;
+}
+.wheel__arrow {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
+}
+.wheel__arrow:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+.wheel__viewport {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+.wheel__item {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+  cursor: pointer;
+  padding: 8px 10px;
+  border-radius: 12px;
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+.wheel__item--side {
+  opacity: 0.5;
+  font-size: 12px;
+}
+.wheel__item--side:hover {
+  opacity: 0.9;
+  color: var(--text);
+}
+.wheel__item--active {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 13px 12px;
+  cursor: default;
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.17), rgba(255, 255, 255, 0.06));
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  backdrop-filter: blur(16px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+.wheel__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* --- Личный кабинет --- */
+.profile {
+  position: relative;
+}
+.profile__btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.profile__btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.profile__avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--orb-2), var(--orb-4));
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.profile__text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.25;
+}
+.profile__name {
+  font-size: 14px;
+  font-weight: 600;
+}
+.profile__role {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.profile__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+}
+.profile__menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  z-index: 20;
+}
+.profile__menu-item {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 13px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.profile__menu-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* --- Модалка ЛК / Настройки --- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 8, 20, 0.42);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+  padding: 24px;
+}
+.modal {
+  width: min(440px, 100%);
+  border-radius: 20px;
+  padding: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modal__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  color: var(--text);
+}
+.modal__body {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.modal__foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* ==================================================================
+   Нижняя панель: слайдер режимов (по центру) + личный кабинет (справа)
+   ================================================================== */
+
+.bottombar {
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 24px;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(0deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  backdrop-filter: blur(16px) saturate(1.4);
+}
+.bottombar__profile {
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* профиль в нижней панели — без фона-панели, только подсветка при наведении */
+.profile__btn {
+  width: auto;
+  padding: 8px 12px;
+  gap: 12px;
+  background: transparent;
+}
+.profile__btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.profile__menu {
+  min-width: 210px;
+}
+.profile__avatar {
+  width: 46px;
+  height: 46px;
+  font-size: 18px;
+}
+.profile__name {
+  font-size: 15px;
+}
+.profile__role {
+  font-size: 12px;
+}
+
+/* центральная «таблетка» слайдера чуть просторнее по горизонтали */
+.wheel__item--active {
+  padding: 11px 18px;
+}
+.wheel__item--side {
+  white-space: nowrap;
 }

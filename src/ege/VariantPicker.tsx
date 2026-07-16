@@ -1,103 +1,62 @@
-import { useState } from 'react'
-import { TASK_TITLES } from './examFlow'
-
 // Заглушки вариантов (структура). Реальные КИМы подключим позже.
 const VARIANTS = Array.from({ length: 12 }, (_, i) => i + 1)
 
-type Individual = { task: number; from: number }[]
-
 /**
- * «Тренажёр» — витрина вариантов устной части.
- * Даёт: список вариантов, выбор случайного из списка и сборку индивидуального
- * варианта из случайных заданий. Запуск открывает «Ответ в формате ЕГЭ».
+ * Экран выбора варианта для «Ответ в формате ЕГЭ».
+ * — «Решить случайный вариант» (акцентная белая кнопка): случайный из ещё не пройденных.
+ * — Ниже — список вариантов; пройденные отмечены галочкой.
  */
-export function VariantPicker({ onStart }: { onStart: (label: string) => void }) {
-  const [selected, setSelected] = useState<number | null>(null)
-  const [individual, setIndividual] = useState<Individual | null>(null)
-
-  const pickRandom = () => {
-    setSelected(VARIANTS[Math.floor(Math.random() * VARIANTS.length)])
-    setIndividual(null)
+export function VariantPicker({
+  onStart,
+  solved,
+}: {
+  onStart: (num: number) => void
+  solved: number[]
+}) {
+  const solveRandom = () => {
+    const pool = VARIANTS.filter((n) => !solved.includes(n))
+    const src = pool.length ? pool : VARIANTS
+    onStart(src[Math.floor(Math.random() * src.length)])
   }
-
-  const buildIndividual = () => {
-    const composed = [1, 2, 3, 4].map((task) => ({
-      task,
-      from: VARIANTS[Math.floor(Math.random() * VARIANTS.length)],
-    }))
-    setIndividual(composed)
-    setSelected(null)
-  }
-
-  const select = (num: number) => {
-    setSelected(num)
-    setIndividual(null)
-  }
-
-  const hasChoice = selected !== null || individual !== null
 
   return (
     <div className="variants">
       <div className="variants__inner">
         <header className="variants__head">
           <h2>Выбор варианта</h2>
-          <p>Выберите готовый вариант устной части или соберите индивидуальный из случайных заданий, затем приступайте к выполнению.</p>
+          <p>Решайте случайные варианты устной части или выбирайте из списка. Пройденные отмечены галочкой.</p>
         </header>
 
         <div className="variants__actions">
-          <button type="button" className="exam-btn exam-btn--primary" onClick={pickRandom}>
-            Случайный вариант
-          </button>
-          <button type="button" className="exam-btn exam-btn--ghost" onClick={buildIndividual}>
-            Собрать индивидуальный вариант
+          <button type="button" className="exam-btn exam-btn--hero" onClick={solveRandom}>
+            Решить случайный вариант
           </button>
         </div>
 
-        {hasChoice && (
-          <div className="variants__banner">
-            <span>
-              {individual ? 'Индивидуальный вариант собран' : <>Выбран <b>Вариант {selected}</b></>}
-            </span>
-            <button
-              type="button"
-              className="exam-btn exam-btn--primary"
-              onClick={() => onStart(individual ? 'Индивидуальный вариант' : `Вариант ${selected}`)}
-            >
-              Начать →
-            </button>
-          </div>
-        )}
-
-        {individual && (
-          <div className="indiv">
-            <div className="indiv__title">Индивидуальный вариант</div>
-            <div className="indiv__rows">
-              {individual.map((row) => (
-                <div className="indiv__row" key={row.task}>
-                  <span>
-                    Задание {row.task} · {TASK_TITLES[row.task]}
-                  </span>
-                  <span className="indiv__from">из Варианта {row.from}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         <ul className="variants__list">
-          {VARIANTS.map((num) => (
-            <li key={num}>
-              <button
-                type="button"
-                className={`vcard${selected === num ? ' is-active' : ''}`}
-                onClick={() => select(num)}
-                aria-pressed={selected === num}
-              >
-                <span className="vcard__num">Вариант {num}</span>
-                <span className="vcard__meta">Устная часть · 4 задания · ~15 мин</span>
-              </button>
-            </li>
-          ))}
+          {VARIANTS.map((num) => {
+            const done = solved.includes(num)
+            return (
+              <li key={num}>
+                <button
+                  type="button"
+                  className={`vcard${done ? ' is-done' : ''}`}
+                  onClick={() => onStart(num)}
+                >
+                  <span className="vcard__top">
+                    <span className="vcard__num">Вариант {num}</span>
+                    {done && (
+                      <span className="vcard__check" aria-label="Пройдено">
+                        ✓
+                      </span>
+                    )}
+                  </span>
+                  <span className="vcard__meta">Устная часть · 4 задания · ~15 мин</span>
+                  {done && <span className="vcard__done">Пройдено</span>}
+                </button>
+              </li>
+            )
+          })}
         </ul>
       </div>
     </div>

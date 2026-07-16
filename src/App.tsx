@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { Sidebar } from './components/Sidebar'
+import { Logo } from './components/Logo'
+import { ModeSlider } from './components/ModeSlider'
+import { Profile } from './components/Profile'
 import { TrainerScreen } from './components/TrainerScreen'
 import { Placeholder } from './components/Placeholder'
 import { EgeFormat } from './ege/EgeFormat'
@@ -23,7 +25,9 @@ export default function App() {
 
   return (
     <div className="app" data-theme={THEME[mode]}>
-      <Sidebar mode={mode} onSelect={setMode} />
+      <header className="topbar">
+        <Logo />
+      </header>
 
       <main className="main">
         {mode === 'conversation' && (
@@ -65,6 +69,13 @@ export default function App() {
           </div>
         )}
       </main>
+
+      <footer className="bottombar">
+        <ModeSlider mode={mode} onSelect={setMode} />
+        <div className="bottombar__profile">
+          <Profile />
+        </div>
+      </footer>
     </div>
   )
 }

@@ -1,19 +1,23 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { STEPS, TASK_TITLES, fmt, type Step } from './examFlow'
 import { useCountdown } from './useCountdown'
 import { ExamFrame, ExamButton, Progress, Material, RecordingIndicator } from './ExamKit'
+import { ExamResults } from './ExamResults'
 
 /**
  * Тренажёр устного ЕГЭ: пошаговый флоу станции (структура, без контента).
  * Порядок и тайминги — в examFlow.ts. Экраны листаются кнопками; таймеры
- * показывают логику; экран «Be ready» (3 сек) переходит сам.
+ * показывают логику; экран «Be ready» (3 сек) переходит сам. Финал — экран
+ * результата (ИИ-разбор). onComplete отмечает вариант пройденным.
  */
 export function EgeTrainer({
   variant,
   onExit,
+  onComplete,
 }: {
-  variant?: string
+  variant?: number
   onExit?: () => void
+  onComplete?: () => void
 } = {}) {
   const [i, setI] = useState(0)
   const step = STEPS[i]
@@ -22,9 +26,15 @@ export function EgeTrainer({
   const restart = () => setI(0)
   const canBack = i > 0
 
+  // Достигли экрана результата → вариант считается пройденным
+  useEffect(() => {
+    if (step.kind === 'finish') onComplete?.()
+    // onComplete намеренно не в зависимостях: вызываем один раз при входе в finish
+  }, [step.kind]) // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="ege">
-      {(variant || onExit) && (
+      {(variant != null || onExit) && (
         <div className="ege__top">
           {onExit ? (
             <button type="button" className="ege__exit" onClick={onExit}>
@@ -33,11 +43,19 @@ export function EgeTrainer({
           ) : (
             <span />
           )}
-          {variant && <span className="ege__variant">{variant}</span>}
+          {variant != null && <span className="ege__variant">Вариант {variant}</span>}
         </div>
       )}
       <StepBar index={i} total={STEPS.length} />
-      <Screen key={i} step={step} onNext={next} onBack={canBack ? back : undefined} onRestart={restart} />
+      <Screen
+        key={i}
+        step={step}
+        variant={variant}
+        onNext={next}
+        onBack={canBack ? back : undefined}
+        onRestart={restart}
+        onExit={onExit}
+      />
     </div>
   )
 }
@@ -54,14 +72,18 @@ function StepBar({ index, total }: { index: number; total: number }) {
 
 function Screen({
   step,
+  variant,
   onNext,
   onBack,
   onRestart,
+  onExit,
 }: {
   step: Step
+  variant?: number
   onNext: () => void
   onBack?: () => void
   onRestart: () => void
+  onExit?: () => void
 }) {
   switch (step.kind) {
     case 'registration':
@@ -81,7 +103,7 @@ function Screen({
     case 'questions':
       return <Questions step={step} onNext={onNext} onBack={onBack} />
     case 'finish':
-      return <Finish onRestart={onRestart} onBack={onBack} />
+      return <ExamResults variant={variant} onRestart={onRestart} onExit={onExit} />
   }
 }
 
@@ -344,23 +366,6 @@ function Questions({
   )
 }
 
-function Finish({ onRestart, onBack }: { onRestart: () => void; onBack?: () => void }) {
-  return (
-    <ExamFrame
-      title="Экзамен завершён"
-      footer={<Nav onBack={onBack} primary="Пройти заново" onPrimary={onRestart} />}
-    >
-      <div className="info info--center">
-        <CheckIcon />
-        <div className="info__text">
-          <p>Все ответы записаны.</p>
-          <p>В реальном экзамене аудио уходит на проверку экспертам.</p>
-        </div>
-      </div>
-    </ExamFrame>
-  )
-}
-
 /* -------------------------------------------------------------- Иконки */
 
 function MonitorIcon() {
@@ -377,15 +382,6 @@ function MicIcon() {
     <svg className="info__icon" viewBox="0 0 48 48" fill="none" aria-hidden="true">
       <rect x="19" y="8" width="10" height="20" rx="5" stroke="currentColor" strokeWidth="2.5" />
       <path d="M14 23a10 10 0 0 0 20 0M24 33v7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function CheckIcon() {
-  return (
-    <svg className="info__icon" viewBox="0 0 48 48" fill="none" aria-hidden="true">
-      <circle cx="24" cy="24" r="18" stroke="currentColor" strokeWidth="2.5" />
-      <path d="m16 24 6 6 11-12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
