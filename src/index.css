@@ -1573,3 +1573,159 @@ body {
 .wheel__item--side {
   white-space: nowrap;
 }
+
+/* ==================================================================
+   Тренажёр — хаб тренировки
+   ================================================================== */
+
+.hub {
+  height: 100%;
+  overflow-y: auto;
+}
+.hub__inner {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 30px clamp(24px, 5vw, 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* Заполнить вакуум — главный блок */
+.hub__hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 24px 26px;
+  border-radius: 20px;
+}
+.hub__herotext h2 {
+  margin: 0 0 6px;
+  font-size: clamp(20px, 2.6vw, 25px);
+  font-weight: 650;
+  color: var(--text);
+}
+.hub__herotext p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1.45;
+  max-width: 62ch;
+}
+
+/* Кнопка-акцент (менее яркая, чем белая hero) */
+.exam-btn--accent {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.13));
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  color: var(--text);
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
+  backdrop-filter: blur(14px) saturate(1.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+.exam-btn--accent:hover {
+  transform: translateY(-1px);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0.2));
+}
+
+.hub__section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.hub__section h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+.hub__sechead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* Список ошибок (раскрывающийся) */
+.errlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.errlist__item {
+  border-radius: 14px;
+  overflow: hidden;
+}
+.errrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+.errrow:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.errrow__title {
+  flex: 1;
+  font-size: 14px;
+}
+.errrow__chev {
+  color: var(--text-dim);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.errrow__body {
+  padding: 0 16px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.errrow__body b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Кнопки типов заданий */
+.hub__taskgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.taskbtn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.12s ease, background 0.15s ease;
+}
+.taskbtn:hover {
+  transform: translateY(-1px);
+}
+.taskbtn__title {
+  font-weight: 600;
+  font-size: 15px;
+}
+.taskbtn__meta {
+  font-size: 12px;
+  color: var(--text-dim);
+}

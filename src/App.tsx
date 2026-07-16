@@ -5,6 +5,7 @@ import { Profile } from './components/Profile'
 import { TrainerScreen } from './components/TrainerScreen'
 import { Placeholder } from './components/Placeholder'
 import { EgeFormat } from './ege/EgeFormat'
+import { TrainerHub } from './ege/TrainerHub'
 import type { Mode, EgeTab } from './types'
 
 const EGE_TABS: { id: EgeTab; label: string }[] = [
@@ -54,11 +55,7 @@ export default function App() {
             </div>
 
             <div className="content">
-              {tab === 'trainer' ? (
-                <Placeholder title="Тренажёр" note="soon…" />
-              ) : (
-                <EgeFormat />
-              )}
+              {tab === 'trainer' ? <TrainerHub /> : <EgeFormat />}
             </div>
           </>
         )}
