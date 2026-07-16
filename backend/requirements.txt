@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+python-multipart
+openai
+pyttsx3
+python-dotenv
