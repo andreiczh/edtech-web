@@ -155,6 +155,7 @@ body {
   position: relative;
   flex: 1;
   min-width: 0;
+  min-height: 0; /* даёт main сжиматься под флекс-место — футер всегда виден, контент скроллится внутри */
   display: flex;
   flex-direction: column;
   /* Сплошной цвет (анимируется при смене темы) + мягкий блик по центру */
@@ -483,15 +484,16 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
-  align-items: center;
   justify-content: center;
-  padding: 20px;
+  align-items: stretch;
+  /* нижний отступ — рамка не доходит до края, футер всегда виден */
+  padding: 12px 20px 18px;
 }
 
 .exam__frame {
   width: 100%;
   max-width: 920px;
-  height: min(640px, 100%);
+  min-height: 0; /* заполняет высоту через stretch, тело скроллится внутри */
   display: flex;
   flex-direction: column;
   background: rgba(255, 255, 255, 0.055);
@@ -1255,12 +1257,17 @@ body {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
-  color: #23232e;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.24);
 }
-.errtag--lex { background: var(--orb-1); }
-.errtag--gram { background: var(--orb-2); }
-.errtag--phon { background: var(--orb-3); }
-.errtag--logic { background: var(--orb-4); }
+/* нейтральный (белый) тэг для всех типов — без пёстрых цветов */
+.errtag--lex,
+.errtag--gram,
+.errtag--phon,
+.errtag--logic {
+  background: rgba(255, 255, 255, 0.16);
+}
 .errcard__task {
   font-size: 12px;
   color: var(--text-dim);
@@ -1703,7 +1710,7 @@ body {
 /* Кнопки типов заданий */
 .hub__taskgrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
 }
 .taskbtn {

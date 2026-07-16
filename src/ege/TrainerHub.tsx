@@ -39,7 +39,25 @@ export function TrainerHub() {
           </button>
         </section>
 
-        {/* Работа над ошибками */}
+        {/* Нарешивание по типам заданий — сразу под «Заполнить вакуум», 4 в ряд */}
+        <section className="hub__section">
+          <h3>Нарешать по типам заданий</h3>
+          <div className="hub__taskgrid">
+            {TASK_TYPES.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className="taskbtn glass"
+                onClick={() => setDrill(t.label)}
+              >
+                <span className="taskbtn__title">{t.label}</span>
+                <span className="taskbtn__meta">5 заданий подряд · фидбэк ИИ</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Работа над ошибками — список ниже */}
         <section className="hub__section">
           <div className="hub__sechead">
             <h3>Работа над ошибками</h3>
@@ -81,24 +99,6 @@ export function TrainerHub() {
               )
             })}
           </ul>
-        </section>
-
-        {/* Нарешивание по типам заданий */}
-        <section className="hub__section">
-          <h3>Нарешать по типам заданий</h3>
-          <div className="hub__taskgrid">
-            {TASK_TYPES.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className="taskbtn glass"
-                onClick={() => setDrill(t.label)}
-              >
-                <span className="taskbtn__title">{t.label}</span>
-                <span className="taskbtn__meta">5 заданий подряд · фидбэк ИИ</span>
-              </button>
-            ))}
-          </div>
         </section>
       </div>
     </div>
