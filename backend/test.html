@@ -21,9 +21,11 @@
   </style>
 </head>
 <body>
-  <h1>Спайк голосовой петли</h1>
-  <p>Нажми «Говорить», скажи фразу <b>по-английски</b>, нажми ещё раз. Бэкенд:
-     <code>/talk</code>. Разреши доступ к микрофону.</p>
+  <h1>Голосовая петля (free stack)</h1>
+  <p>Нажми «Говорить», скажи фразу <b>по-английски</b>, нажми ещё раз. Стек:
+     faster-whisper (локально) → OpenRouter → edge-tts. Разреши доступ к микрофону.</p>
+  <p><small><b>Первый запрос</b> будет долгим: faster-whisper один раз скачает модель
+     (~150–500 МБ). Дальше — быстро.</small></p>
 
   <button id="btn">🎤 Говорить</button>
   <div id="status">Готов.</div>
@@ -95,8 +97,10 @@
         const data = await res.json();
         document.getElementById('user').textContent = data.user || '—';
         document.getElementById('ai').textContent = data.ai || '—';
-        document.getElementById('player').src = 'data:audio/wav;base64,' + data.audio_b64;
-        document.getElementById('player').play().catch(() => {});
+        const mime = data.audio_mime || 'audio/mpeg';
+        document.getElementById('player').src = data.audio_b64
+          ? 'data:' + mime + ';base64,' + data.audio_b64 : '';
+        if (data.audio_b64) document.getElementById('player').play().catch(() => {});
         const roundtrip = ((performance.now() - t0) / 1000).toFixed(2);
         document.getElementById('latency').textContent =
           JSON.stringify({ ...data.latency, roundtrip_с_сетью: roundtrip }, null, 2);

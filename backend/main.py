@@ -1,32 +1,38 @@
 """
-Спайк голосовой петли (Этап 1): микрофон → STT → LLM → TTS → звук обратно.
-Non-streaming, push-to-talk. Цель — «петля живёт» и замер задержки.
+Голосовая петля (Этап 2, редизайн на бесплатные и доступные из РФ API):
+  микрофон → STT → LLM → TTS → звук обратно. Push-to-talk, замер задержки.
 
-Стек (API-путь, без GPU):
-  STT — Groq Whisper (free tier, OpenAI-совместимый endpoint)
-  LLM — provod.ai (оплата из РФ рублями, OpenAI-совместимый)
-  TTS — Windows SAPI / macOS через pyttsx3 (спайк); позже — Kokoro/Qwen3-TTS
+Стек — только бесплатное и доступное из РФ без VPN:
+  STT — faster-whisper ЛОКАЛЬНО (офлайн, без ключа, без гео-блока)
+  LLM — OpenRouter :free-модели (OpenAI-совместимо, из РФ без VPN, без карты);
+        endpoint свапается через .env → можно указать DeepSeek или любой
+        другой OpenAI-совместимый провайдер, ничего в коде не меняя.
+  TTS — edge-tts (нейро-голоса Microsoft, бесплатно, без ключа, из РФ ок)
 
 Открой http://localhost:8000/ — там страница записи микрофона (test.html).
-Сервер стартует даже без ключей: страница откроется, а /talk скажет, чего не хватает.
+Сервер стартует даже без LLM-ключа: страница откроется, а /talk скажет, чего нет.
 """
 
+from __future__ import annotations
+
+import asyncio
 import base64
 import os
-import subprocess
-import sys
+import tempfile
 import time
 
+import edge_tts
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from faster_whisper import WhisperModel
 from openai import OpenAI
 
 load_dotenv()
 
-app = FastAPI(title="Копилот — спайк голосовой петли")
-# CORS — чтобы позже можно было дёргать бэкенд с фронта (localhost:5173)
+app = FastAPI(title="Копилот — голосовая петля (free stack)")
+# CORS — чтобы позже дёргать бэкенд с фронта (localhost:5173).
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
@@ -45,6 +51,23 @@ SYSTEM_PROMPT = (
     "- Reply in English only."
 )
 
+# Настройки через .env (все с разумными дефолтами).
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")  # base=быстрее, small=точнее
+TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AriaNeural")
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+LLM_MODEL = os.environ.get("LLM_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+
+# STT-модель грузим лениво и один раз (первый вызов скачает веса ~150–500 МБ).
+_whisper: WhisperModel | None = None
+
+
+def get_whisper() -> WhisperModel:
+    global _whisper
+    if _whisper is None:
+        # int8 на CPU — самый лёгкий режим для ноутбука без GPU.
+        _whisper = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+    return _whisper
+
 
 def _require(name: str) -> str:
     val = os.environ.get(name)
@@ -56,27 +79,29 @@ def _require(name: str) -> str:
     return val
 
 
-def synthesize(text: str, path: str = "reply.wav") -> bytes:
-    """TTS в ОТДЕЛЬНОМ процессе (tts_worker.py).
+def transcribe(data: bytes) -> str:
+    """STT локально через faster-whisper. На вход — байты webm/opus из браузера."""
+    with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
+        f.write(data)
+        path = f.name
+    try:
+        segments, _info = get_whisper().transcribe(path, language="en", beam_size=1)
+        return " ".join(seg.text for seg in segments).strip()
+    finally:
+        os.unlink(path)
 
-    Прямой вызов pyttsx3 в долгоживущем сервере падает на 2-м запросе
-    («run loop already started»). Подпроцесс на каждый синтез это лечит.
-    """
-    worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tts_worker.py")
-    proc = subprocess.run(
-        [sys.executable, worker, path],
-        input=text,
-        text=True,
-        capture_output=True,
-        timeout=60,
-    )
-    if proc.returncode != 0 or not os.path.exists(path):
-        raise HTTPException(
-            status_code=500,
-            detail=f"TTS не удался: {proc.stderr.strip() or 'нет вывода воркера'}",
-        )
+
+async def synthesize(text: str, path: str = "reply.mp3") -> bytes:
+    """TTS через edge-tts (нейро-голоса Microsoft). Возвращает mp3-байты."""
+    communicate = edge_tts.Communicate(text, TTS_VOICE)
+    await communicate.save(path)
     with open(path, "rb") as f:
         return f.read()
+
+
+def llm_client() -> OpenAI:
+    # Ленивое создание — сервер стартует и без ключа.
+    return OpenAI(base_url=LLM_BASE_URL, api_key=_require("LLM_API_KEY"))
 
 
 @app.get("/")
@@ -88,69 +113,66 @@ def index():
 def health():
     return {
         "ok": True,
-        "groq_key": bool(os.environ.get("GROQ_API_KEY")),
-        "provod_key": bool(os.environ.get("PROVOD_API_KEY")),
-        "provod_url": bool(os.environ.get("PROVOD_BASE_URL")),
+        "stt": f"faster-whisper:{WHISPER_MODEL} (local)",
+        "tts": f"edge-tts:{TTS_VOICE}",
+        "llm_base": LLM_BASE_URL,
+        "llm_model": LLM_MODEL,
+        "llm_key": bool(os.environ.get("LLM_API_KEY")),
     }
 
 
 @app.post("/talk")
 async def talk(audio: UploadFile = File(...)):
-    # Клиенты создаём здесь (лениво), чтобы сервер стартовал и без ключей
-    stt_client = OpenAI(
-        base_url="https://api.groq.com/openai/v1", api_key=_require("GROQ_API_KEY")
-    )
-    llm_client = OpenAI(
-        base_url=_require("PROVOD_BASE_URL"), api_key=_require("PROVOD_API_KEY")
-    )
-
     t0 = time.time()
     data = await audio.read()
 
-    # 1) STT: речь → текст
+    # 1) STT (локальная CPU-работа → в отдельный поток, чтобы не блокировать сервер)
     try:
-        transcript = stt_client.audio.transcriptions.create(
-            model="whisper-large-v3",
-            file=(audio.filename or "speech.webm", data, "audio/webm"),
-            language="en",
-        )
-    except Exception as e:  # noqa: BLE001 — покажем причину в UI (ключ/сеть/лимит)
-        raise HTTPException(status_code=502, detail=f"STT (Groq) ошибка: {e}")
-    user_text = (transcript.text or "").strip()
+        user_text = await asyncio.to_thread(transcribe, data)
+    except Exception as e:  # noqa: BLE001 — покажем причину в UI
+        raise HTTPException(status_code=502, detail=f"STT (faster-whisper) ошибка: {e}")
     t1 = time.time()
 
-    # Тишина / STT ничего не расслышал — не гоняем LLM+TTS впустую.
+    # Тишина / ничего не распознали — не гоняем LLM+TTS впустую.
     if not user_text:
         return {
             "user": "",
             "ai": "(не расслышал — скажи ещё раз, чуть громче)",
             "audio_b64": "",
+            "audio_mime": "audio/mpeg",
             "latency": {"stt": round(t1 - t0, 2), "llm": 0, "tts": 0, "total": round(t1 - t0, 2)},
         }
 
-    # 2) LLM: «мозг» (короткий ответ — и педагогически верно, и быстрее TTS)
+    # 2) LLM (OpenAI-совместимый вызов; частая причина ошибки — имя модели в LLM_MODEL)
+    client = llm_client()
     try:
-        completion = llm_client.chat.completions.create(
-            model=os.environ.get("LLM_MODEL", "gemini-2.5-flash-lite"),
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_text},
-            ],
-            max_tokens=80,
+        completion = await asyncio.to_thread(
+            lambda: client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_text},
+                ],
+                max_tokens=80,
+            )
         )
-    except Exception as e:  # noqa: BLE001 — частая причина: неверное имя модели в LLM_MODEL
-        raise HTTPException(status_code=502, detail=f"LLM (provod.ai) ошибка: {e}")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"LLM ошибка ({LLM_MODEL}): {e}")
     ai_text = (completion.choices[0].message.content or "").strip()
     t2 = time.time()
 
-    # 3) TTS: текст → речь
-    wav = synthesize(ai_text)
+    # 3) TTS (edge-tts, асинхронно)
+    try:
+        wav = await synthesize(ai_text)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"TTS (edge-tts) ошибка: {e}")
     t3 = time.time()
 
     return {
         "user": user_text,
         "ai": ai_text,
         "audio_b64": base64.b64encode(wav).decode(),
+        "audio_mime": "audio/mpeg",
         "latency": {
             "stt": round(t1 - t0, 2),
             "llm": round(t2 - t1, 2),
