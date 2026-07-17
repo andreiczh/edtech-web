@@ -93,8 +93,8 @@
       try {
         const t0 = performance.now();
         const res = await fetch(BACKEND, { method: 'POST', body: fd });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
         document.getElementById('user').textContent = data.user || '—';
         document.getElementById('ai').textContent = data.ai || '—';
         const mime = data.audio_mime || 'audio/mpeg';
@@ -106,7 +106,11 @@
           JSON.stringify({ ...data.latency, roundtrip_с_сетью: roundtrip }, null, 2);
         statusEl.textContent = 'Готово.';
       } catch (e) {
-        statusEl.textContent = 'Ошибка: ' + e.message + ' — бэкенд запущен на :8000?';
+        // TypeError = сеть/CORS не достучались до бэкенда вовсе (не запущен/не тот порт).
+        // Любая другая ошибка — бэкенд ответил, но со сбоем внутри (текст уже конкретный).
+        statusEl.textContent = e instanceof TypeError
+          ? 'Ошибка сети: ' + e.message + ' — бэкенд запущен на :8000?'
+          : 'Ошибка: ' + e.message;
       } finally {
         btn.disabled = false;
       }
