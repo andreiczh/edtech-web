@@ -21,6 +21,10 @@ import os
 import tempfile
 import time
 
+# На Windows без Developer Mode huggingface_hub печатает безобидный warning
+# про symlinks при каждой загрузке модели — глушим, чтобы не путать с ошибкой.
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
 import edge_tts
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
