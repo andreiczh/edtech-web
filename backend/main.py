@@ -13,9 +13,10 @@ Non-streaming, push-to-talk. Цель — «петля живёт» и заме�
 
 import base64
 import os
+import subprocess
+import sys
 import time
 
-import pyttsx3
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,15 +49,24 @@ def _require(name: str) -> str:
 
 
 def synthesize(text: str, path: str = "reply.wav") -> bytes:
-    """TTS через системный движок (Windows SAPI / macOS). Пробуем англ. голос."""
-    engine = pyttsx3.init()
-    for v in engine.getProperty("voices"):
-        name = (v.name or "").lower()
-        if any(k in name for k in ("english", "david", "zira", "mark", "samantha", "alex")):
-            engine.setProperty("voice", v.id)
-            break
-    engine.save_to_file(text, path)
-    engine.runAndWait()
+    """TTS в ОТДЕЛЬНОМ процессе (tts_worker.py).
+
+    Прямой вызов pyttsx3 в долгоживущем сервере падает на 2-м запросе
+    («run loop already started»). Подпроцесс на каждый синтез это лечит.
+    """
+    worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tts_worker.py")
+    proc = subprocess.run(
+        [sys.executable, worker, path],
+        input=text,
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+    if proc.returncode != 0 or not os.path.exists(path):
+        raise HTTPException(
+            status_code=500,
+            detail=f"TTS не удался: {proc.stderr.strip() or 'нет вывода воркера'}",
+        )
     with open(path, "rb") as f:
         return f.read()
 
@@ -90,23 +100,38 @@ async def talk(audio: UploadFile = File(...)):
     data = await audio.read()
 
     # 1) STT: речь → текст
-    transcript = stt_client.audio.transcriptions.create(
-        model="whisper-large-v3",
-        file=(audio.filename or "speech.webm", data, "audio/webm"),
-        language="en",
-    )
+    try:
+        transcript = stt_client.audio.transcriptions.create(
+            model="whisper-large-v3",
+            file=(audio.filename or "speech.webm", data, "audio/webm"),
+            language="en",
+        )
+    except Exception as e:  # noqa: BLE001 — покажем причину в UI (ключ/сеть/лимит)
+        raise HTTPException(status_code=502, detail=f"STT (Groq) ошибка: {e}")
     user_text = (transcript.text or "").strip()
     t1 = time.time()
 
+    # Тишина / STT ничего не расслышал — не гоняем LLM+TTS впустую.
+    if not user_text:
+        return {
+            "user": "",
+            "ai": "(не расслышал — скажи ещё раз, чуть громче)",
+            "audio_b64": "",
+            "latency": {"stt": round(t1 - t0, 2), "llm": 0, "tts": 0, "total": round(t1 - t0, 2)},
+        }
+
     # 2) LLM: «мозг» (короткий ответ — и педагогически верно, и быстрее TTS)
-    completion = llm_client.chat.completions.create(
-        model=os.environ.get("LLM_MODEL", "gemini-2.5-flash-lite"),
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_text},
-        ],
-        max_tokens=80,
-    )
+    try:
+        completion = llm_client.chat.completions.create(
+            model=os.environ.get("LLM_MODEL", "gemini-2.5-flash-lite"),
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_text},
+            ],
+            max_tokens=80,
+        )
+    except Exception as e:  # noqa: BLE001 — частая причина: неверное имя модели в LLM_MODEL
+        raise HTTPException(status_code=502, detail=f"LLM (provod.ai) ошибка: {e}")
     ai_text = (completion.choices[0].message.content or "").strip()
     t2 = time.time()
 
