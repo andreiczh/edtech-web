@@ -23,5 +23,8 @@ if (-not (Test-Path ".env")) {
     exit 1
 }
 
-# 4) start. --host 0.0.0.0 so the server is reachable for a tunnel / LAN too.
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+# 4) start. No --reload: it restarts the server on file writes and drops
+#    in-flight requests. On the FIRST start the STT model downloads (~150 MB) -
+#    wait for the line "Uvicorn running on http://0.0.0.0:8000" before using it.
+Write-Host "Starting server. On first run it downloads the STT model - wait for 'Uvicorn running'." -ForegroundColor Cyan
+uvicorn main:app --host 0.0.0.0 --port 8000

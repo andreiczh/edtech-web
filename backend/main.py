@@ -52,7 +52,9 @@ SYSTEM_PROMPT = (
 )
 
 # Настройки через .env (все с разумными дефолтами).
-WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")  # base=быстрее, small=точнее
+# base.en — лёгкая англ.-модель: быстрее и легче по памяти, чем small (важно для
+# слабого ноута). Точнее/тяжелее по возрастанию: base.en < small.en < small.
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base.en")
 TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AriaNeural")
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://openrouter.ai/api/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
@@ -91,17 +93,35 @@ def transcribe(data: bytes) -> str:
         os.unlink(path)
 
 
-async def synthesize(text: str, path: str = "reply.mp3") -> bytes:
-    """TTS через edge-tts (нейро-голоса Microsoft). Возвращает mp3-байты."""
-    communicate = edge_tts.Communicate(text, TTS_VOICE)
-    await communicate.save(path)
-    with open(path, "rb") as f:
-        return f.read()
+async def synthesize(text: str) -> bytes:
+    """TTS через edge-tts (нейро-голоса Microsoft). Возвращает mp3-байты.
+
+    Пишем во ВРЕМЕННЫЙ файл (не в cwd), чтобы не мусорить в рабочей папке.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+        path = f.name
+    try:
+        communicate = edge_tts.Communicate(text, TTS_VOICE)
+        await communicate.save(path)
+        with open(path, "rb") as fh:
+            return fh.read()
+    finally:
+        if os.path.exists(path):
+            os.unlink(path)
 
 
 def llm_client() -> OpenAI:
     # Ленивое создание — сервер стартует и без ключа.
     return OpenAI(base_url=LLM_BASE_URL, api_key=_require("LLM_API_KEY"))
+
+
+@app.on_event("startup")
+async def _warmup():
+    # Прогреваем STT-модель при СТАРТЕ: первая загрузка (~150 МБ) идёт здесь и
+    # видна в консоли, а не виснет на первом /talk (иначе соединение рвётся).
+    print(f"[startup] Загружаю faster-whisper:{WHISPER_MODEL} (первый раз качает модель, подожди)...")
+    await asyncio.to_thread(get_whisper)
+    print("[startup] STT-модель готова. Сервер принимает запросы.")
 
 
 @app.get("/")
