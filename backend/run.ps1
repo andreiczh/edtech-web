@@ -1,24 +1,27 @@
-# run.ps1 — обновить и запустить сервер на Windows одной командой.
-# Запуск:  powershell -ExecutionPolicy Bypass -File run.ps1
+# run.ps1 - update and start the backend server on Windows in one command.
+# Run:  powershell -ExecutionPolicy Bypass -File run.ps1
+# NOTE: keep this file ASCII-only. Windows PowerShell 5.1 reads .ps1 as the
+# system ANSI codepage (CP1251 on RU Windows), so Cyrillic / em-dashes here
+# would break the parser.
 $ErrorActionPreference = "Stop"
 
-# 1) подтянуть свежий код с GitHub (то, что ты запушил с Мака)
+# 1) pull the latest code from GitHub (what was pushed from the Mac)
 Set-Location "$PSScriptRoot\.."
 git pull
 Set-Location "$PSScriptRoot"
 
-# 2) окружение
+# 2) python environment
 if (-not (Test-Path ".venv")) { py -3.11 -m venv .venv }
 .\.venv\Scripts\Activate.ps1
 pip install -q -r requirements.txt
 
-# 3) .env
+# 3) .env with API keys
 if (-not (Test-Path ".env")) {
     Copy-Item ".env.example" ".env"
-    Write-Host "Создан .env — впиши ключи (GROQ_API_KEY, PROVOD_*), потом запусти снова." -ForegroundColor Yellow
+    Write-Host "Created .env - fill in your keys (GROQ_API_KEY, PROVOD_*), then run this again." -ForegroundColor Yellow
     notepad .env
     exit 1
 }
 
-# 4) запуск. --host 0.0.0.0 — чтобы сервер был доступен и для туннеля/локальной сети.
+# 4) start. --host 0.0.0.0 so the server is reachable for a tunnel / LAN too.
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
