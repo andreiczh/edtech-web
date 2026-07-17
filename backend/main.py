@@ -60,8 +60,11 @@ SYSTEM_PROMPT = (
 # слабого ноута). Точнее/тяжелее по возрастанию: base.en < small.en < small.
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base.en")
 TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AriaNeural")
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://openrouter.ai/api/v1")
-LLM_MODEL = os.environ.get("LLM_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+# DeepSeek — дефолт. OpenRouter на практике оказался за Cloudflare-блоком с
+# части РФ-сетей ("Sorry, you are blocked" даже в браузере, без участия нашего
+# кода) — DeepSeek подтверждённо работает из РФ без VPN. См. .env.example.
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com")
+LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
 
 # STT-модель грузим лениво и один раз (первый вызов скачает веса ~150–500 МБ).
 _whisper: WhisperModel | None = None
