@@ -10,7 +10,7 @@ const CAPTIONS: Record<ConversationState, string> = {
 }
 
 export function TrainerScreen() {
-  const { state, toggle } = useConversation()
+  const { state, toggle, transcript, reply, error } = useConversation()
 
   return (
     <div className="stage">
@@ -19,6 +19,18 @@ export function TrainerScreen() {
       <div className="controls">
         <p className={`caption caption--${state}`}>{CAPTIONS[state]}</p>
         <MicButton state={state} onToggle={toggle} />
+      </div>
+
+      {/* Расшифровка/ответ/ошибка — плавающий блок снизу, не сдвигает композицию. */}
+      <div className="dialog" aria-live="polite">
+        {error ? (
+          <p className="dialog__err">{error}</p>
+        ) : (
+          <>
+            {transcript && <p className="dialog__you">Ты: {transcript}</p>}
+            {reply && <p className="dialog__ai">ИИ: {reply}</p>}
+          </>
+        )}
       </div>
     </div>
   )

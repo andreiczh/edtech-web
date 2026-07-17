@@ -332,6 +332,25 @@ body {
 .caption--listening { color: var(--orb-4); }
 .caption--speaking { color: var(--orb-3); }
 
+/* ---------------------------------------------------- Диалог (расшифровка) */
+/* Плавающий блок внизу сцены — не влияет на центрирование кругов/кнопки. */
+.dialog {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  width: min(600px, 90%);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+.dialog p { margin: 0; font-size: 14px; line-height: 1.4; }
+.dialog__you { color: rgba(248, 243, 252, 0.5); }
+.dialog__ai { color: rgba(248, 243, 252, 0.9); }
+.dialog__err { color: #ff9b9b; }
+
 /* ------------------------------------------------------------- Mic button */
 
 .mic {
