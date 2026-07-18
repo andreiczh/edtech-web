@@ -19,9 +19,12 @@ export interface ConversationApi {
   latency: Record<string, number> | null // { stt, llm, tts, total }
 }
 
-// Адрес бэкенда. По умолчанию — та же машина (бэк на :8000). Меняется через
-// VITE_BACKEND_URL в .env (напр. если бэк за туннелем).
-const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000').replace(/\/+$/, '')
+// Адрес бэкенда. По умолчанию ПУСТОЙ = тот же origin, что отдал страницу:
+//   - бэк сам раздаёт собранный фронт  → /talk == origin/talk  ✓
+//   - за публичным туннелем            → /talk == tunnel/talk  ✓
+//   - `npm run dev` (:5173)            → /talk проксируется на :8000 (vite.config)
+// Переопределяется через VITE_BACKEND_URL, если бэк реально на другом хосте.
+const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
 
 export function useConversation(): ConversationApi {
   const [state, setState] = useState<ConversationState>('idle')

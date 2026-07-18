@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from faster_whisper import WhisperModel
 from openai import OpenAI
 
@@ -60,11 +61,11 @@ SYSTEM_PROMPT = (
 # слабого ноута). Точнее/тяжелее по возрастанию: base.en < small.en < small.
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base.en")
 TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AriaNeural")
-# DeepSeek — дефолт. OpenRouter на практике оказался за Cloudflare-блоком с
-# части РФ-сетей ("Sorry, you are blocked" даже в браузере, без участия нашего
-# кода) — DeepSeek подтверждённо работает из РФ без VPN. См. .env.example.
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com")
-LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
+# Mistral — дефолт: подтверждённо работает из РФ без VPN и активируется без
+# карты. (DeepSeek не начислил бесплатный грант — 402 Insufficient Balance;
+# OpenRouter за Cloudflare-блоком РФ — 403.) Свапается через .env, см. .env.example.
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.mistral.ai/v1")
+LLM_MODEL = os.environ.get("LLM_MODEL", "mistral-small-latest")
 
 # STT-модель грузим лениво и один раз (первый вызов скачает веса ~150–500 МБ).
 _whisper: WhisperModel | None = None
@@ -131,9 +132,14 @@ async def _warmup():
     print("[startup] STT-модель готова. Сервер принимает запросы.")
 
 
-@app.get("/")
-def index():
-    return FileResponse("test.html")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_DIST = os.path.join(_HERE, "..", "dist")  # собранный React-фронт (npm run build)
+
+
+@app.get("/test")
+def test_page():
+    """Старая проверочная страница (vanilla JS). Основной UI — собранный фронт на /."""
+    return FileResponse(os.path.join(_HERE, "test.html"))
 
 
 @app.get("/health")
@@ -207,3 +213,17 @@ async def talk(audio: UploadFile = File(...)):
             "total": round(t3 - t0, 2),
         },
     }
+
+
+# Раздаём собранный React-фронт (../dist) на "/", если он собран (npm run build).
+# Так весь UI и API живут на ОДНОМ адресе — одна публичная ссылка через туннель,
+# без возни с двумя серверами и CORS. Маршруты /talk, /health, /test заданы ВЫШЕ
+# и имеют приоритет над этим mount.
+if os.path.isdir(_DIST):
+    app.mount("/", StaticFiles(directory=_DIST, html=True), name="frontend")
+else:
+
+    @app.get("/")
+    def _need_build():
+        # Фронт ещё не собран — покажем проверочную страницу как заглушку.
+        return FileResponse(os.path.join(_HERE, "test.html"))
