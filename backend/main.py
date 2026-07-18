@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import tempfile
 import time
@@ -58,6 +59,41 @@ SYSTEM_PROMPT = (
     "kindly (\"You can say ...\"), then move on — do not nitpick every small error.\n"
     "- Match the student's level, speak clearly, and encourage them.\n"
     "- Reply in English only."
+)
+
+# Промпт-ревьюер устного ЕГЭ, Задание 4 (монолог по 2 фото / голосовое другу).
+# Критерии ФИПИ (10 баллов): коммуникативная задача (4) + организация (3) +
+# языковое оформление (3). ВАЖНО: на вход — авто-транскрипт, поэтому произношение
+# оценить НЕЛЬЗЯ (в тексте его нет) → фонетические ошибки не выдумываем.
+MONOLOGUE_PROMPT = (
+    "You are an examiner for the Russian EGE oral English exam, Task 4: a monologue "
+    "comparing two photos (a voice message to a friend, explaining the choice for a "
+    "project). You receive an AUTOMATIC TRANSCRIPT of the student's spoken answer.\n\n"
+    "Grade it by the 3 official criteria (10 points total):\n"
+    "1) key=\"task\" — Решение коммуникативной задачи (max 4): are all required aspects "
+    "covered, volume ~12-15 phrases, on-topic.\n"
+    "2) key=\"organization\" — Организация высказывания (max 3): opening + conclusion, "
+    "linking words (firstly, however, in conclusion), logical structure.\n"
+    "3) key=\"language\" — Языковое оформление (max 3): lexical and grammatical accuracy "
+    "and range.\n\n"
+    "IMPORTANT: the input is a TEXT transcript — you CANNOT judge pronunciation or word "
+    "stress from it, so NEVER invent phonetic errors. Judge only what the text shows.\n\n"
+    "Return ONLY a JSON object (no prose, no markdown) with EXACTLY this shape:\n"
+    "{\n"
+    '  "summary": "<one short sentence in Russian: overall verdict>",\n'
+    '  "criteria": [\n'
+    '    {"key":"task","name":"Решение коммуникативной задачи","score":<0-4>,"max":4,"comment":"<по-русски, кратко>"},\n'
+    '    {"key":"organization","name":"Организация высказывания","score":<0-3>,"max":3,"comment":"<по-русски, кратко>"},\n'
+    '    {"key":"language","name":"Языковое оформление","score":<0-3>,"max":3,"comment":"<по-русски, кратко>"}\n'
+    "  ],\n"
+    '  "errors": [\n'
+    '    {"cat":"gram|lex|logic","quote":"<exact words from the answer, English>","correction":"<fixed, English>","explanation":"<по-русски, почему>"}\n'
+    "  ]\n"
+    "}\n\n"
+    "Rules: comments and explanations in Russian; quote and correction in English. "
+    "Be honest but encouraging (level A2-B1). List up to 6 most important errors "
+    "(cat is only gram/lex/logic — never phon). If the answer is empty or off-task, "
+    "give zeros and say so in the summary."
 )
 
 # Настройки через .env (все с разумными дефолтами).
@@ -215,6 +251,63 @@ async def talk(audio: UploadFile = File(...)):
             "llm": round(t2 - t1, 2),
             "tts": round(t3 - t2, 2),
             "total": round(t3 - t0, 2),
+        },
+    }
+
+
+@app.post("/monologue")
+async def monologue(audio: UploadFile = File(...)):
+    """Разбор монолога (ЕГЭ Задание 4): полное аудио → batch STT → ОДИН
+    структурный проход LLM → JSON-фидбэк (3 критерия + ошибки). Без TTS —
+    разбор текстовый, для экрана результата. Фаза 1 (baseline, без стриминга).
+    """
+    t0 = time.time()
+    data = await audio.read()
+
+    # 1) STT — весь монолог разом (Фаза 2 сделает это стримингом во время речи).
+    try:
+        transcript_text = await asyncio.to_thread(transcribe, data)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"STT (faster-whisper) ошибка: {e}")
+    t1 = time.time()
+
+    if not transcript_text:
+        raise HTTPException(
+            status_code=422, detail="Тишина — ничего не распознали. Запиши монолог ещё раз."
+        )
+
+    # 2) LLM — один структурный проход, ответ строго JSON.
+    client = llm_client()
+    try:
+        completion = await asyncio.to_thread(
+            lambda: client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": MONOLOGUE_PROMPT},
+                    {"role": "user", "content": transcript_text},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.2,
+                max_tokens=800,
+            )
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"LLM ошибка ({LLM_MODEL}): {e}")
+
+    raw = (completion.choices[0].message.content or "").strip()
+    try:
+        feedback = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
+    t2 = time.time()
+
+    return {
+        "transcript": transcript_text,
+        "feedback": feedback,
+        "latency": {
+            "stt": round(t1 - t0, 2),
+            "llm": round(t2 - t1, 2),
+            "total": round(t2 - t0, 2),
         },
     }
 
