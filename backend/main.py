@@ -29,6 +29,7 @@ import edge_tts
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from faster_whisper import WhisperModel
@@ -41,6 +42,9 @@ app = FastAPI(title="Копилот — голосовая петля (free stac
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
+# Сжимаем ответы (JS-бандл ~225 КБ несжатым) — важно за нестабильным туннелем
+# (trycloudflare/RF-маршрут): меньше файл — меньше шанс оборваться на середине.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 SYSTEM_PROMPT = (
     "You are a warm, encouraging native-speaker English tutor helping a Russian "
