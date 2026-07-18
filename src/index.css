@@ -1617,6 +1617,70 @@ body {
   gap: 28px;
 }
 
+/* --- Практика монолога (Задание 4) --- */
+.mono__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mono__center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 18px;
+  padding: 32px 0;
+}
+.mono__hint {
+  max-width: 48ch;
+  color: rgba(248, 243, 252, 0.7);
+  font-size: 15px;
+  line-height: 1.5;
+  margin: 0;
+}
+.mono__rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+}
+.mono__dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #e5484d;
+  animation: think-pulse 1.2s ease-in-out infinite;
+}
+.mono__time {
+  font-size: 46px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.mono__spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid rgba(248, 243, 252, 0.25);
+  border-top-color: rgba(248, 243, 252, 0.9);
+  animation: mono-spin 0.8s linear infinite;
+}
+@keyframes mono-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.mono__transcript {
+  font-size: 14px;
+  line-height: 1.5;
+  color: rgba(248, 243, 252, 0.7);
+}
+.mono__transcript summary {
+  cursor: pointer;
+  color: rgba(248, 243, 252, 0.85);
+  margin-bottom: 8px;
+}
+
 /* Заполнить вакуум — главный блок */
 .hub__hero {
   display: flex;

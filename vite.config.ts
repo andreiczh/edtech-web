@@ -10,6 +10,7 @@ export default defineConfig({
     // звать относительный /talk (тот же путь, что в собранном виде за туннелем).
     proxy: {
       '/talk': 'http://localhost:8000',
+      '/monologue': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
     },
   },

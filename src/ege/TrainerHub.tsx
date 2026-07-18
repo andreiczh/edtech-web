@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { DrillSession } from './DrillSession'
+import { MonologuePractice } from './MonologuePractice'
 import { PAST_ERRORS, CAT_LABEL, TASK_TYPES } from './trainerData'
 
 /**
@@ -12,8 +13,13 @@ import { PAST_ERRORS, CAT_LABEL, TASK_TYPES } from './trainerData'
  */
 export function TrainerHub() {
   const [drill, setDrill] = useState<string | null>(null)
+  const [mono, setMono] = useState(false)
   const [openError, setOpenError] = useState<number | null>(null)
 
+  // Задание 4 (Монолог) — реальная практика с ИИ-разбором; остальное пока заглушка.
+  if (mono) {
+    return <MonologuePractice onExit={() => setMono(false)} />
+  }
   if (drill !== null) {
     return <DrillSession title={drill} onExit={() => setDrill(null)} />
   }
@@ -48,7 +54,7 @@ export function TrainerHub() {
                 key={t.id}
                 type="button"
                 className="taskbtn glass"
-                onClick={() => setDrill(t.label)}
+                onClick={() => (t.id === 4 ? setMono(true) : setDrill(t.label))}
               >
                 <span className="taskbtn__title">{t.label}</span>
                 <span className="taskbtn__meta">5 заданий подряд · фидбэк ИИ</span>
