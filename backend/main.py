@@ -19,6 +19,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import tempfile
 import time
 
@@ -31,10 +32,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from faster_whisper import WhisperModel
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 load_dotenv()
 
@@ -161,6 +162,25 @@ async def synthesize(text: str) -> bytes:
 def llm_client() -> OpenAI:
     # Ленивое создание — сервер стартует и без ключа.
     return OpenAI(base_url=LLM_BASE_URL, api_key=_require("LLM_API_KEY"))
+
+
+def async_llm_client() -> AsyncOpenAI:
+    # Асинхронный клиент — для стриминга токенов (/talk_stream).
+    return AsyncOpenAI(base_url=LLM_BASE_URL, api_key=_require("LLM_API_KEY"))
+
+
+# Граница предложения: точка/!/?/… (возможно несколько) + пробел/конец.
+_SENTENCE_END = re.compile(r"[.!?…]+(?=\s|$)")
+
+
+def _split_sentence(buf: str) -> tuple[str, str]:
+    """Отрезает первое законченное предложение из буфера.
+    Возвращает (предложение | '', остаток)."""
+    m = _SENTENCE_END.search(buf)
+    if not m:
+        return "", buf
+    end = m.end()
+    return buf[:end].strip(), buf[end:].lstrip()
 
 
 @app.on_event("startup")
@@ -310,6 +330,95 @@ async def monologue(audio: UploadFile = File(...)):
             "total": round(t2 - t0, 2),
         },
     }
+
+
+@app.post("/talk_stream")
+async def talk_stream(audio: UploadFile = File(...)):
+    """Разговор со СТРИМИНГОМ ответа (Шаг A к <2с бесшовности).
+
+    Тот же push-to-talk на входе, но ответ течёт пофразно: LLM токенами →
+    режем на предложения → каждое сразу озвучиваем (edge-tts) и отдаём чанком
+    NDJSON `{text, audio_b64}`. Фронт играет их подряд — первый звук идёт,
+    пока генерится остальное. Финальный чанк: `{done, user, reply, latency}`,
+    где latency.first_audio = время до первого озвученного предложения.
+    """
+    data = await audio.read()
+
+    async def gen():
+        t0 = time.time()
+        # 1) STT (batch, после стопа — Шаг B сделает это стримингом во время речи)
+        try:
+            user_text = await asyncio.to_thread(transcribe, data)
+        except Exception as e:  # noqa: BLE001
+            yield json.dumps({"error": f"STT (faster-whisper) ошибка: {e}"}) + "\n"
+            return
+        t1 = time.time()
+        if not user_text:
+            yield json.dumps(
+                {"done": True, "user": "", "reply": "(не расслышал — скажи ещё раз)",
+                 "latency": {"stt": round(t1 - t0, 2), "first_audio": 0, "total": round(t1 - t0, 2)}}
+            ) + "\n"
+            return
+
+        # Расшифровку отдаём сразу — фронт покажет «Ты сказал…», пока стримится ответ.
+        yield json.dumps({"user": user_text}) + "\n"
+
+        # 2) LLM стримингом → 3) пофразный TTS
+        client = async_llm_client()
+        reply_full = ""
+        buf = ""
+        first_audio_at = None
+
+        async def emit(sentence: str):
+            nonlocal first_audio_at
+            wav = await synthesize(sentence)
+            if first_audio_at is None:
+                first_audio_at = time.time()
+            return json.dumps({"text": sentence, "audio_b64": base64.b64encode(wav).decode()}) + "\n"
+
+        try:
+            stream = await client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_text},
+                ],
+                max_tokens=120,
+                stream=True,
+            )
+            async for chunk in stream:
+                delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
+                if not delta:
+                    continue
+                buf += delta
+                reply_full += delta
+                # выгружаем все законченные предложения из буфера
+                while True:
+                    sentence, buf = _split_sentence(buf)
+                    if not sentence:
+                        break
+                    yield await emit(sentence)
+            # хвост (последнее предложение без завершающего пробела)
+            tail = buf.strip()
+            if tail:
+                yield await emit(tail)
+        except Exception as e:  # noqa: BLE001
+            yield json.dumps({"error": f"LLM/TTS ошибка ({LLM_MODEL}): {e}"}) + "\n"
+            return
+
+        t2 = time.time()
+        yield json.dumps(
+            {"done": True, "user": user_text, "reply": reply_full.strip(),
+             "latency": {"stt": round(t1 - t0, 2),
+                         "first_audio": round((first_audio_at or t2) - t1, 2),
+                         "total": round(t2 - t0, 2)}}
+        ) + "\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
 
 
 # Раздаём собранный React-фронт (../dist) на "/", если он собран (npm run build).

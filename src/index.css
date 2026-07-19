@@ -350,6 +350,11 @@ body {
 .dialog__you { color: rgba(248, 243, 252, 0.5); }
 .dialog__ai { color: rgba(248, 243, 252, 0.9); }
 .dialog__err { color: #ff9b9b; }
+.dialog__lat {
+  font-size: 12px;
+  color: rgba(248, 243, 252, 0.4);
+  font-variant-numeric: tabular-nums;
+}
 
 /* ------------------------------------------------------------- Mic button */
 

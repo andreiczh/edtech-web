@@ -10,7 +10,7 @@ const CAPTIONS: Record<ConversationState, string> = {
 }
 
 export function TrainerScreen() {
-  const { state, toggle, transcript, reply, error } = useConversation()
+  const { state, toggle, transcript, reply, error, latency } = useConversation()
 
   return (
     <div className="stage">
@@ -29,6 +29,11 @@ export function TrainerScreen() {
           <>
             {transcript && <p className="dialog__you">Ты: {transcript}</p>}
             {reply && <p className="dialog__ai">ИИ: {reply}</p>}
+            {latency && (
+              <p className="dialog__lat">
+                1-й звук: {latency.first_audio}s · всего: {latency.total}s
+              </p>
+            )}
           </>
         )}
       </div>
