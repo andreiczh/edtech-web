@@ -39,6 +39,41 @@ from openai import AsyncOpenAI, OpenAI
 
 load_dotenv()
 
+# Пути, отдающие ПОТОК: их сжимать нельзя, см. GZipExceptStreams ниже.
+# Новый потоковый эндпоинт — дописать его путь сюда, иначе стриминг у него
+# молча выключится (ответ придёт целиком в самом конце).
+_STREAM_PATHS = {"/talk_stream"}
+
+
+class GZipExceptStreams:
+    """GZip для всего, КРОМЕ потоковых ответов.
+
+    Грабли (замерено на Windows-ноуте 22.07.2026): GZipMiddleware ломает
+    стриминг насмерть. zlib копит вход во внутреннем буфере и отдаёт сжатый
+    блок только когда его наберётся достаточно, а base64-mp3 почти не
+    сжимается — поэтому чанки висят в буфере до конца ответа. Итог: браузер
+    получал ВЕСЬ NDJSON разом в момент `total`, то есть Шаг A (стриминг
+    ответа) не давал ничего вообще.
+
+    Контрольный опыт, один и тот же запрос:
+      с gzip:     расшифровка и первый звук пришли на 4.84с (= total 4.82с);
+      identity:   расшифровка на 2.72с, первый звук на 3.99с — как задумано.
+
+    `X-Accel-Buffering: no` на StreamingResponse от этого не спасает: он про
+    буферизацию в nginx, а тут буфер внутри нашего же процесса.
+    """
+
+    def __init__(self, app, **kwargs):
+        self._plain = app
+        self._gzipped = GZipMiddleware(app, **kwargs)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path") in _STREAM_PATHS:
+            await self._plain(scope, receive, send)
+        else:
+            await self._gzipped(scope, receive, send)
+
+
 app = FastAPI(title="Копилот — голосовая петля (free stack)")
 # CORS — чтобы позже дёргать бэкенд с фронта (localhost:5173).
 app.add_middleware(
@@ -46,7 +81,7 @@ app.add_middleware(
 )
 # Сжимаем ответы (JS-бандл ~225 КБ несжатым) — важно за нестабильным туннелем
 # (trycloudflare/RF-маршрут): меньше файл — меньше шанс оборваться на середине.
-app.add_middleware(GZipMiddleware, minimum_size=500)
+app.add_middleware(GZipExceptStreams, minimum_size=500)
 
 SYSTEM_PROMPT = (
     "You are a warm, encouraging native-speaker English tutor helping a Russian "
@@ -62,17 +97,29 @@ SYSTEM_PROMPT = (
     "- Reply in English only."
 )
 
-# Промпт-ревьюер устного ЕГЭ, Задание 4 (монолог по 2 фото / голосовое другу).
+# Промпт-ревьюер устного ЕГЭ, Задание 4 (монолог, голосовое сообщение другу).
 # Критерии ФИПИ (10 баллов): коммуникативная задача (4) + организация (3) +
 # языковое оформление (3). ВАЖНО: на вход — авто-транскрипт, поэтому произношение
 # оценить НЕЛЬЗЯ (в тексте его нет) → фонетические ошибки не выдумываем.
+#
+# ВАЖНО-2 (баг, найден замером 22.07.2026): промпт требовал сравнения двух фото,
+# а экран честно просит «говори на свободную тему — картинок пока нет». Из-за
+# этого связный монолог на 65с получал 0+0+0 и вердикт «нет сравнения двух фото»,
+# а разбор ошибок не делался вовсе. Промпт согласован с тем, что просит экран.
+# Когда появятся материалы (2 фото + план) — передавать сюда текст задания
+# и вернуть проверку по аспектам плана.
 MONOLOGUE_PROMPT = (
-    "You are an examiner for the Russian EGE oral English exam, Task 4: a monologue "
-    "comparing two photos (a voice message to a friend, explaining the choice for a "
-    "project). You receive an AUTOMATIC TRANSCRIPT of the student's spoken answer.\n\n"
+    "You are an examiner for the Russian EGE oral English exam, Task 4: a ~2-minute "
+    "monologue recorded as a voice message to a friend. You receive an AUTOMATIC "
+    "TRANSCRIPT of the student's spoken answer.\n\n"
+    "THE APP HAS NO PHOTO MATERIALS YET, so the student was asked to speak on a topic "
+    "of their own choice in the Task 4 format. NEVER demand a comparison of two photos "
+    "and NEVER give zeros because the answer does not describe pictures — grade the "
+    "monologue the student was actually asked to produce.\n\n"
     "Grade it by the 3 official criteria (10 points total):\n"
-    "1) key=\"task\" — Решение коммуникативной задачи (max 4): are all required aspects "
-    "covered, volume ~12-15 phrases, on-topic.\n"
+    "1) key=\"task\" — Решение коммуникативной задачи (max 4): is the chosen topic "
+    "really developed (not a few generic phrases), volume ~12-15 phrases, does the "
+    "student stay on one topic.\n"
     "2) key=\"organization\" — Организация высказывания (max 3): opening + conclusion, "
     "linking words (firstly, however, in conclusion), logical structure.\n"
     "3) key=\"language\" — Языковое оформление (max 3): lexical and grammatical accuracy "
@@ -93,8 +140,9 @@ MONOLOGUE_PROMPT = (
     "}\n\n"
     "Rules: comments and explanations in Russian; quote and correction in English. "
     "Be honest but encouraging (level A2-B1). List up to 6 most important errors "
-    "(cat is only gram/lex/logic — never phon). If the answer is empty or off-task, "
-    "give zeros and say so in the summary."
+    "(cat is only gram/lex/logic — never phon). Zeros are only for an empty answer or "
+    "a few unrelated words; any real monologue must be graded on its merits, and the "
+    "errors list must be filled in even when the scores are low."
 )
 
 # Настройки через .env (все с разумными дефолтами).
