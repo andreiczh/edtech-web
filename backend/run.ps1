@@ -52,11 +52,30 @@ git pull --rebase --autostash
 Assert-Ok "git pull"
 
 # 2) frontend deps + build. The backend serves ../dist, which is NOT in git,
-#    so skipping this means serving a stale UI. npm.cmd (not npm) bypasses the
-#    PowerShell shim blocked by ExecutionPolicy.
-Write-Host "[2/4] npm install + build" -ForegroundColor Cyan
-npm.cmd install
-Assert-Ok "npm install"
+#    so skipping the build means serving a stale UI. npm.cmd (not npm) bypasses
+#    the PowerShell shim blocked by ExecutionPolicy.
+#
+#    "npm ci", NOT "npm install": install rewrites package-lock.json on Windows
+#    (it drops the macOS-only optional binaries of rollup/esbuild that the Mac
+#    recorded), which then blocks every future "git pull" with "unstaged
+#    changes". "npm ci" installs strictly from the lock file and never writes
+#    to it. Run it only when the lock file is newer than node_modules -
+#    dependencies change rarely, and a full reinstall on every server start
+#    would cost a minute for nothing.
+Write-Host "[2/4] frontend deps + build" -ForegroundColor Cyan
+$needDeps = $true
+$nm = Join-Path $root "node_modules"
+if (Test-Path $nm) {
+    $lockTime = (Get-Item (Join-Path $root "package-lock.json")).LastWriteTime
+    if ((Get-Item $nm).LastWriteTime -ge $lockTime) { $needDeps = $false }
+}
+if ($needDeps) {
+    Write-Host "      dependencies changed - running npm ci" -ForegroundColor Cyan
+    npm.cmd ci
+    Assert-Ok "npm ci"
+} else {
+    Write-Host "      dependencies unchanged - skipping install" -ForegroundColor DarkGray
+}
 npm.cmd run build
 Assert-Ok "npm run build"
 

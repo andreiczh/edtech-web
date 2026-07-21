@@ -38,7 +38,6 @@
 # Windows, полный цикл
 cd C:\Users\Lenovo\edtech-copilot-web
 git pull --rebase
-npm.cmd install
 npm.cmd run build          # обязательно: бэкенд раздаёт dist/
 cd backend
 .\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000

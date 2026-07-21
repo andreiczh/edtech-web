@@ -61,13 +61,19 @@ gh auth login
 ```powershell
 cd C:\Users\Lenovo\edtech-copilot-web
 git pull --rebase
-npm.cmd install
 npm.cmd run build
 cd backend
 .\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
 Или одной командой вместо всего блока: `powershell -ExecutionPolicy Bypass -File backend\run.ps1`
+(он сам решает, надо ли переустанавливать зависимости).
+
+**`npm.cmd install` на Windows не запускать.** Он переписывает `package-lock.json` —
+выкидывает macOS-бинарники rollup/esbuild, которые записал Мак, — и после этого
+каждый `git pull` падает с `unstaged changes`. Если зависимости реально поменялись,
+ставить их надо командой **`npm.cmd ci`**: она читает лок-файл строго и никогда
+в него не пишет.
 
 Проверить, что сборка реально прошла: в выводе должна быть строка `built in …`.
 Если TypeScript ругнулся — сборки **не было**, `dist/` остался старый, дальше не идти.
