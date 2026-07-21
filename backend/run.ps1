@@ -17,15 +17,38 @@ function Assert-Ok($step) {
     if ($LASTEXITCODE -ne 0) {
         Write-Host ""
         Write-Host "FAILED: $step (exit code $LASTEXITCODE)." -ForegroundColor Red
-        Write-Host "Fix the error above before starting the server." -ForegroundColor Red
+        Write-Host "Read the error above. Common cases:" -ForegroundColor Yellow
+        Write-Host "  'unstaged changes'  -> run: git stash" -ForegroundColor Yellow
+        Write-Host "  'unmerged files'    -> run: git rebase --abort, then ask the Mac agent" -ForegroundColor Yellow
+        Write-Host "  'SSL' / 'unable to access' -> network problem. Turn the VPN OFF:" -ForegroundColor Yellow
+        Write-Host "     this project does not need it, and it can break git and the API." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Server NOT started. Press Enter to close." -ForegroundColor Red
+        Read-Host | Out-Null
         exit 1
     }
 }
 
-# 1) pull the latest code pushed from the Mac
+# Port check first: VPN / proxy clients (v2rayN, clash, ...) open local
+# listeners, and if one took :8000 uvicorn dies on bind with WinError 10048
+# at the very last step - after several minutes of pulling and building.
+$busy = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
+if ($busy) {
+    $owner = (Get-Process -Id $busy[0].OwningProcess -ErrorAction SilentlyContinue).ProcessName
+    Write-Host "Port 8000 is already taken by '$owner' (pid $($busy[0].OwningProcess))." -ForegroundColor Red
+    Write-Host "If that is an old server of ours - close its window and run this again." -ForegroundColor Yellow
+    Write-Host "If it is a VPN / proxy client - change its local port or stop it." -ForegroundColor Yellow
+    Read-Host "Press Enter to close" | Out-Null
+    exit 1
+}
+
+# 1) pull the latest code pushed from the Mac.
+#    --autostash: local edits are set aside and put back automatically instead
+#    of blocking the pull. Note it also makes git return 0 even if putting them
+#    back conflicts - so the working tree is still expected to stay clean.
 Set-Location $root
 Write-Host "[1/4] git pull" -ForegroundColor Cyan
-git pull --rebase
+git pull --rebase --autostash
 Assert-Ok "git pull"
 
 # 2) frontend deps + build. The backend serves ../dist, which is NOT in git,

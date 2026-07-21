@@ -159,14 +159,43 @@ async def synthesize(text: str) -> bytes:
             os.unlink(path)
 
 
+# Клиенты создаём ОДИН раз на процесс, а не на каждый запрос: иначе каждый вызов
+# платит новый TLS-хендшейк (а из РФ это заметная часть задержки голосовой петли).
+# Ленивая инициализация — сервер должен стартовать и без ключа.
+# Таймауты заданы явно: дефолт SDK (600с на чтение, 2 ретрая) при обрыве сети
+# превращает сбой в многоминутное зависание, которое выглядит как «всё сломалось».
+_llm: OpenAI | None = None
+_async_llm: AsyncOpenAI | None = None
+_LLM_TIMEOUT = 30.0
+_LLM_RETRIES = 1
+
+
 def llm_client() -> OpenAI:
-    # Ленивое создание — сервер стартует и без ключа.
-    return OpenAI(base_url=LLM_BASE_URL, api_key=_require("LLM_API_KEY"))
+    global _llm
+    if _llm is None:
+        _llm = OpenAI(
+            base_url=LLM_BASE_URL, api_key=_require("LLM_API_KEY"),
+            timeout=_LLM_TIMEOUT, max_retries=_LLM_RETRIES,
+        )
+    return _llm
 
 
 def async_llm_client() -> AsyncOpenAI:
     # Асинхронный клиент — для стриминга токенов (/talk_stream).
-    return AsyncOpenAI(base_url=LLM_BASE_URL, api_key=_require("LLM_API_KEY"))
+    global _async_llm
+    if _async_llm is None:
+        _async_llm = AsyncOpenAI(
+            base_url=LLM_BASE_URL, api_key=_require("LLM_API_KEY"),
+            timeout=_LLM_TIMEOUT, max_retries=_LLM_RETRIES,
+        )
+    return _async_llm
+
+
+class TtsFailed(Exception):
+    """Сбой синтеза речи. Отдельный тип, чтобы не сваливать его в «LLM ошибка»:
+    в /talk_stream синтез идёт внутри того же try, что и стриминг LLM, и без
+    разделения падение edge-tts рапортуется как проблема с моделью Mistral —
+    пользователь идёт перевыпускать ключ вместо того, чтобы чинить TTS."""
 
 
 # Граница предложения: точка/!/?/… (возможно несколько) + пробел/конец.
@@ -371,7 +400,10 @@ async def talk_stream(audio: UploadFile = File(...)):
 
         async def emit(sentence: str):
             nonlocal first_audio_at
-            wav = await synthesize(sentence)
+            try:
+                wav = await synthesize(sentence)
+            except Exception as e:  # noqa: BLE001
+                raise TtsFailed(str(e)) from e
             if first_audio_at is None:
                 first_audio_at = time.time()
             return json.dumps({"text": sentence, "audio_b64": base64.b64encode(wav).decode()}) + "\n"
@@ -402,8 +434,11 @@ async def talk_stream(audio: UploadFile = File(...)):
             tail = buf.strip()
             if tail:
                 yield await emit(tail)
+        except TtsFailed as e:
+            yield json.dumps({"error": f"TTS (edge-tts) ошибка: {e}"}) + "\n"
+            return
         except Exception as e:  # noqa: BLE001
-            yield json.dumps({"error": f"LLM/TTS ошибка ({LLM_MODEL}): {e}"}) + "\n"
+            yield json.dumps({"error": f"LLM ошибка ({LLM_MODEL}): {e}"}) + "\n"
             return
 
         t2 = time.time()

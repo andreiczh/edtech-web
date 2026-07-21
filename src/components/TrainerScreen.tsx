@@ -30,8 +30,14 @@ export function TrainerScreen() {
             {transcript && <p className="dialog__you">Ты: {transcript}</p>}
             {reply && <p className="dialog__ai">ИИ: {reply}</p>}
             {latency && (
+              // «Пауза» = stt + first_audio. Показывать один first_audio нельзя:
+              // он считается ПОСЛЕ распознавания, то есть занижает реальное
+              // ожидание студента примерно на 20-30%. total — не пауза вообще,
+              // это когда сервер доделал ПОСЛЕДНЮЮ фразу, поэтому подписан честно.
               <p className="dialog__lat">
-                1-й звук: {latency.first_audio}s · всего: {latency.total}s
+                пауза до ответа: {(latency.stt + latency.first_audio).toFixed(2)}s
+                {' '}(stt {latency.stt}s + {latency.first_audio}s) · сервер отработал
+                за {latency.total}s
               </p>
             )}
           </>

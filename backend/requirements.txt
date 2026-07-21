@@ -3,5 +3,8 @@ uvicorn[standard]
 python-multipart
 openai
 faster-whisper
-edge-tts
+# Верхняя граница осознанная: edge-tts зависит от недокументированного протокола
+# Microsoft и ломался на мажорных обновлениях (403 / NoAudioReceived). Точную
+# рабочую версию запинить, когда узнаем её с Windows-ноута.
+edge-tts>=7,<8
 python-dotenv
