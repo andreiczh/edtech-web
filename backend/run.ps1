@@ -103,6 +103,17 @@ if (-not (Test-Path ".env")) {
 # 5) start. No --reload: it restarts on file writes and drops in-flight
 #    requests. On the FIRST start the STT model downloads (~150 MB) with no
 #    progress bar - wait for the "Uvicorn running" line before using the app.
+$log = Join-Path $env:TEMP "pingo-uvicorn.log"
 Write-Host "[4/4] starting server" -ForegroundColor Cyan
 Write-Host "First run downloads the STT model - wait for 'Uvicorn running'." -ForegroundColor Cyan
-.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
+Write-Host ""
+Write-Host "DO NOT press Ctrl+C in this window just to copy text - it STOPS the server." -ForegroundColor Yellow
+Write-Host "To send the log to the Mac, open a SECOND window and run:" -ForegroundColor Yellow
+Write-Host ('    Get-Content "' + $log + '" -Tail 40 | Set-Clipboard') -ForegroundColor Yellow
+Write-Host ""
+
+# -u = unbuffered: without it Python buffers stdout into the pipe and the log
+# file lags minutes behind the console. Tee keeps the console output AND writes
+# the file, so logs can be collected without touching this window.
+.\.venv\Scripts\python.exe -u -m uvicorn main:app --host 127.0.0.1 --port 8000 2>&1 |
+    Tee-Object -FilePath $log
