@@ -5,3 +5,15 @@ dist-ssr
 .DS_Store
 .vite
 *.tsbuildinfo
+
+# Секреты. Шаблон "*.local" их НЕ ловит — нужны явные строки.
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Питон
+__pycache__/
+*.pyc
+.venv/

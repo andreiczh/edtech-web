@@ -1,0 +1,14 @@
+# Нормализация переводов строк: без этого Windows-редактор переписывает весь файл
+# целиком (LF -> CRLF) и создаёт ложные конфликты слияния на пустом месте.
+* text=auto
+
+# .ps1 должны приезжать на Windows с CRLF и оставаться ASCII-only:
+# Windows PowerShell 5.1 читает их в системной кодировке (CP1251 на RU-винде).
+*.ps1 text eol=crlf
+
+# Бинарники не трогать.
+*.png binary
+*.jpg binary
+*.mp3 binary
+*.wav binary
+*.pdf binary
