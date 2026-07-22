@@ -1,175 +1,406 @@
 /**
- * Данные и типы заданий устного ЕГЭ по новому макету.
+ * Банк заданий устного ЕГЭ и память о прогрессе.
  *
- * Тайминги взяты из формулировок самих заданий (они же на скринах): 39 — полторы
- * минуты на чтение про себя и полторы на чтение вслух; 40 — по 20 секунд на
- * каждый из четырёх вопросов; 41 — по 40 секунд на каждый из пяти; 42 — две с
- * половиной минуты подготовки и три минуты речи.
+ * По просьбе пользователя каждый номер — это СЕРИЯ: клик по карточке №39 даёт не
+ * один случайный текст, а сессию из пяти ранее не решённых вариантов этого типа
+ * с общим фидбэком в конце. Поэтому у TaskDef появились variants[], а отметки
+ * «пройдено» ставятся на вариант, не на номер.
+ *
+ * Тайминги взяты из формулировок самих заданий: 39 — полторы минуты на чтение;
+ * 40 — по 20 секунд на каждый из четырёх вопросов; 41 — по 40 секунд на каждый
+ * из пяти ответов; 42 — три минуты речи.
  */
 
 export type TaskId = 39 | 40 | 41 | 42
 export type TaskKind = 'reading' | 'dialogue' | 'interview' | 'monologue'
 
+export interface TaskVariant {
+  id: string
+  /** Текст задания на вводном экране. У 40 и 42 отличается между вариантами. */
+  brief: string
+  /** Текст для чтения вслух — только у 39 */
+  readText?: string
+  images?: string[]
+  imageCaption?: string
+  /** Шаги ответа: вопросы-подсказки у 40, вопросы интервью у 41 */
+  steps?: string[]
+}
+
 export interface TaskDef {
   id: TaskId
   kind: TaskKind
-  /** Подпись под номером в меню: reading / dialogue / interview / monologue */
   label: string
-  /** Текст задания на вводном экране (фото 4, 5, 7) */
-  brief: string
-  /** Картинки задания. Для 40 — одна (объявление), для 42 — две (сравнение). */
-  images?: string[]
-  imageCaption?: string
-  /** Текст для чтения вслух — только у 39 */
-  readText?: string
-  /** Реплики-подсказки по шагам: вопросы для 40 и 41 */
-  steps?: string[]
-  /** Секунды на подготовку до начала ответа */
   prepSeconds: number
   /** Секунды на ОДИН шаг ответа (для 40 и 41 — на каждый вопрос) */
   answerSeconds: number
-  /**
-   * Есть ли на бэкенде разбор именно этого задания. Сейчас честно только у 42:
-   * эндпоинт /monologue считает по критериям ФИПИ 4+3+3. Для остальных разбор
-   * не написан, и притворяться, что он есть, нельзя.
-   */
-  hasAiFeedback: boolean
+  /** Максимум баллов, который ставит разбор (ориентир по устной части ЕГЭ) */
+  maxScore: number
+  variants: TaskVariant[]
 }
 
 /* Картинки — публичные заглушки из Unsplash: своих материалов в репозитории нет,
    а без изображения задания 40 и 42 бессмысленны. Заменить на свои. */
-const IMG_DANCE =
-  'https://images.unsplash.com/photo-1518611012118-696072aa579a?w=900&q=70&auto=format&fit=crop'
-const IMG_KNIT =
-  'https://images.unsplash.com/photo-1584992236310-6edddc08acff?w=700&q=70&auto=format&fit=crop'
-const IMG_SKATE =
-  'https://images.unsplash.com/photo-1520045892732-304bc3ac5d8e?w=700&q=70&auto=format&fit=crop'
+const IMG = {
+  dance: 'https://images.unsplash.com/photo-1518611012118-696072aa579a?w=900&q=70&auto=format&fit=crop',
+  pool: 'https://images.unsplash.com/photo-1530549387789-4c1017266635?w=900&q=70&auto=format&fit=crop',
+  books: 'https://images.unsplash.com/photo-1512820790803-83ca734da794?w=900&q=70&auto=format&fit=crop',
+  bike: 'https://images.unsplash.com/photo-1485965120184-e220f721d03e?w=900&q=70&auto=format&fit=crop',
+  camera: 'https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=900&q=70&auto=format&fit=crop',
+  knit: 'https://images.unsplash.com/photo-1584992236310-6edddc08acff?w=700&q=70&auto=format&fit=crop',
+  skate: 'https://images.unsplash.com/photo-1520045892732-304bc3ac5d8e?w=700&q=70&auto=format&fit=crop',
+  mountains: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=700&q=70&auto=format&fit=crop',
+  beach: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=700&q=70&auto=format&fit=crop',
+  homeFood: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=700&q=70&auto=format&fit=crop',
+  restaurant: 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=700&q=70&auto=format&fit=crop',
+  guitar: 'https://images.unsplash.com/photo-1510915361894-db8b60106cb1?w=700&q=70&auto=format&fit=crop',
+  concert: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=700&q=70&auto=format&fit=crop',
+  chess: 'https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=700&q=70&auto=format&fit=crop',
+}
+
+/* ------------------------------------------------------------------- №39 */
+
+const BRIEF_39 =
+  '№39: Imagine that you are preparing a project with your friend. You have found some ' +
+  'interesting material for the presentation and you want to read this text to your friend. ' +
+  'You have 1.5 minutes to read the text silently, then be ready to read it out aloud. ' +
+  'You will not have more than 1.5 minutes to read it.'
+
+const READ_TEXTS: string[] = [
+  // 1 — деревья (текст из макета)
+  'A tree is a tall plant with a trunk and branches made of wood. Trees can live for many ' +
+    'years. The oldest tree ever discovered is approximately 5,000 years old. The four main ' +
+    'parts of a tree are the roots, the trunk, the branches, and the leaves. The roots of a ' +
+    'tree are usually under the ground. A single tree has many roots. The roots carry ' +
+    'nutrients and water from the ground through the trunk and branches to the leaves of the ' +
+    'tree. They can also breathe in air. The trunk is the main body of the tree. The trunk is ' +
+    'covered with bark which protects it from damage. Branches grow from the trunk. They ' +
+    'spread out so that the leaves can get more sunlight. The leaves of a tree are green most ' +
+    'of the time, but they can come in many colours, shapes and sizes. The leaves take in ' +
+    'sunlight and use water and food from the roots to make the tree grow, and to reproduce.',
+  // 2 — вода
+  'Water is the most important substance on Earth. People, animals and plants cannot live ' +
+    'without it. About seventy percent of our planet is covered with water, but most of it is ' +
+    'salty. Only a small part is fresh water that people can drink. In everyday life we use ' +
+    'water for cooking, washing and cleaning. Farmers need it to grow food, and factories use ' +
+    'it to make almost everything, from paper to computers. Scientists say that many countries ' +
+    'may have problems with clean water in the future. That is why it is important to save ' +
+    'water today: turn off the tap when you brush your teeth, fix dripping taps at home and ' +
+    'never throw rubbish into rivers and lakes.',
+  // 3 — пчёлы
+  'Honey bees are small insects, but they are very important for people and nature. They live ' +
+    'in large families, and each bee has its own job. Worker bees fly from flower to flower ' +
+    'and collect sweet nectar, which they later turn into honey. While they are doing this, ' +
+    'they carry pollen from one plant to another and help fruits and vegetables grow. One bee ' +
+    'family can visit millions of flowers in one summer. Bees even talk to each other with a ' +
+    'special dance which shows where food can be found. Sadly, the number of bees is getting ' +
+    'smaller because of chemicals and the loss of wild flowers, so many countries now protect ' +
+    'these useful insects.',
+  // 4 — Луна
+  'The Moon is the closest space object to our planet and its only natural satellite. It ' +
+    'looks bright in the night sky, but it does not make any light itself — it only reflects ' +
+    'the light of the Sun. The Moon is about four hundred thousand kilometres away from the ' +
+    'Earth. Its gravity moves huge masses of water in our oceans and makes tides. People have ' +
+    'always dreamed about travelling there, and in 1969 the first astronauts finally walked on ' +
+    'its surface. They brought back stones which scientists still study today. New missions to ' +
+    'the Moon are being prepared now in several countries, and one day people may even build ' +
+    'a station there.',
+  // 5 — сон
+  'Sleep is as important for our health as food and water. When we sleep, the body repairs ' +
+    'itself and the brain sorts the information of the day. That is why students remember new ' +
+    'material better after a good night’s rest. Doctors say that teenagers need about nine ' +
+    'hours of sleep, but many of them sleep much less because of phones, computers and ' +
+    'homework. If people do not sleep enough, they feel tired, make more mistakes and get ill ' +
+    'more often. To sleep well, it is useful to go to bed at the same time every day and to ' +
+    'put away all screens at least one hour before sleep.',
+]
+
+/* ------------------------------------------------------------------- №40 */
+
+function ad(intro: string, points: string[]): string {
+  return (
+    'Task 2. Study the advertisement.\n' +
+    `${intro} In 1.5 minutes you are to ask four direct questions to find out about the ` +
+    'following:\n' +
+    points.map((p, i) => `${i + 1}. ${p}`).join('\n') +
+    '\nYou have 20 seconds to ask each question.'
+  )
+}
+
+const DIALOGUE_VARIANTS: Array<{
+  intro: string
+  caption: string
+  image: string
+  points: string[]
+}> = [
+  {
+    intro: 'You are considering taking dance lessons in a new dance school and now you’d like to get more information.',
+    caption: 'Choose a dance and come to learn!',
+    image: IMG.dance,
+    points: ['course for beginners', 'duration of one lesson', 'cost of the course', 'special clothes'],
+  },
+  {
+    intro: 'You are thinking about visiting the new City Aqua Centre and now you’d like to get more information.',
+    caption: 'City Aqua Centre — dive in!',
+    image: IMG.pool,
+    points: ['opening hours', 'price of one visit', 'individual lessons', 'things to bring'],
+  },
+  {
+    intro: 'You are considering joining the Speak Easy language school and now you’d like to get more information.',
+    caption: 'Speak Easy — languages for everyone!',
+    image: IMG.books,
+    points: ['languages available', 'size of the groups', 'length of the course', 'free trial lesson'],
+  },
+  {
+    intro: 'You are considering renting a bike at GreenWheels and now you’d like to get more information.',
+    caption: 'GreenWheels — see the city by bike!',
+    image: IMG.bike,
+    points: ['rental price per hour', 'helmet included', 'opening hours', 'discounts for students'],
+  },
+  {
+    intro: 'You are considering booking a photo session at the Focus studio and now you’d like to get more information.',
+    caption: 'Focus studio — your best photos!',
+    image: IMG.camera,
+    points: ['price of a photo session', 'duration of the session', 'printed photos', 'booking in advance'],
+  },
+]
+
+/* ------------------------------------------------------------------- №41 */
+
+const BRIEF_41 =
+  '№41: You are going to give an interview. You have to answer five questions. Give full ' +
+  'answers to the questions (2-3 sentences). Remember that you have 40 seconds to answer ' +
+  'each question.'
+
+const INTERVIEW_SETS: string[][] = [
+  [
+    'What is your favourite way to spend a weekend?',
+    'How much time do you spend on sport every week?',
+    'What kind of music do you enjoy and why?',
+    'Do you prefer reading books or watching films? Why?',
+    'What would you like to change about your school?',
+  ],
+  [
+    'Do you like travelling? Why or why not?',
+    'What country would you like to visit one day and why?',
+    'Do you prefer travelling with your family or with friends?',
+    'What things do you usually take with you on a trip?',
+    'Is it better to plan a trip carefully or to travel without any plan? Why?',
+  ],
+  [
+    'What is your favourite dish and who usually cooks it?',
+    'Do you help your family to cook at home? What can you cook yourself?',
+    'Why do many people think fast food is bad for us?',
+    'What Russian dishes would you recommend to a foreign friend?',
+    'Is it important for a family to have dinner together? Why?',
+  ],
+  [
+    'How much time do you usually spend on your phone every day?',
+    'What do you use the Internet for most of all?',
+    'Can a modern school work without computers? Why or why not?',
+    'What are the good sides of social networks?',
+    'What gadget would you like to get and why?',
+  ],
+  [
+    'What is your favourite school subject and why?',
+    'What profession would you like to choose in the future?',
+    'Why do you learn English?',
+    'Do you think exams are useful for students? Why?',
+    'What advice can you give to younger students about studying?',
+  ],
+]
+
+/* ------------------------------------------------------------------- №42 */
+
+function monologueBrief(topic: string, aspectA: string, aspectB: string): string {
+  return (
+    `Task 4. Imagine that you and your friend are doing a school project “${topic}”. You have ` +
+    'found some photos to illustrate it but for technical reasons you cannot send them now. ' +
+    'Leave a voice message to your friend explaining your choice of the photos and sharing ' +
+    'some ideas about the project. In 2.5 minutes be ready to:\n' +
+    '• explain the choice of the illustrations for the project by briefly describing them and noting the differences;\n' +
+    `• mention the advantages (1–2) of ${aspectA};\n` +
+    `• mention the disadvantages (1–2) of ${aspectB};\n` +
+    '• express your opinion on the subject of the project – which option presented in the pictures you would prefer and why.\n\n' +
+    'You will speak for not more than 3 minutes (12–15 sentences). You have to talk continuously.'
+  )
+}
+
+const MONOLOGUE_VARIANTS: Array<{ topic: string; a: string; b: string; images: string[] }> = [
+  { topic: 'The world of hobbies', a: 'the two hobbies', b: 'the two hobbies', images: [IMG.knit, IMG.skate] },
+  { topic: 'Ways of travelling', a: 'the two ways of spending holidays', b: 'the two ways of spending holidays', images: [IMG.mountains, IMG.beach] },
+  { topic: 'Eating at home and eating out', a: 'the two ways of eating', b: 'the two ways of eating', images: [IMG.homeFood, IMG.restaurant] },
+  { topic: 'Music in our life', a: 'the two ways of enjoying music', b: 'the two ways of enjoying music', images: [IMG.guitar, IMG.concert] },
+  { topic: 'Sport and games in our life', a: 'the two activities', b: 'the two activities', images: [IMG.pool, IMG.chess] },
+]
+
+/* -------------------------------------------------------------- Сборка */
 
 export const TASKS: Record<TaskId, TaskDef> = {
   39: {
     id: 39,
     kind: 'reading',
     label: 'reading',
-    brief:
-      '№39: Imagine that you are preparing a project with your friend. You have found some ' +
-      'interesting material for the presentation and you want to read this text to your friend. ' +
-      'You have 1.5 minutes to read the text silently, then be ready to read it out aloud. ' +
-      'You will not have more than 1.5 minutes to read it.',
-    readText:
-      'A tree is a tall plant with a trunk and branches made of wood. Trees can live for many ' +
-      'years. The oldest tree ever discovered is approximately 5,000 years old. The four main ' +
-      'parts of a tree are the roots, the trunk, the branches, and the leaves. The roots of a ' +
-      'tree are usually under the ground. A single tree has many roots. The roots carry nutrients ' +
-      'and water from the ground through the trunk and branches to the leaves of the tree. They ' +
-      'can also breathe in air. The trunk is the main body of the tree. The trunk is covered with ' +
-      'bark which protects it from damage. Branches grow from the trunk. They spread out so that ' +
-      'the leaves can get more sunlight. The leaves of a tree are green most of the time, but they ' +
-      'can come in many colours, shapes and sizes. The leaves take in sunlight and use water and ' +
-      'food from the roots to make the tree grow, and to reproduce.',
     prepSeconds: 90,
     answerSeconds: 90,
-    hasAiFeedback: false,
+    maxScore: 1,
+    variants: READ_TEXTS.map((text, i) => ({
+      id: `39-${i + 1}`,
+      brief: BRIEF_39,
+      readText: text,
+    })),
   },
-
   40: {
     id: 40,
     kind: 'dialogue',
     label: 'dialogue',
-    brief:
-      'Task 2. Study the advertisement.\nYou are considering taking dance lessons in a new dance ' +
-      'school and now you’d like to get more information. In 1.5 minutes you are to ask four ' +
-      'direct questions to find out about the following:\n1. course for beginners\n2. duration of ' +
-      'one lesson\n3. cost of the course\n4. special clothes\nYou have 20 seconds to ask each question.',
-    images: [IMG_DANCE],
-    imageCaption: 'Choose a dance and come to learn!',
-    steps: [
-      'Question 1: course for beginners',
-      'Question 2: duration of one lesson',
-      'Question 3: cost of the course',
-      'Question 4: special clothes',
-    ],
     prepSeconds: 90,
     answerSeconds: 20,
-    hasAiFeedback: false,
+    maxScore: 4,
+    variants: DIALOGUE_VARIANTS.map((v, i) => ({
+      id: `40-${i + 1}`,
+      brief: ad(v.intro, v.points),
+      images: [v.image],
+      imageCaption: v.caption,
+      steps: v.points.map((p, n) => `Question ${n + 1}: ${p}`),
+    })),
   },
-
   41: {
     id: 41,
     kind: 'interview',
     label: 'interview',
-    brief:
-      '№41: You are going to give an interview. You have to answer five questions. Give full ' +
-      'answers to the questions (2-3 sentences). Remember that you have 40 seconds to answer ' +
-      'each question.',
-    steps: [
-      'What is your favourite way to spend a weekend?',
-      'How much time do you spend on sport every week?',
-      'What kind of music do you enjoy and why?',
-      'Do you prefer reading books or watching films? Why?',
-      'What would you like to change about your school?',
-    ],
     prepSeconds: 0,
     answerSeconds: 40,
-    hasAiFeedback: false,
+    maxScore: 5,
+    variants: INTERVIEW_SETS.map((qs, i) => ({
+      id: `41-${i + 1}`,
+      brief: BRIEF_41,
+      steps: qs,
+    })),
   },
-
   42: {
     id: 42,
     kind: 'monologue',
     label: 'monologue',
-    brief:
-      'Task 4. Imagine that you and your friend are doing a school project “The world of hobbies”. ' +
-      'You have found some photos to illustrate it but for technical reasons you cannot send them ' +
-      'now. Leave a voice message to your friend explaining your choice of the photos and sharing ' +
-      'some ideas about the project. In 2.5 minutes be ready to:\n' +
-      '• explain the choice of the illustrations for the project by briefly describing them and ' +
-      'noting the differences;\n' +
-      '• mention the advantages (1–2) of the two hobbies;\n' +
-      '• mention the disadvantages (1–2) of the two hobbies;\n' +
-      '• express your opinion on the subject of the project – which hobby presented in the ' +
-      'pictures you would prefer and why.\n\n' +
-      'You will speak for not more than 3 minutes (12–15 sentences). You have to talk continuously.',
-    images: [IMG_KNIT, IMG_SKATE],
     prepSeconds: 150,
     answerSeconds: 180,
-    hasAiFeedback: true,
+    maxScore: 10,
+    variants: MONOLOGUE_VARIANTS.map((v, i) => ({
+      id: `42-${i + 1}`,
+      brief: monologueBrief(v.topic, v.a, v.b),
+      images: v.images,
+      imageCaption: v.topic,
+    })),
   },
 }
 
 export const TASK_ORDER: TaskId[] = [39, 40, 41, 42]
 
-/* ------------------------------------------------- Что ученик уже прорешал */
+export function variantById(taskId: TaskId, variantId: string): TaskVariant | undefined {
+  return TASKS[taskId].variants.find((v) => v.id === variantId)
+}
 
-/**
- * Меню должно вести на задания, которых ученик ещё не решал. Базы у нас нет
- * (логирование сессий — незакрытый пункт роадмапа), поэтому пока помним в
- * localStorage. Это честная заглушка: она переживает перезагрузку страницы и
- * ничего не обещает про синхронизацию между устройствами.
+/* ------------------------------------------- Память о пройденном (localStorage)
+ *
+ * Базы нет — это честная заглушка до логирования сессий: переживает перезагрузку
+ * страницы, но живёт только в этом браузере. Порядок в массиве = хронология,
+ * этим пользуется добор давно решённых вариантов в сессию.
  */
-const DONE_KEY = 'pingo.solvedTasks.v1'
 
-export function loadSolved(): TaskId[] {
+const SOLVED_KEY = 'pingo.solvedVariants.v2'
+
+export function solvedVariantIds(): string[] {
   try {
-    const raw = localStorage.getItem(DONE_KEY)
-    if (!raw) return []
-    return (JSON.parse(raw) as number[]).filter((n): n is TaskId =>
-      TASK_ORDER.includes(n as TaskId),
-    )
+    const raw = localStorage.getItem(SOLVED_KEY)
+    return raw ? (JSON.parse(raw) as string[]).filter((s) => typeof s === 'string') : []
   } catch {
     return []
   }
 }
 
-export function markSolved(id: TaskId) {
+export function markVariantSolved(id: string) {
   try {
-    const next = Array.from(new Set([...loadSolved(), id]))
-    localStorage.setItem(DONE_KEY, JSON.stringify(next))
+    // Повтор варианта двигает его в конец: он снова «самый свежий», и добор
+    // в следующую сессию возьмёт его в последнюю очередь.
+    const next = [...solvedVariantIds().filter((s) => s !== id), id]
+    localStorage.setItem(SOLVED_KEY, JSON.stringify(next))
   } catch {
-    /* приватный режим браузера — молча живём без памяти */
+    /* приватный режим — живём без памяти */
   }
 }
 
-/** Первое нерешённое задание; если решены все — undefined. */
-export function firstUnsolved(solved: TaskId[]): TaskId | undefined {
-  return TASK_ORDER.find((id) => !solved.includes(id))
+export function taskProgress(id: TaskId): { done: number; total: number } {
+  const solved = new Set(solvedVariantIds())
+  const total = TASKS[id].variants.length
+  return { done: TASKS[id].variants.filter((v) => solved.has(v.id)).length, total }
+}
+
+/**
+ * Сессия по номеру: сначала все нерешённые варианты (в порядке банка), а если их
+ * меньше пяти — добор из решённых, начиная с самых давних. Так «пять ранее не
+ * решённых» выполняется, пока банк не исчерпан, а после — честный повтор без
+ * тупика «всё пройдено, нажимать нечего».
+ */
+export function pickSession(id: TaskId, want = 5): TaskVariant[] {
+  const task = TASKS[id]
+  const solvedOrder = solvedVariantIds()
+  const solved = new Set(solvedOrder)
+  const fresh = task.variants.filter((v) => !solved.has(v.id))
+  const stale = solvedOrder
+    .map((vid) => task.variants.find((v) => v.id === vid))
+    .filter((v): v is TaskVariant => Boolean(v))
+  return [...fresh, ...stale].slice(0, Math.min(want, task.variants.length))
+}
+
+/** DEMO: по одному варианту каждого типа — первый нерешённый (или самый давний). */
+export function pickDemoItems(): Array<{ taskId: TaskId; variantId: string }> {
+  return TASK_ORDER.map((taskId) => ({ taskId, variantId: pickSession(taskId, 1)[0].id }))
+}
+
+/* --------------------------------------- Последний разбор — для экрана STATS */
+
+export interface StoredError {
+  quote: string
+  correction: string
+  explanation: string
+}
+
+export interface StoredFeedback {
+  when: string
+  summary: string
+  score: number
+  max: number
+  errors: StoredError[]
+}
+
+const FEEDBACK_KEY = 'pingo.lastFeedback.v1'
+
+export function loadTaskFeedback(): Partial<Record<TaskId, StoredFeedback>> {
+  try {
+    const raw = localStorage.getItem(FEEDBACK_KEY)
+    return raw ? (JSON.parse(raw) as Partial<Record<TaskId, StoredFeedback>>) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function saveTaskFeedback(id: TaskId, fb: StoredFeedback) {
+  try {
+    localStorage.setItem(FEEDBACK_KEY, JSON.stringify({ ...loadTaskFeedback(), [id]: fb }))
+  } catch {
+    /* приватный режим */
+  }
+}
+
+/** Что уходит на бэкенд вместе с аудио — контекст, без которого разбор невозможен. */
+export function feedbackPayload(task: TaskDef, v: TaskVariant): Record<string, unknown> {
+  switch (task.kind) {
+    case 'reading':
+      return { referenceText: v.readText }
+    case 'dialogue':
+      return { ad: v.imageCaption ?? '', points: v.steps ?? [] }
+    case 'interview':
+      return { questions: v.steps ?? [] }
+    case 'monologue':
+      return { brief: v.brief }
+  }
 }

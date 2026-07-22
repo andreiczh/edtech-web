@@ -32,7 +32,7 @@ import aiohttp
 import edge_tts
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -65,9 +65,9 @@ if not os.environ.get("KEEP_SYSTEM_PROXY"):
 # Пути, отдающие ПОТОК: их сжимать нельзя, см. GZipExceptStreams ниже.
 # Новый потоковый эндпоинт — дописать его путь сюда, иначе стриминг у него
 # молча выключится (ответ придёт целиком в самом конце).
-# /monologue тоже здесь: он шлёт «сердцебиение» переводами строк, а zlib копил бы
-# их в буфере — и смысл сердцебиения пропал бы целиком.
-_STREAM_PATHS = {"/talk_stream", "/monologue"}
+# /monologue и /task_feedback тоже здесь: они шлют «сердцебиение» переводами
+# строк, а zlib копил бы их в буфере — и смысл сердцебиения пропал бы целиком.
+_STREAM_PATHS = {"/talk_stream", "/monologue", "/task_feedback"}
 
 
 class GZipExceptStreams:
@@ -808,6 +808,160 @@ async def _monologue_work(data: bytes) -> dict:
             "total": round(t2 - t0, 2),
         },
     }
+
+
+# ------------------------------------------------------------------------
+# Разбор ЛЮБОГО задания устной части: /task_feedback.
+#
+# Появился 22.07.2026 по запросу «подключи бэкенд везде, где есть голосовой
+# ввод»: до этого ИИ-разбор был только у монолога (№42), а чтение, диалог и
+# интервью честно говорили «разбора нет». Один эндпоинт на все типы, различия —
+# в промпте; фронт передаёт kind и payload (текст для чтения / пункты вопросов).
+#
+# Единый формат ответа LLM для 39-41:
+#   {"summary": <ru>, "score": N, "max": M, "errors": [{quote, correction,
+#    explanation}]}
+# Для monologue используется старый промпт с критериями ФИПИ, а score/max
+# досчитываются на сервере — фронт везде видит одну и ту же форму.
+
+_FEEDBACK_JSON_SHAPE = (
+    'Return ONLY a JSON object (no prose, no markdown) with EXACTLY this shape:\n'
+    '{"summary": "<one short sentence in Russian>", "score": <int>, "max": <int>, '
+    '"errors": [{"quote": "<what the student said, English>", '
+    '"correction": "<fixed, English>", "explanation": "<по-русски, кратко>"}]}\n'
+    "Up to 6 most important errors. Be honest but encouraging (level A2-B1)."
+)
+
+
+def _feedback_prompt(kind: str, payload: dict) -> str:
+    if kind == "reading":
+        ref = str(payload.get("referenceText") or "")
+        return (
+            "You are an examiner for the Russian EGE oral English exam, Task 1 "
+            "(reading a short text aloud). You get the REFERENCE text and an AUTOMATIC "
+            "TRANSCRIPT of what the student actually said.\n\n"
+            "IMPORTANT: a transcript cannot show pronunciation, stress or intonation — "
+            "NEVER invent phonetic errors. Judge ONLY what the text shows: skipped, "
+            "replaced, added or misread words. In errors, quote = what the student said "
+            "(or «пропущено», if a fragment is missing), correction = the fragment as "
+            "written in the reference.\n"
+            "score: 1 if the text is read completely with at most 2 minor slips, else 0. "
+            "max: 1.\n\n" + _FEEDBACK_JSON_SHAPE + f"\n\nREFERENCE TEXT:\n{ref}"
+        )
+    if kind == "dialogue":
+        points = payload.get("points") or []
+        ad = str(payload.get("ad") or "")
+        pts = "; ".join(str(p) for p in points)
+        return (
+            "You are an examiner for the Russian EGE oral English exam, Task 2 (four "
+            f"direct questions about an advertisement: {ad}). The student had to ask "
+            f"four DIRECT questions about: {pts}.\n\n"
+            "From the transcript, count how many of these points are covered by a "
+            "correctly formed direct question. score = that count, max = 4. In errors "
+            "list wrong word order, indirect questions instead of direct ones, and "
+            "grammar slips. If a point was not asked about at all, add an error with "
+            "quote=«вопрос не задан» and correction = an example of a correct question.\n\n"
+            + _FEEDBACK_JSON_SHAPE
+        )
+    if kind == "interview":
+        questions = [str(q) for q in (payload.get("questions") or [])]
+        qs = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
+        return (
+            "You are an examiner for the Russian EGE oral English exam, Task 3 "
+            "(interview). The student answered these questions one after another:\n"
+            f"{qs}\n\n"
+            "The transcript is one continuous recording of all answers. An answer counts "
+            "as full if it is relevant and contains at least two sentences. "
+            f"score = number of properly answered questions, max = {max(1, len(questions))}. "
+            "In errors list grammar and vocabulary mistakes from the transcript.\n\n"
+            + _FEEDBACK_JSON_SHAPE
+        )
+    # monologue — старый проверенный промпт с критериями ФИПИ
+    return MONOLOGUE_PROMPT
+
+
+async def _task_feedback_work(kind: str, payload_raw: str, data: bytes) -> dict:
+    t0 = time.time()
+    try:
+        transcript_text = await transcribe_auto(data)
+    except SttFailed as e:
+        print(f"[stt] task_feedback не распознал: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail="Не удалось распознать запись — она пустая или повреждена. Запиши ещё раз.",
+        )
+    t1 = time.time()
+    if not transcript_text:
+        raise HTTPException(
+            status_code=422, detail="Тишина — ничего не распознали. Запиши ответ ещё раз."
+        )
+
+    try:
+        payload = json.loads(payload_raw) if payload_raw else {}
+    except json.JSONDecodeError:
+        payload = {}
+
+    client = llm_client()
+    try:
+        completion = await asyncio.to_thread(
+            lambda: client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": _feedback_prompt(kind, payload)},
+                    {"role": "user", "content": transcript_text},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.2,
+                max_tokens=800,
+            )
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"LLM ошибка ({LLM_MODEL}): {e}")
+
+    raw = (completion.choices[0].message.content or "").strip()
+    try:
+        feedback = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
+
+    # Монолог отвечает в формате критериев ФИПИ — доводим до единой формы,
+    # чтобы фронт не различал типы заданий.
+    if kind == "monologue" and "criteria" in feedback:
+        try:
+            feedback["score"] = sum(int(c.get("score", 0)) for c in feedback["criteria"])
+            feedback["max"] = sum(int(c.get("max", 0)) for c in feedback["criteria"]) or 10
+        except (TypeError, ValueError):
+            feedback["score"], feedback["max"] = 0, 10
+
+    t2 = time.time()
+    return {
+        "transcript": transcript_text,
+        "feedback": feedback,
+        "latency": {
+            "stt": round(t1 - t0, 2),
+            "llm": round(t2 - t1, 2),
+            "total": round(t2 - t0, 2),
+        },
+    }
+
+
+@app.post("/task_feedback")
+async def task_feedback(
+    audio: UploadFile = File(...),
+    kind: str = Form(...),
+    payload: str = Form("{}"),
+):
+    """Разбор ответа на задание устной части (39-42). Отдаётся потоком с
+    «сердцебиением» — см. `_json_with_heartbeat`; путь обязан быть в
+    `_STREAM_PATHS`, иначе gzip молча похоронит стриминг."""
+    if kind not in {"reading", "dialogue", "interview", "monologue"}:
+        raise HTTPException(status_code=422, detail=f"Неизвестный тип задания: {kind}")
+    data = await audio.read()
+    return StreamingResponse(
+        _json_with_heartbeat(_task_feedback_work(kind, payload, data)),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
 
 
 @app.post("/talk_stream")

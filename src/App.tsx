@@ -1,22 +1,22 @@
 /**
- * Маршрутизация по новому макету SPEAKO.
+ * Маршрутизация по макету SPEAKO.
  *
- * Роутера в проекте нет и он не нужен: экранов немного, а адресная строка у нас
- * не участвует в продукте (ссылку дают на корень). Держим состояние в одном месте
- * — так видно весь граф переходов сразу, без беготни по файлам.
+ * Роутера в проекте нет и он не нужен: экранов немного, а адресная строка не
+ * участвует в продукте (ссылку дают на корень). Состояние в одном месте — виден
+ * весь граф переходов сразу.
  *
- * Прежний каркас (слайдер режимов внизу + вкладки ЕГЭ) заменён на верхние вкладки
- * из макета: conversation / ЕГЭ. Режим ОГЭ в макете отсутствует, поэтому он остаётся
- * вкладкой-заглушкой, а не выкинут: продукт его обещает.
+ * Клик по номеру задания открывает СЕССИЮ — серию из пяти ранее не решённых
+ * вариантов этого типа (см. pickSession). DEMO — по одному варианту каждого
+ * номера. Итоги показывает SessionScreen.
  */
 import { useCallback, useState } from 'react'
 
 import type { TopTab } from './design/ui'
-import { TASK_ORDER, type TaskId } from './ege2/tasks'
+import { pickDemoItems, pickSession, type TaskId } from './ege2/tasks'
 import { ConversationScreen } from './screens/ConversationScreen'
 import { EgeMenuScreen } from './screens/EgeMenuScreen'
+import { SessionScreen, type SessionItem } from './screens/SessionScreen'
 import { StatsScreen } from './screens/StatsScreen'
-import { TaskScreen } from './screens/TaskScreen'
 
 const TABS: TopTab[] = [
   { id: 'conversation', label: 'conversation' },
@@ -27,9 +27,13 @@ type Route =
   | { name: 'conversation' }
   | { name: 'ege' }
   | { name: 'stats' }
-  | { name: 'task'; id: TaskId }
-  /** DEMO — те же экраны заданий, но подряд; index — сколько уже пройдено. */
-  | { name: 'demo'; index: number }
+  /** nonce пересоздаёт сессию при «Пройти ещё раз» — иначе React сохранил бы
+      состояние старой (индекс, результаты) и итоги не сбросились бы. */
+  | { name: 'session'; items: SessionItem[]; nonce: number }
+
+/** Отзыв уходит владельцу продукта; адрес виден и так — это его публичная почта. */
+const FEEDBACK_MAILTO =
+  'mailto:andeich_daddy@icloud.com?subject=' + encodeURIComponent('SPEAKO — отзыв')
 
 export default function App() {
   const [route, setRoute] = useState<Route>({ name: 'conversation' })
@@ -48,27 +52,43 @@ export default function App() {
 
   const backToEge = useCallback(() => setRoute({ name: 'ege' }), [])
 
-  // В DEMO задания идут подряд: закончилось одно — сразу следующее, а после
-  // последнего показываем сводную статистику, ради которой демо и затевалось.
-  const onTaskFinished = useCallback(() => {
-    setRoute((r) => {
-      if (r.name !== 'demo') return { name: 'ege' }
-      const next = r.index + 1
-      return next >= TASK_ORDER.length ? { name: 'stats' } : { name: 'demo', index: next }
+  const startSession = useCallback((id: TaskId) => {
+    setRoute({
+      name: 'session',
+      items: pickSession(id).map((v) => ({ taskId: id, variantId: v.id })),
+      nonce: Date.now(),
     })
   }, [])
 
-  // Ключ маршрута нужен обёртке .screenwrap: смена ключа пересоздаёт узел, и
-  // анимация появления проигрывается заново. Без этого переход между экранами
-  // был бы мгновенной подменой — пользователь просил, чтобы система ощущалась
-  // плавной. Для DEMO в ключ входит номер задания, иначе переход между
-  // заданиями внутри демо остался бы без анимации.
-  const routeKey =
-    route.name === 'task'
-      ? `task-${route.id}`
-      : route.name === 'demo'
-        ? `demo-${route.index}`
-        : route.name
+  const startDemo = useCallback(() => {
+    setRoute({ name: 'session', items: pickDemoItems(), nonce: Date.now() })
+  }, [])
+
+  const restartSession = useCallback(() => {
+    setRoute((r) => {
+      if (r.name !== 'session') return r
+      // Пересобираем сессию заново: отметки «пройдено» уже обновились, и
+      // pickSession выдаст добор из самых давних вариантов.
+      const taskId = r.items[0]?.taskId
+      if (taskId === undefined) return { name: 'ege' }
+      const sameTask = r.items.every((i) => i.taskId === taskId)
+      return {
+        name: 'session',
+        items: sameTask
+          ? pickSession(taskId).map((v) => ({ taskId, variantId: v.id }))
+          : pickDemoItems(),
+        nonce: Date.now(),
+      }
+    })
+  }, [])
+
+  const onFeedback = useCallback(() => {
+    window.location.href = FEEDBACK_MAILTO
+  }, [])
+
+  // Ключ маршрута пересоздаёт обёртку — так анимация появления проигрывается на
+  // каждом переходе, а не один раз при загрузке приложения.
+  const routeKey = route.name === 'session' ? `session-${route.nonce}` : route.name
 
   return (
     <div className="app" data-theme="blue">
@@ -79,8 +99,7 @@ export default function App() {
             activeTab={activeTab}
             onTab={onTab}
             onProfile={onProfile}
-            onQuit={() => setRoute({ name: 'ege' })}
-            onFeedback={onProfile}
+            onFeedback={onFeedback}
           />
         )}
 
@@ -90,8 +109,8 @@ export default function App() {
             activeTab={activeTab}
             onTab={onTab}
             onProfile={onProfile}
-            onOpenTask={(id) => setRoute({ name: 'task', id })}
-            onDemo={() => setRoute({ name: 'demo', index: 0 })}
+            onOpenTask={startSession}
+            onDemo={startDemo}
             onStats={() => setRoute({ name: 'stats' })}
           />
         )}
@@ -106,17 +125,8 @@ export default function App() {
           />
         )}
 
-        {route.name === 'task' && (
-          <TaskScreen taskId={route.id} onExit={backToEge} onFinished={onTaskFinished} />
-        )}
-
-        {route.name === 'demo' && (
-          <TaskScreen
-            taskId={TASK_ORDER[route.index]}
-            onExit={backToEge}
-            onFinished={onTaskFinished}
-            demoProgress={{ index: route.index + 1, total: TASK_ORDER.length }}
-          />
+        {route.name === 'session' && (
+          <SessionScreen items={route.items} onExit={backToEge} onRestart={restartSession} />
         )}
       </div>
     </div>

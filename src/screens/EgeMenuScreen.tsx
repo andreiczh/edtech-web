@@ -1,28 +1,23 @@
 /**
  * Экран выбора задания ЕГЭ (фото 3 макета).
  *
- * Шесть карточек: четыре задания, DEMO (все подряд) и STATS. Номера ведут сразу
- * в практику — вводный экран задания сам расскажет условие, лишний клик здесь
- * ничего не добавляет.
+ * Шесть карточек: четыре номера, DEMO и STATS. Клик по номеру запускает СЕССИЮ —
+ * серию из пяти ранее не решённых вариантов этого типа (пожелание пользователя),
+ * поэтому прогресс на карточке считается по вариантам: «3/5».
  *
- * Про «уже решал»: базы нет, `loadSolved()` помнит прогресс в localStorage этого
- * браузера. Поэтому пройденное только ПРИГЛУШАЕМ и подписываем, а не блокируем:
- * блокировка по данным, которых нет на сервере, отняла бы у человека задание
- * из-за очищенного кэша. По той же причине под сеткой честно написано, где
- * лежат отметки и у какого задания реально работает разбор ИИ.
+ * Прогресс живёт в localStorage этого браузера (базы нет), поэтому пройденное
+ * только приглушаем, а не блокируем: блокировка по данным, которых нет на
+ * сервере, отняла бы задание из-за очищенного кэша.
  */
 import { useEffect, useState, type CSSProperties } from 'react'
 import { CardButton, TopBar, type TopTab } from '../design/ui'
-import { TASKS, TASK_ORDER, firstUnsolved, loadSolved, type TaskId } from '../ege2/tasks'
+import { TASKS, TASK_ORDER, taskProgress, type TaskId } from '../ege2/tasks'
 
-/* Прокрутки здесь больше нет — по прямой просьбе: «всё должно стоять на одном
-   экране». Раньше карточкам задавалась пропорция (aspect-ratio), из-за неё сетка
-   не влезала в 720px по высоте и появлялся системный ползунок.
-   Теперь высоту диктует сетка (.cardgrid забирает остаток и делит его между
-   рядами, 3×2 на десктопе и 2×3 на узком), поэтому переполнению взяться неоткуда,
-   а overflow:hidden ловит случай, если контент всё же окажется выше — лучше
-   подрезать край, чем показать ползунок, который просили убрать. */
-const BODY: CSSProperties = { overflow: 'hidden', justifyContent: 'center' }
+/* Прокрутки здесь нет — по прямой просьбе: «всё должно стоять на одном экране».
+   Высоту диктует сетка (.cardgrid делит остаток между рядами, 3×2 и 2×3), а
+   overflow:hidden ловит случай, если контент всё же окажется выше. Внутренний
+   padding нужен подъёму карточек на ховере — без него верх лифта режется краем. */
+const BODY: CSSProperties = { overflow: 'hidden', justifyContent: 'center', padding: '8px 10px' }
 
 const NOTE: CSSProperties = {
   width: 'min(100%, 900px)',
@@ -35,27 +30,23 @@ const NOTE: CSSProperties = {
 
 function TaskCard({
   id,
-  solved,
+  progress,
   next,
   onOpen,
 }: {
   id: TaskId
-  solved: boolean
+  progress: { done: number; total: number }
   next: boolean
   onOpen: (id: TaskId) => void
 }) {
   const task = TASKS[id]
+  const complete = progress.done >= progress.total
 
-  const marks: string[] = []
-  if (solved) marks.push('✓ пройдено')
-  else if (next) marks.push('дальше')
-  if (task.hasAiFeedback) marks.push('разбор ИИ')
-
-  const hint = solved
-    ? 'Уже пройдено. Можно пройти ещё раз.'
+  const hint = complete
+    ? 'Все варианты пройдены — сессия соберётся из самых давних.'
     : next
-      ? 'Первое непройденное задание.'
-      : 'Ещё не пройдено.'
+      ? 'Начни отсюда: серия из пяти вариантов подряд.'
+      : `Пройдено ${progress.done} из ${progress.total} вариантов.`
 
   return (
     /* Своя разметка вместо <CardButton>: нужны приглушение пройденного, рамка
@@ -68,7 +59,7 @@ function TaskCard({
       title={`Задание ${id} — ${task.label}. ${hint}`}
       aria-label={`Задание ${id}, ${task.label}. ${hint}`}
       style={{
-        opacity: solved ? 0.62 : 1,
+        opacity: complete ? 0.62 : 1,
         /* Именно outline, а не box-shadow: инлайновая тень перебила бы подъём
            карточки на ховере из .card2--button:hover. */
         outline: next ? '2px solid var(--orb-2)' : undefined,
@@ -77,7 +68,9 @@ function TaskCard({
     >
       <span className="card2__title">№{id}</span>
       <span className="card2__sub">{task.label}</span>
-      {marks.length > 0 && <span className="card2__sub">{marks.join(' · ')}</span>}
+      <span className="card2__sub">
+        {complete ? '✓ все варианты' : `${progress.done}/${progress.total} вариантов`}
+      </span>
     </button>
   )
 }
@@ -99,24 +92,18 @@ export function EgeMenuScreen({
   onDemo: () => void
   onStats: () => void
 }) {
-  /* Отметку «пройдено» ставит экран задания, а меню при возврате обычно
-     монтируется заново — этого хватает. Слушатель фокуса добирает случай, когда
-     вкладку переключали, а меню всё это время висело смонтированным. */
-  const [solved, setSolved] = useState<TaskId[]>(loadSolved)
+  /* Отметки ставит сессия, а меню при возврате монтируется заново — этого
+     хватает. Слушатель фокуса добирает случай, когда вкладку переключали. */
+  const [progress, setProgress] = useState(() =>
+    TASK_ORDER.map((id) => ({ id, ...taskProgress(id) })),
+  )
   useEffect(() => {
-    const refresh = () => setSolved(loadSolved())
+    const refresh = () => setProgress(TASK_ORDER.map((id) => ({ id, ...taskProgress(id) })))
     window.addEventListener('focus', refresh)
     return () => window.removeEventListener('focus', refresh)
   }, [])
 
-  const next = firstUnsolved(solved)
-
-  const progress =
-    solved.length === 0
-      ? `Пока ничего не отмечено пройденным — начни с №${TASK_ORDER[0]}.`
-      : next
-        ? `Пройдено ${solved.length} из ${TASK_ORDER.length}, дальше — №${next}.`
-        : 'Пройдены все четыре. Ничего не заблокировано — любое можно перерешать.'
+  const next = progress.find((p) => p.done < p.total)?.id
 
   return (
     <div className="screen">
@@ -124,14 +111,8 @@ export function EgeMenuScreen({
 
       <div className="screen__body" style={BODY}>
         <div className="cardgrid">
-          {TASK_ORDER.map((id) => (
-            <TaskCard
-              key={id}
-              id={id}
-              solved={solved.includes(id)}
-              next={id === next}
-              onOpen={onOpenTask}
-            />
+          {progress.map((p) => (
+            <TaskCard key={p.id} id={p.id} progress={p} next={p.id === next} onOpen={onOpenTask} />
           ))}
 
           <CardButton
@@ -153,10 +134,10 @@ export function EgeMenuScreen({
         </div>
 
         <div style={NOTE}>
-          <p style={{ margin: 0 }}>{progress}</p>
-          <p style={{ margin: '4px 0 0' }}>
-            Отметки хранятся только в этом браузере — на другом устройстве прогресс будет
-            пустой. Разбор ответа ИИ пока работает только у №42.
+          <p style={{ margin: 0 }}>
+            Каждый номер — серия из пяти вариантов с общим разбором в конце. Отметки о
+            пройденном хранятся только в этом браузере. У №39 разбор сверяет слова с текстом —
+            произношение по записи не оценивается.
           </p>
         </div>
       </div>

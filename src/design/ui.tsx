@@ -3,7 +3,7 @@
  * прожатие кнопки выглядели одинаково везде, их описывают здесь, а не в каждом
  * экране заново.
  */
-import type { CSSProperties, ReactNode } from 'react'
+import { useState, type CSSProperties, type ReactNode } from 'react'
 
 /* ------------------------------------------------------------------ Кнопки */
 
@@ -151,13 +151,24 @@ export function BottomBar({
 }) {
   return (
     <footer className="bottombar2">
-      <Pill onClick={onQuit}>
-        {quitLabel} <ExitIcon />
-      </Pill>
+      {/* Кнопки без обработчика не рисуем: мёртвая кнопка хуже отсутствующей.
+          Пустой span сохраняет раскладку space-between, чтобы подпись и
+          Feedback не съехали влево. */}
+      {onQuit ? (
+        <Pill onClick={onQuit}>
+          {quitLabel} <ExitIcon />
+        </Pill>
+      ) : (
+        <span />
+      )}
       <div className="bottombar2__caption">{caption}</div>
-      <Pill onClick={onFeedback}>
-        Feedback <ExitIcon />
-      </Pill>
+      {onFeedback ? (
+        <Pill onClick={onFeedback}>
+          Feedback <ExitIcon />
+        </Pill>
+      ) : (
+        <span />
+      )}
     </footer>
   )
 }
@@ -215,43 +226,64 @@ function ExitIcon() {
   )
 }
 
-/**
- * Маскот со скринов 4 и 7. Настоящий арт — растровый и его в репозитории нет,
- * поэтому здесь векторная заглушка в палитре проекта: она не «дырка в макете»,
- * а осмысленный placeholder, который не ломает композицию. Придёт файл — заменить
- * на <img src=...>, размеры и тень задаёт .mascot.
- */
+/* Настоящего арта маскота в репозитории нет — есть только скриншоты макета,
+   а картинку из чата на диск не вытащить. Поэтому компонент сначала пробует
+   файл `public/mascot.png` (vite копирует public/ в корень сборки): положи туда
+   PNG маскота — он подхватится на всех экранах без правок кода. Пока файла нет,
+   рисуется векторная замена, максимально близкая к референсу: лежащий пухлый
+   фиолетовый зверёк с крылышками-ушками, подмигивает.
+   Флаг на уровне модуля — чтобы не дёргать 404 на каждом монтировании. */
+let mascotFileMissing = false
+
 export function Mascot({ style }: { style?: CSSProperties }) {
+  const [missing, setMissing] = useState(mascotFileMissing)
+  if (!missing) {
+    return (
+      <img
+        className="mascot"
+        src="/mascot.png"
+        alt=""
+        style={style}
+        onError={() => {
+          mascotFileMissing = true
+          setMissing(true)
+        }}
+      />
+    )
+  }
   return (
-    <svg className="mascot" viewBox="0 0 200 160" style={style} aria-hidden="true">
+    <svg className="mascot" viewBox="0 0 230 150" style={style} aria-hidden="true">
       <defs>
         <linearGradient id="m-body" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#cfc7ff" />
-          <stop offset="1" stopColor="#8f86d8" />
+          <stop offset="0" stopColor="#cdc5f4" />
+          <stop offset="1" stopColor="#8d84d9" />
+        </linearGradient>
+        <linearGradient id="m-wing" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#b7aeee" />
+          <stop offset="1" stopColor="#9a90e0" />
         </linearGradient>
       </defs>
-      <ellipse cx="100" cy="104" rx="62" ry="44" fill="url(#m-body)" />
-      <ellipse cx="100" cy="112" rx="42" ry="28" fill="#f4f1ff" opacity="0.9" />
-      <path d="M44 74c-16-16-30-16-34-6 8 2 16 10 22 22z" fill="#a79ee6" />
-      <path d="M156 74c16-16 30-16 34-6-8 2-16 10-22 22z" fill="#a79ee6" />
-      <circle cx="80" cy="92" r="9" fill="#2f2a52" />
-      <circle cx="83" cy="89" r="3" fill="#fff" />
-      <path
-        d="M112 92c4-4 10-4 14 0"
-        stroke="#2f2a52"
-        strokeWidth="4"
-        strokeLinecap="round"
-        fill="none"
-      />
-      <path
-        d="M92 108c5 5 11 5 16 0"
-        stroke="#2f2a52"
-        strokeWidth="4"
-        strokeLinecap="round"
-        fill="none"
-      />
-      <ellipse cx="66" cy="104" rx="7" ry="5" fill="#ffb6a6" opacity="0.75" />
-      <ellipse cx="134" cy="104" rx="7" ry="5" fill="#ffb6a6" opacity="0.75" />
+
+      {/* тельце лежит, как на референсе */}
+      <ellipse cx="118" cy="92" rx="86" ry="50" fill="url(#m-body)" />
+      <ellipse cx="122" cy="108" rx="58" ry="28" fill="#f1edff" opacity="0.92" />
+
+      {/* крылышки-ушки */}
+      <path d="M74 50 C64 26 44 18 32 24 C46 30 56 42 60 58 Z" fill="url(#m-wing)" />
+      <path d="M150 48 C158 24 178 16 190 22 C176 28 166 40 162 56 Z" fill="url(#m-wing)" />
+
+      {/* хвостик-крылышко сбоку */}
+      <path d="M196 88 q20 -8 26 4 q-12 12 -28 6 z" fill="#b7aeee" />
+
+      {/* открытый глаз + подмигивающий */}
+      <circle cx="92" cy="82" r="8" fill="#332e5c" />
+      <circle cx="95" cy="79" r="2.6" fill="#fff" />
+      <path d="M136 82 q8 -7 16 0" stroke="#332e5c" strokeWidth="4.5" strokeLinecap="round" fill="none" />
+
+      {/* улыбка и румянец */}
+      <path d="M106 96 q9 8 18 0" stroke="#332e5c" strokeWidth="4.5" strokeLinecap="round" fill="none" />
+      <ellipse cx="78" cy="96" rx="7" ry="4.5" fill="#ffb6a6" opacity="0.8" />
+      <ellipse cx="158" cy="96" rx="7" ry="4.5" fill="#ffb6a6" opacity="0.8" />
     </svg>
   )
 }

@@ -29,14 +29,12 @@ export function ConversationScreen({
   activeTab,
   onTab,
   onProfile,
-  onQuit,
   onFeedback,
 }: {
   tabs: TopTab[]
   activeTab: string
   onTab: (id: string) => void
   onProfile: () => void
-  onQuit: () => void
   onFeedback: () => void
 }) {
   const { state, toggle, transcript, reply, error, latency } = useConversation()
@@ -84,7 +82,9 @@ export function ConversationScreen({
         <MicButton state={state} onToggle={toggle} />
       </div>
 
-      <BottomBar caption={CAPTIONS[state]} onQuit={onQuit} onFeedback={onFeedback} />
+      {/* QUIT здесь некуда: разговор — корневой экран, выходить из него не во
+          что. Кнопки без смысла быть не должно. */}
+      <BottomBar caption={CAPTIONS[state]} onFeedback={onFeedback} />
     </div>
   )
 }

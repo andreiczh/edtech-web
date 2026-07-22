@@ -616,10 +616,13 @@
  * амплитуда быстро надоедает и начинает мешать, особенно когда ходишь по меню
  * туда-обратно.
  */
+/* Смягчено по замечанию «резкая и обрубленная»: сдвиг меньше (5px), время
+   больше (460 мс), а кривая easeOutQuint — быстрый отклик в начале и очень
+   длинный мягкий доезд, из-за которого у движения нет ощутимого «конца». */
 @keyframes screen-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(5px);
   }
   to {
     opacity: 1;
@@ -637,22 +640,22 @@
 }
 
 .screenwrap > .screen {
-  animation: screen-in 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation: screen-in 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* Внутри экрана шапка, тело и низ подхватывают ту же волну с небольшой
    задержкой — так экран «собирается», а не появляется плитой. */
 .screenwrap > .screen > * {
-  animation: screen-in 320ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation: screen-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .screenwrap > .screen > *:nth-child(2) {
-  animation-delay: 45ms;
+  animation-delay: 60ms;
 }
 .screenwrap > .screen > *:nth-child(3) {
-  animation-delay: 90ms;
+  animation-delay: 120ms;
 }
 .screenwrap > .screen > *:nth-child(4) {
-  animation-delay: 125ms;
+  animation-delay: 170ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
