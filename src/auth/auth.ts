@@ -57,28 +57,48 @@ export function identityId(): string {
   return currentUser()?.id ?? deviceId()
 }
 
-/* ------------------------------------------------------------- Никнеймы */
+/* ------------------------------------------------------------- Никнеймы
+ *
+ * Строго два английских слова, прилагательное + существительное, БЕЗ цифр
+ * (требование владельца, 23.07.2026). Руками ник не вводится вовсе — только
+ * генерация, поэтому занятые имена решаются не человеком, а тихим повтором
+ * в register(). Списки расширены: без цифр комбинаций меньше, чем было.
+ */
 
 const ADJECTIVES = [
   'Brave', 'Calm', 'Clever', 'Bright', 'Gentle', 'Happy', 'Kind', 'Lucky',
   'Mighty', 'Noble', 'Proud', 'Quick', 'Quiet', 'Royal', 'Shiny', 'Smart',
   'Sunny', 'Swift', 'Warm', 'Wild', 'Witty', 'Bold', 'Cosmic', 'Golden',
-  'Silver', 'Velvet', 'Cozy', 'Breezy', 'Merry', 'Frosty',
+  'Silver', 'Velvet', 'Cozy', 'Breezy', 'Merry', 'Frosty', 'Amber', 'Azure',
+  'Coral', 'Crimson', 'Daring', 'Dreamy', 'Eager', 'Fluffy', 'Gleaming',
+  'Humble', 'Jolly', 'Lively', 'Misty', 'Peachy', 'Rosy', 'Sleek', 'Tender',
+  'Vivid', 'Zesty', 'Snowy',
 ]
 const NOUNS = [
   'Falcon', 'Tiger', 'Panda', 'Dolphin', 'Comet', 'Maple', 'River', 'Meadow',
   'Pearl', 'Cloud', 'Ember', 'Breeze', 'Harbor', 'Willow', 'Aurora', 'Canyon',
-  'Coral', 'Fox', 'Owl', 'Lark', 'Otter', 'Pine', 'Star', 'Moon', 'Wave',
-  'Stone', 'Leaf', 'Spark', 'Drift', 'Bloom',
+  'Fox', 'Owl', 'Lark', 'Otter', 'Pine', 'Star', 'Moon', 'Wave', 'Stone',
+  'Leaf', 'Spark', 'Drift', 'Bloom', 'Badger', 'Beacon', 'Cedar', 'Clover',
+  'Coyote', 'Crane', 'Fern', 'Glacier', 'Heron', 'Lagoon', 'Lynx', 'Orchid',
+  'Osprey', 'Puffin', 'Raven', 'Sequoia', 'Sparrow', 'Thistle', 'Tundra',
+  'Walrus', 'Zephyr',
 ]
 
 export function randomNickname(): string {
   const pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
-  const num = String(10 + Math.floor(Math.random() * 90))
-  return `${pick(ADJECTIVES)}${pick(NOUNS)}${num}`
+  return `${pick(ADJECTIVES)}${pick(NOUNS)}`
 }
 
 /* ------------------------------------------------------------------- API */
+
+class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+  }
+}
 
 async function post(path: string, body: unknown): Promise<AuthUser> {
   let res: Response
@@ -101,14 +121,28 @@ async function post(path: string, body: unknown): Promise<AuthUser> {
     data && typeof data === 'object' && 'detail' in data
       ? String((data as { detail: unknown }).detail)
       : null
-  if (!res.ok) throw new Error(httpErrorMessage(res.status, detail))
+  if (!res.ok) throw new ApiError(httpErrorMessage(res.status, detail), res.status)
   return data as AuthUser
 }
 
 export async function register(nickname: string, password: string, exam: string): Promise<AuthUser> {
-  const user = await post('/auth/register', { nickname, password, exam })
-  saveUser(user)
-  return user
+  // Занятый ник (409) решаем сами: генерируем другой и пробуем снова — человек
+  // ник не выбирает, значит и разруливать коллизию не его работа. Финальное имя
+  // он видит на экране «запиши данные».
+  let nick = nickname
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const user = await post('/auth/register', { nickname: nick, password, exam })
+      saveUser(user)
+      return user
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409 && attempt < 6) {
+        nick = randomNickname()
+        continue
+      }
+      throw e
+    }
+  }
 }
 
 export async function login(nickname: string, password: string): Promise<AuthUser> {

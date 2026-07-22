@@ -498,8 +498,14 @@ async def auth_register(body: dict = Body(...)):
     nickname = str(body.get("nickname") or "").strip()
     password = str(body.get("password") or "")
     exam = str(body.get("exam") or "ege")
-    if not (3 <= len(nickname) <= 32):
-        raise HTTPException(status_code=422, detail="Никнейм должен быть от 3 до 32 символов.")
+    # Только английские буквы, без цифр: ник генерируется из двух слов, руками
+    # его не вводят (23.07.2026). Фронт это и так не даёт, но API обязан
+    # проверять сам — в базу не должно попадать то, что нельзя сгенерировать.
+    if not re.fullmatch(r"[A-Za-z]{4,32}", nickname):
+        raise HTTPException(
+            status_code=422,
+            detail="Никнейм — два английских слова без цифр, он генерируется кнопкой.",
+        )
     if len(password) < 4:
         raise HTTPException(status_code=422, detail="Пароль — минимум 4 символа.")
     if exam not in ("ege", "other"):

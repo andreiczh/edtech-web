@@ -117,15 +117,14 @@ export function RegisterScreen({ onDone }: { onDone: (u: AuthUser) => void }) {
       <Mascot style={{ width: 'clamp(90px, 14vw, 150px)', marginTop: '-8px' }} />
 
       <div className="auth-panel">
+        {/* Ник руками не вводится — это витрина сгенерированного имени
+            (требование владельца): только кнопка Change перекидывает на другой
+            случайный. Поэтому не input, а обычный блок — клавиатуре здесь
+            делать нечего, и на телефоне она не выпрыгивает. */}
         <div className="auth-inputrow">
-          <input
-            className="auth-input"
-            value={nickname}
-            onChange={(e) => setNickname(e.target.value)}
-            placeholder="nickname"
-            aria-label="Никнейм"
-            maxLength={32}
-          />
+          <div className="auth-input auth-input--static" aria-label="Твой никнейм" title="Никнейм генерируется — введи свой нельзя">
+            {nickname}
+          </div>
           <button
             type="button"
             className="auth-chip"
@@ -178,7 +177,7 @@ export function RegisterScreen({ onDone }: { onDone: (u: AuthUser) => void }) {
       <button
         type="button"
         className="auth-btn"
-        disabled={busy || !exam || password.length < 4 || nickname.trim().length < 3}
+        disabled={busy || !exam || password.length < 4}
         onClick={() => void submit()}
         title={
           !exam

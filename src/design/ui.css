@@ -34,6 +34,51 @@
   --pad-screen: clamp(14px, 2.4vw, 28px);
 }
 
+/* ------------------------------------------------------------------ Шрифт
+ *
+ * Nunito — округлый гротеск, которым нарисованы макеты (SPEAKO, PINGO AI).
+ * Хостим сами из public/fonts: зависеть от чужого CDN в проде незачем —
+ * историю про Cloudflare и РФ этот проект уже проходил. Variable-файлы,
+ * вес 200–1000, латиница + кириллица, суммарно ~125 КБ. unicode-range даёт
+ * браузеру качать только нужные поднаборы.
+ */
+@font-face {
+  font-family: 'Nunito';
+  src: url('/fonts/nunito-latin.woff2') format('woff2');
+  font-weight: 200 1000;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+2000-206F, U+20AC, U+2122, U+2212, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Nunito';
+  src: url('/fonts/nunito-latin-ext.woff2') format('woff2');
+  font-weight: 200 1000;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+1E00-1E9F, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Nunito';
+  src: url('/fonts/nunito-cyr.woff2') format('woff2');
+  font-weight: 200 1000;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Nunito';
+  src: url('/fonts/nunito-cyr-ext.woff2') format('woff2');
+  font-weight: 200 1000;
+  font-display: swap;
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F,
+    U+FE2E-FE2F;
+}
+
+body {
+  font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif;
+}
+
 /* Фон приложения: тот же фиолетовый, но с мягким градиентом в светлый тон
    сверху (референс — присланные макеты SPEAKO): плоская заливка выглядела
    плоско, свет сверху даёт сцене глубину. Перебивает --bg из index.css. */
@@ -391,11 +436,19 @@
 /* --------------------------------------------------------------- Карточки */
 
 .card2 {
-  background: var(--card);
+  /* Настоящее стекло, а не белая плашка: прозрачность ниже (0.86), сзади
+     размытие с подъёмом насыщенности, сверху внутренняя световая грань.
+     0.86 — нижняя граница, при которой текст задания остаётся комфортным;
+     прозрачнее — чернила var(--card-ink) начинают спорить с фоном. */
+  background: rgba(248, 246, 253, 0.86);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   color: var(--card-ink);
   border-radius: var(--r-card);
-  box-shadow: var(--shadow-card);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    var(--shadow-card);
+  border: 1px solid rgba(255, 255, 255, 0.55);
   padding: clamp(14px, 2vw, 22px);
 }
 
@@ -873,6 +926,19 @@
 .auth-input::placeholder {
   color: #a8a5bb;
   font-weight: 600;
+}
+
+/* Витрина сгенерированного никнейма: выглядит как поле, но полем не является —
+   клавиатурного ввода нет по требованию, имя меняется только кнопкой Change. */
+.auth-input--static {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #4a4480;
+  user-select: all; /* клик — и имя выделено целиком, удобно копировать */
 }
 .auth-input:focus-visible {
   outline: 2px solid #cfc9f2;
