@@ -205,6 +205,27 @@ STT_REMOTE_MODEL = os.environ.get("STT_REMOTE_MODEL", "voxtral-mini-latest")
 # Цена запасного пути — голос. У Mistral для английского только мужские голоса
 # ("Paul"), тогда как сейчас звучит женский en-US-AriaNeural. Для тренажёра это
 # приемлемо, но заметно, поэтому переключение автоматическое и только при отказе.
+# Не давать хостингу усыпить сервис: сами дёргаем свой публичный адрес.
+#
+# Render на бесплатном тарифе засыпает после 15 минут без ВХОДЯЩИХ запросов и
+# просыпается около минуты, показывая заглушку. Первый зашедший друг видит именно
+# её. Собственный запрос на свой публичный адрес считается входящим и сон отменяет.
+#
+# Почему не GitHub Actions: у приватного репозитория 2000 минут в месяц, а пинг
+# раз в 10 минут — это 4320 запусков, каждый тарифицируется минимум минутой.
+# Не влезает вдвое.
+#
+# ⚠️ Плата за это — часы работы. У Render 750 инстанс-часов в месяц на аккаунт, а
+# в месяце 720-744 часа: круглосуточный пинг съедает ВСЮ квоту без запаса, и при
+# перерасходе сервис отключают до следующего месяца. Поэтому пингуем только в окно
+# дневной активности (по умолчанию 04:00-20:00 UTC = 07:00-23:00 МСК): 16 часов в
+# сутки это ~480 часов в месяц, с запасом. Ночью сервис спит и часы не тратит.
+#
+# KEEP_AWAKE_URL пуст — механизм выключен (так и надо на localhost).
+KEEP_AWAKE_URL = os.environ.get("KEEP_AWAKE_URL", "").strip()
+KEEP_AWAKE_FROM_HOUR_UTC = int(os.environ.get("KEEP_AWAKE_FROM_HOUR_UTC", "4"))
+KEEP_AWAKE_TO_HOUR_UTC = int(os.environ.get("KEEP_AWAKE_TO_HOUR_UTC", "20"))
+
 TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "edge").strip().lower()
 TTS_REMOTE_MODEL = os.environ.get("TTS_REMOTE_MODEL", "voxtral-mini-tts-latest")
 TTS_REMOTE_VOICE = os.environ.get("TTS_REMOTE_VOICE", "en_paul_neutral")
@@ -489,6 +510,37 @@ def _split_sentence(buf: str) -> tuple[str, str]:
     return buf[:end].strip(), buf[end:].lstrip()
 
 
+async def _keep_awake_loop():
+    """Раз в 10 минут дёргаем собственный /health, чтобы хостинг не усыпил сервис.
+
+    Ошибки глотаем молча по одной, но считаем подряд идущие: если адрес задан
+    неверно, лог не должен превратиться в поток мусора, а знать об этом надо.
+    """
+    fails = 0
+    while True:
+        await asyncio.sleep(600)
+        hour = time.gmtime().tm_hour
+        awake_window = (
+            KEEP_AWAKE_FROM_HOUR_UTC <= hour < KEEP_AWAKE_TO_HOUR_UTC
+            if KEEP_AWAKE_FROM_HOUR_UTC < KEEP_AWAKE_TO_HOUR_UTC
+            # окно через полночь (например 22:00-06:00)
+            else hour >= KEEP_AWAKE_FROM_HOUR_UTC or hour < KEEP_AWAKE_TO_HOUR_UTC
+        )
+        if not awake_window:
+            continue
+        try:
+            async with httpx.AsyncClient(timeout=30, trust_env=False) as cl:
+                await cl.get(KEEP_AWAKE_URL.rstrip("/") + "/health")
+            if fails:
+                print(f"[keep-awake] снова отвечает (было {fails} неудач подряд)")
+            fails = 0
+        except Exception as e:  # noqa: BLE001
+            fails += 1
+            if fails in (1, 5, 20):
+                print(f"[keep-awake] не достучался до {KEEP_AWAKE_URL} "
+                      f"({type(e).__name__}), неудач подряд: {fails}")
+
+
 @app.on_event("startup")
 async def _warmup():
     # Локальные модели греем ТОЛЬКО если распознаём локально. Иначе не грузим их
@@ -517,6 +569,11 @@ async def _warmup():
             print(f"[startup] Загружаю faster-whisper:{name} (первый раз качает модель, подожди)...")
             await asyncio.to_thread(get_whisper, name)
         print("[startup] STT-модели готовы.")
+    if KEEP_AWAKE_URL:
+        asyncio.create_task(_keep_awake_loop())
+        print(f"[startup] самопинг раз в 10 мин на {KEEP_AWAKE_URL}, "
+              f"окно {KEEP_AWAKE_FROM_HOUR_UTC:02d}:00-{KEEP_AWAKE_TO_HOUR_UTC:02d}:00 UTC")
+
     print("[startup] Сервер принимает запросы.")
 
 
