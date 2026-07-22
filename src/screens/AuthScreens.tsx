@@ -112,6 +112,10 @@ export function RegisterScreen({ onDone }: { onDone: (u: AuthUser) => void }) {
         REGISTRATION
       </h1>
 
+      {/* Маскот и на регистрации — как на приветственном референсе. Компонент
+          сам решает, какой зверь достался этой сессии. */}
+      <Mascot style={{ width: 'clamp(90px, 14vw, 150px)', marginTop: '-8px' }} />
+
       <div className="auth-panel">
         <div className="auth-inputrow">
           <input

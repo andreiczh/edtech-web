@@ -268,7 +268,8 @@ export const TASKS: Record<TaskId, TaskDef> = {
     id: 41,
     kind: 'interview',
     label: 'interview',
-    prepSeconds: 0,
+    // 20 секунд собраться перед интервью — по ТЗ владельца от 23.07.2026
+    prepSeconds: 20,
     answerSeconds: 40,
     maxScore: 5,
     variants: INTERVIEW_SETS.map((qs, i) => ({

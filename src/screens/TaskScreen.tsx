@@ -34,7 +34,9 @@ const CAT_LABEL: Record<string, string> = {
   logic: 'Логика',
 }
 
-type Phase = 'intro' | 'run' | 'analyzing' | 'result'
+/** prep — подготовка по таймингу экзамена: видно задание и материал, идёт
+    отсчёт, микрофон ещё НЕ пишет. Запись стартует сама по концу подготовки. */
+type Phase = 'intro' | 'prep' | 'run' | 'analyzing' | 'result'
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
@@ -196,6 +198,20 @@ export function TaskScreen({
     }
   }, [analyze, stop])
 
+  /** Запуск ЗАПИСИ — по концу подготовки (таймером) или кнопкой «Отвечать». */
+  const startRun = useCallback(async () => {
+    if (phaseRef.current === 'run') return
+    if (!(await start())) {
+      // Микрофон не дали — возвращаемся на intro, где micError объяснит причину.
+      setPhase('intro')
+      return
+    }
+    startedAtRef.current = Date.now()
+    finishingRef.current = false
+    setStep(0)
+    setPhase('run')
+  }, [start])
+
   /**
    * Граница шагов (40: четыре вопроса, 41: пять). Запись НЕ режем на куски и не
    * перезапускаем: MediaRecorder на рестарте теряет заголовок контейнера, а
@@ -204,28 +220,33 @@ export function TaskScreen({
    * и вопрос на экране — разбор на бэкенде так и рассчитан: он получает один
    * транскрипт всех ответов подряд.
    */
-  const nextStep = useCallback(() => {
+  const onTimerDone = useCallback(() => {
+    if (phaseRef.current === 'prep') {
+      // Подготовка кончилась — экзаменационная логика: ответ начинается сам.
+      void startRun()
+      return
+    }
     if (phaseRef.current !== 'run') return
     if (step + 1 < stepCount) setStep((s) => s + 1)
     else void finish()
-  }, [finish, step, stepCount])
+  }, [finish, startRun, step, stepCount])
 
-  const left = useCountdown(task.answerSeconds, nextStep, true, `${phase}:${step}`)
+  /* На подготовке тикает prepSeconds, на ответе — answerSeconds на каждый шаг. */
+  const phaseSeconds = phase === 'prep' ? task.prepSeconds : task.answerSeconds
+  const left = useCountdown(phaseSeconds, onTimerDone, true, `${phase}:${step}`)
 
   /* Хук нельзя вызвать условно, поэтому отсчёт тикает и на intro. Сброс приходит
-     эффектом, уже после первой отрисовки run, — без этой строки полоса на кадр
-     вспыхивала бы красным 00:00. */
-  const shown = left > 0 ? left : task.answerSeconds
+     эффектом, уже после первой отрисовки prep/run, — без этой строки полоса на
+     кадр вспыхивала бы красным 00:00. */
+  const shown = left > 0 ? left : phaseSeconds
 
   const begin = useCallback(async () => {
     setFeedback(null)
     setFailure(null)
-    if (!(await start())) return // причину покажет micError
-    startedAtRef.current = Date.now()
-    finishingRef.current = false
-    setStep(0)
-    setPhase('run')
-  }, [start])
+    // Сначала подготовка по таймингу экзамена; если её нет — сразу запись.
+    if (task.prepSeconds > 0) setPhase('prep')
+    else await startRun()
+  }, [startRun, task.prepSeconds])
 
   const again = useCallback(() => {
     setFeedback(null)
@@ -318,6 +339,22 @@ export function TaskScreen({
           </div>
         )}
 
+        {phase === 'prep' && (
+          <div className="scroll-soft scroll-soft--onDark" style={scrollArea}>
+            <span className="statrow__label" style={{ marginTop: 0 }}>
+              Подготовка — запись ещё не идёт
+            </span>
+            <div className="card2 taskcard" style={{ width: '100%' }}>
+              <Brief text={variant.brief} />
+            </div>
+            {variant.readText && <div className="readtext">{variant.readText}</div>}
+            {variant.images && (
+              <TaskImages srcs={variant.images} alt={variant.imageCaption} maxHeight="min(30vh, 280px)" />
+            )}
+            <Mascot />
+          </div>
+        )}
+
         {phase === 'run' && (
           <div className="scroll-soft scroll-soft--onDark" style={scrollArea}>
             <RecBadge recording={state === 'recording'} />
@@ -391,6 +428,20 @@ export function TaskScreen({
         <div className="rowbetween">
           <Pill onClick={quit}>QUIT</Pill>
           <Pill onClick={() => void begin()}>START</Pill>
+        </div>
+      )}
+
+      {phase === 'prep' && (
+        <div className="rowbetween">
+          <Pill onClick={quit}>QUIT</Pill>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <CountdownBar
+              left={shown}
+              total={task.prepSeconds}
+              onEnd={() => void startRun()}
+              endLabel="Отвечать"
+            />
+          </div>
         </div>
       )}
 

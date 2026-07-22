@@ -218,7 +218,11 @@ export function BottomBar({
 
 /* ------------------------------------------------------------- Обратный счёт */
 
-/** Полоса обратного отсчёта из макетов: заполнение + mm:ss + кнопка справа. */
+/** Полоса обратного отсчёта из макетов: заполнение + mm:ss + кнопка справа.
+
+    Полоса стартует БЕЛОЙ и заливается фиолетовым слева направо по мере хода
+    времени (замечание владельца, 23.07.2026): заполнение = прошедшее время,
+    а не остаток. Цифра рядом по-прежнему показывает, сколько осталось. */
 export function CountdownBar({
   left,
   total,
@@ -230,7 +234,7 @@ export function CountdownBar({
   onEnd?: () => void
   endLabel?: string
 }) {
-  const pct = total > 0 ? Math.max(0, Math.min(100, (left / total) * 100)) : 0
+  const pct = total > 0 ? Math.max(0, Math.min(100, ((total - left) / total) * 100)) : 0
   const mm = String(Math.floor(left / 60)).padStart(2, '0')
   const ss = String(left % 60).padStart(2, '0')
   return (

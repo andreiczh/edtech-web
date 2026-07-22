@@ -403,7 +403,7 @@ async def transcribe_remote(data: bytes, filename: str = "speech.webm") -> str:
         files={"file": (filename, data, "audio/webm")},
     )
     if r.status_code != 200:
-        raise RuntimeError(f"Mistral STT вернул {r.status_code}: {r.text[:200]}")
+        raise _RemoteSttError(r.status_code, r.text)
     return (r.json().get("text") or "").strip()
 
 
@@ -630,7 +630,26 @@ class SttFailed(Exception):
     «STT (faster-whisper) ошибка: [Errno 1094995529] Invalid data found when
     processing input: '/tmp/tmphwai8heq.webm'» — код ffmpeg и путь к временному
     файлу на экране у школьника.
+
+    `user_message` — то, что показываем ученику. Причины разные, и валить всё в
+    «запись пустая или повреждена» нельзя: на перегрузке Mistral (429) эта
+    фраза заставляла человека перезаписывать нормальный ответ.
     """
+
+    def __init__(self, detail: str, user_message: str | None = None):
+        super().__init__(detail)
+        self.user_message = user_message or (
+            "Не расслышал — запись пустая или слишком короткая. Скажи ещё раз."
+        )
+
+
+class _RemoteSttError(Exception):
+    """Ошибка HTTP от Mistral STT — со статусом, чтобы отличать перегрузку (429,
+    надо просто повторить) от битого аудио (400, повторять бессмысленно)."""
+
+    def __init__(self, status: int, body: str):
+        super().__init__(f"HTTP {status}: {body[:160]}")
+        self.status = status
 
 
 # Липкий откат распознавания. Провал Mistral (обычно таймаут загрузки на плохой
@@ -649,22 +668,41 @@ async def transcribe_auto(data: bytes, local_model: str | None = None) -> str:
     Понижение уровня печатаем в лог: молчаливая деградация хуже отсутствия.
     """
     global _stt_degraded_until
-    remote_allowed = STT_PROVIDER == "mistral" and time.time() >= _stt_degraded_until
+    remote_allowed = STT_PROVIDER == "mistral" and (
+        STT_FALLBACK_LOCAL is False or time.time() >= _stt_degraded_until
+    )
     if remote_allowed:
-        try:
-            return await transcribe_remote(data)
-        except Exception as e:  # noqa: BLE001
-            detail = f"{type(e).__name__}: {str(e)[:160]}"
-            if not STT_FALLBACK_LOCAL:
-                print(f"[stt] Mistral не смог ({detail}), откат выключен")
-                raise SttFailed(detail) from e
-            _stt_degraded_until = time.time() + _STT_DEGRADE_SECONDS
-            print(f"[stt] Mistral не смог ({detail}) — следующие "
-                  f"{_STT_DEGRADE_SECONDS:.0f}с распознаю локально")
-    elif STT_PROVIDER == "mistral" and not STT_FALLBACK_LOCAL:
-        # Откат запрещён (Render) — липкая деградация не применяется, каждый
-        # запрос честно идёт в Mistral.
-        return await transcribe_remote(data)
+        # Две попытки с короткой паузой: жалоба пользователя «иногда тупит и
+        # выдаёт ошибку» — это в основном разовые икоты сети и 429 у Mistral,
+        # которые лечатся простым повтором. Повторяем только то, что имеет
+        # смысл повторять: 429, 5xx и обрывы соединения; 400 (битое аудио)
+        # повторять бессмысленно.
+        last: Exception | None = None
+        for attempt in (1, 2):
+            try:
+                return await transcribe_remote(data)
+            except Exception as e:  # noqa: BLE001
+                last = e
+                permanent = isinstance(e, _RemoteSttError) and e.status not in (429,) and e.status < 500
+                if attempt == 1 and not permanent:
+                    await asyncio.sleep(0.6)
+                    continue
+                break
+        detail = f"{type(last).__name__}: {str(last)[:160]}"
+        if not STT_FALLBACK_LOCAL:
+            print(f"[stt] Mistral не смог дважды ({detail}), откат выключен")
+            overloaded = isinstance(last, _RemoteSttError) and (
+                last.status == 429 or last.status >= 500
+            )
+            raise SttFailed(
+                detail,
+                "Сервис распознавания перегружен — подожди пару секунд и скажи ещё раз."
+                if overloaded or not isinstance(last, _RemoteSttError)
+                else None,
+            ) from last
+        _stt_degraded_until = time.time() + _STT_DEGRADE_SECONDS
+        print(f"[stt] Mistral не смог ({detail}) — следующие "
+              f"{_STT_DEGRADE_SECONDS:.0f}с распознаю локально")
     try:
         return await asyncio.to_thread(transcribe, data, local_model)
     except Exception as e:  # noqa: BLE001
@@ -1022,10 +1060,7 @@ async def _monologue_work(data: bytes) -> dict:
         transcript_text = await transcribe_auto(data)
     except SttFailed as e:
         print(f"[stt] монолог не распознан: {e}")
-        raise HTTPException(
-            status_code=502,
-            detail="Не удалось распознать запись — она пустая или повреждена. Запиши ещё раз.",
-        )
+        raise HTTPException(status_code=502, detail=e.user_message)
     t1 = time.time()
 
     if not transcript_text:
@@ -1154,10 +1189,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
         transcript_text = await transcribe_auto(data)
     except SttFailed as e:
         print(f"[stt] task_feedback не распознал: {e}")
-        raise HTTPException(
-            status_code=502,
-            detail="Не удалось распознать запись — она пустая или повреждена. Запиши ещё раз.",
-        )
+        raise HTTPException(status_code=502, detail=e.user_message)
     t1 = time.time()
     if not transcript_text:
         raise HTTPException(
@@ -1272,12 +1304,11 @@ async def talk_stream(audio: UploadFile = File(...), x_device: str | None = Head
         try:
             user_text = await transcribe_auto(data, WHISPER_MODEL_FAST)
         except SttFailed as e:
-            # Ученику — человеческая фраза, причина уходит в лог сервера.
-            # Чаще всего сюда попадает пустая или слишком короткая запись.
+            # Ученику — человеческая фраза (у разных причин она разная: битая
+            # запись vs перегрузка сервиса), техника уходит в лог сервера.
             print(f"[stt] не распознал: {e}")
             yield json.dumps(
-                {"done": True, "user": "",
-                 "reply": "Не расслышал — запись пустая или слишком короткая. Скажи ещё раз.",
+                {"done": True, "user": "", "reply": e.user_message,
                  "latency": {"stt": round(time.time() - t0, 2), "first_audio": 0,
                              "total": round(time.time() - t0, 2)}}
             ) + "\n"

@@ -13,7 +13,6 @@
  *    иначе кнопка микрофона уезжала бы за нижнюю панель.
  */
 import { MicButton } from '../components/MicButton'
-import { VoiceOrbs } from '../components/VoiceOrbs'
 import { BottomBar } from '../design/ui'
 import { useConversation, type ConversationState } from '../useConversation'
 
@@ -32,8 +31,6 @@ export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
   return (
     <div className="screenbody">
       <div className="screen__body">
-        <VoiceOrbs state={state} />
-
         {(reply || error) && (
           <div className="card2 answer scroll-soft" aria-live="polite">
             {error ? (
@@ -63,7 +60,20 @@ export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
           </div>
         )}
 
-        <MicButton state={state} onToggle={toggle} />
+        {/* Сцена кружков: в покое и при ответе — ряд над микрофоном, во время
+            записи — орбита вокруг него (см. .orbstage в ui.css). Сцена — обычный
+            блок фиксированных пропорций, кружки за неё не вылезают и соседние
+            блоки не перекрывают. */}
+        <div className={`orbstage orbstage--${state}`} aria-hidden="false">
+          <div className="orbstage__ring" aria-hidden="true">
+            {[1, 2, 3, 4].map((i) => (
+              <span key={i} className={`orbstage__orb orbstage__orb--${i}`} />
+            ))}
+          </div>
+          <div className="orbstage__mic">
+            <MicButton state={state} onToggle={toggle} />
+          </div>
+        </div>
       </div>
 
       {/* QUIT здесь некуда: разговор — корневой экран, выходить из него не во

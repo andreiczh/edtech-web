@@ -34,6 +34,110 @@
   --pad-screen: clamp(14px, 2.4vw, 28px);
 }
 
+/* Фон приложения: тот же фиолетовый, но с мягким градиентом в светлый тон
+   сверху (референс — присланные макеты SPEAKO): плоская заливка выглядела
+   плоско, свет сверху даёт сцене глубину. Перебивает --bg из index.css. */
+.app {
+  background: radial-gradient(130% 105% at 50% -10%, #786fb8 0%, #5b5497 45%, #4b4580 100%);
+}
+
+/* ------------------------------------------------- Кружки вокруг микрофона
+ *
+ * Хореография по ТЗ (23.07.2026):
+ *  - покой: кружки стоят рядком над микрофоном (референс «Готов поговорить?»);
+ *  - идёт ЗАПИСЬ: кружки разлетаются на орбиту и крутятся вокруг микрофона;
+ *  - ИИ отвечает: возвращаются в ряд над микрофоном и пульсируют вверх-вниз.
+ *
+ * Механика: у кружка два слоя трансформаций. `translate` (отдельное CSS-свойство)
+ * всегда центрует кружок на своих top/left-координатах, а `transform` свободен
+ * для анимации пульса — они не конфликтуют. Позиции заданы в процентах сцены,
+ * поэтому кружки НЕ вылезают за неё и не перекрывают соседние блоки: сцена —
+ * обычный блок в потоке с фиксированными пропорциями.
+ */
+.orbstage {
+  position: relative;
+  width: min(78vw, 380px);
+  aspect-ratio: 1 / 0.82;
+  flex-shrink: 0;
+  margin-inline: auto;
+}
+
+.orbstage__ring {
+  position: absolute;
+  inset: 0;
+}
+/* Вращается вся «карусель» позиций — так кружки идут по орбите строем. */
+.orbstage--listening .orbstage__ring {
+  animation: orb-spin 8s linear infinite;
+}
+.orbstage--processing .orbstage__ring {
+  animation: orb-spin 2.6s linear infinite; /* «думает» — заметно быстрее */
+}
+@keyframes orb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.orbstage__orb {
+  position: absolute;
+  border-radius: 50%;
+  translate: -50% -50%;
+  transition:
+    top 620ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    left 620ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+/* Размеры разные нарочно — как на референсе, ряд «живой», а не гирлянда */
+.orbstage__orb--1 { width: clamp(30px, 6vw, 52px); height: clamp(30px, 6vw, 52px); background: var(--orb-1); }
+.orbstage__orb--2 { width: clamp(40px, 8vw, 68px); height: clamp(40px, 8vw, 68px); background: var(--orb-2); }
+.orbstage__orb--3 { width: clamp(38px, 7.4vw, 62px); height: clamp(38px, 7.4vw, 62px); background: var(--orb-3); }
+.orbstage__orb--4 { width: clamp(44px, 8.8vw, 74px); height: clamp(44px, 8.8vw, 74px); background: var(--orb-4); }
+
+/* Ряд над микрофоном — покой и ответ */
+.orbstage--idle .orbstage__orb--1, .orbstage--speaking .orbstage__orb--1 { top: 16%; left: 17%; }
+.orbstage--idle .orbstage__orb--2, .orbstage--speaking .orbstage__orb--2 { top: 12%; left: 39%; }
+.orbstage--idle .orbstage__orb--3, .orbstage--speaking .orbstage__orb--3 { top: 12%; left: 61%; }
+.orbstage--idle .orbstage__orb--4, .orbstage--speaking .orbstage__orb--4 { top: 16%; left: 83%; }
+
+/* Орбита вокруг микрофона — запись и «думает» */
+.orbstage--listening .orbstage__orb--1, .orbstage--processing .orbstage__orb--1 { top: 50%; left: 12%; }
+.orbstage--listening .orbstage__orb--2, .orbstage--processing .orbstage__orb--2 { top: 10%; left: 50%; }
+.orbstage--listening .orbstage__orb--3, .orbstage--processing .orbstage__orb--3 { top: 50%; left: 88%; }
+.orbstage--listening .orbstage__orb--4, .orbstage--processing .orbstage__orb--4 { top: 90%; left: 50%; }
+
+/* Пульс вверх-вниз при ответе, со сдвигом фаз между кружками */
+.orbstage--speaking .orbstage__orb {
+  animation: orb-bob 1.5s ease-in-out infinite;
+}
+.orbstage--speaking .orbstage__orb--2 { animation-delay: 0.18s; }
+.orbstage--speaking .orbstage__orb--3 { animation-delay: 0.36s; }
+.orbstage--speaking .orbstage__orb--4 { animation-delay: 0.54s; }
+@keyframes orb-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-9px); }
+}
+
+/* Микрофон: в ряду — чуть ниже центра сцены, на орбите — точный центр круга */
+.orbstage__mic {
+  position: absolute;
+  top: 62%;
+  left: 50%;
+  translate: -50% -50%;
+  z-index: 2;
+  transition: top 620ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.orbstage--listening .orbstage__mic,
+.orbstage--processing .orbstage__mic {
+  top: 50%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbstage__ring,
+  .orbstage--speaking .orbstage__orb {
+    animation: none;
+  }
+}
+
 /* ---------------------------------------------------------------- Стекло */
 
 /* Базовое «жидкое стекло»: размытие + подъём насыщенности + светлая грань.
