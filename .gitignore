@@ -17,3 +17,6 @@ CLAUDE.local.md
 __pycache__/
 *.pyc
 .venv/
+
+# Pamyat ob oshibkah: lokalnaya SQLite-baza i ee WAL-faily. Dannye uchenikov, ne kod.
+backend/pingo.db*

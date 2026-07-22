@@ -162,7 +162,10 @@ export function TaskScreen({
       setPhase('analyzing')
       setFailure(null)
       try {
-        const res = await requestTaskFeedback(blob, task.kind, feedbackPayload(task, variant))
+        const res = await requestTaskFeedback(blob, task.kind, feedbackPayload(task, variant), {
+          variantId: variant.id,
+          durationSec: Math.max(0, Math.round((Date.now() - startedAtRef.current) / 1000)),
+        })
         setFeedback(res.feedback)
         setTranscript(res.transcript)
       } catch (e) {

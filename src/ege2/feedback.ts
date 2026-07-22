@@ -9,6 +9,7 @@
  * ошибки прокси это HTML, без try человек увидел бы «Unexpected token <».
  */
 import { backendUnreachableMessage, httpErrorMessage } from '../backendError'
+import { deviceId } from './device'
 import type { TaskKind } from './tasks'
 
 const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
@@ -46,15 +47,25 @@ export async function requestTaskFeedback(
   blob: Blob,
   kind: TaskKind,
   payload: Record<string, unknown>,
+  /** Для памяти об ошибках: какой вариант решался и сколько секунд говорил */
+  meta?: { variantId?: string; durationSec?: number },
 ): Promise<FeedbackResponse> {
   const fd = new FormData()
   fd.append('audio', blob, 'answer.webm')
   fd.append('kind', kind)
   fd.append('payload', JSON.stringify(payload))
+  if (meta?.variantId) fd.append('variant', meta.variantId)
+  if (meta?.durationSec) fd.append('duration', String(meta.durationSec))
 
   let res: Response
   try {
-    res = await fetch(`${BACKEND}/task_feedback`, { method: 'POST', body: fd })
+    res = await fetch(`${BACKEND}/task_feedback`, {
+      method: 'POST',
+      body: fd,
+      // По X-Device сервер копит профиль ошибок ученика. Не личные данные —
+      // случайный uuid браузера, см. device.ts.
+      headers: { 'X-Device': deviceId() },
+    })
   } catch {
     throw new Error(backendUnreachableMessage())
   }

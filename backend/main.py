@@ -32,13 +32,15 @@ import aiohttp
 import edge_tts
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from faster_whisper import WhisperModel
 from openai import AsyncOpenAI, OpenAI
+
+import storage
 
 load_dotenv()
 
@@ -402,6 +404,59 @@ async def transcribe_remote(data: bytes, filename: str = "speech.webm") -> str:
     return (r.json().get("text") or "").strip()
 
 
+_storage_ok = False
+
+
+async def _load_memory(device: str | None, kind: str | None) -> dict:
+    """Выжимки для промпта. Единственное место, где память сидит в горячем пути,
+    поэтому жёсткий лимит времени: не успела за секунду — отвечаем без неё.
+    Пустой словарь — легальный результат, а не ошибка."""
+    if not _storage_ok or not (device or kind):
+        return {}
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(storage.get_digests, device, kind), timeout=1.0
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[memory] чтение не удалось ({type(e).__name__}: {str(e)[:80]})")
+        return {}
+
+
+def _memory_prompt_block(mem: dict) -> str:
+    if not mem:
+        return ""
+    block = "\n\nSTUDENT MEMORY (use it to personalise your feedback):\n"
+    if mem.get("user"):
+        block += f"- This student's recent profile: {mem['user']}\n"
+    if mem.get("global"):
+        block += f"- {mem['global']}\n"
+    block += (
+        "If the student repeats one of these mistakes, point it out explicitly; "
+        "if they clearly avoided a previously frequent mistake, praise that in the summary."
+    )
+    return block
+
+
+def _remember(device: str | None, kind: str, variant: str, feedback: dict,
+              duration_sec: int) -> None:
+    """Запись итога в память — строго fire-and-forget: ученик ответа не ждёт,
+    а упавшая база не должна отнимать у него разбор."""
+    if not (_storage_ok and device):
+        return
+
+    async def run():
+        try:
+            await asyncio.to_thread(
+                storage.save_result, device, kind, variant,
+                int(feedback.get("score") or 0), int(feedback.get("max") or 0),
+                duration_sec, feedback.get("errors") or [],
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[memory] запись не удалась ({type(e).__name__}: {str(e)[:80]})")
+
+    asyncio.create_task(run())
+
+
 class SttFailed(Exception):
     """Распознать не удалось — ни основным путём, ни запасным.
 
@@ -633,6 +688,20 @@ async def _warmup():
         print(f"[startup] самопинг раз в 10 мин на {KEEP_AWAKE_URL}, "
               f"окно {KEEP_AWAKE_FROM_HOUR_UTC:02d}:00-{KEEP_AWAKE_TO_HOUR_UTC:02d}:00 UTC")
 
+    # Память об ошибках. Недоступная база НЕ роняет сервер: продукт обязан
+    # работать и без памяти, просто без персонализации.
+    global _storage_ok
+    try:
+        await asyncio.to_thread(storage.ensure_schema)
+        _storage_ok = True
+        print(f"[startup] память включена: {storage.describe()}")
+        if not storage.DATABASE_URL:
+            print("[startup] ⚠ память в SQLite: на Render диск эфемерный, база "
+                  "живёт до ближайшего деплоя. Для постоянной — DATABASE_URL (Neon).")
+    except Exception as e:  # noqa: BLE001
+        _storage_ok = False
+        print(f"[startup] память НЕдоступна ({type(e).__name__}: {e}) — работаю без неё")
+
     print("[startup] Сервер принимает запросы.")
 
 
@@ -661,6 +730,7 @@ def health():
         "llm_base": LLM_BASE_URL,
         "llm_model": LLM_MODEL,
         "llm_key": bool(os.environ.get("LLM_API_KEY")),
+        "memory": storage.describe() if _storage_ok else "выключена",
     }
 
 
@@ -851,8 +921,12 @@ async def _monologue_work(data: bytes) -> dict:
 _FEEDBACK_JSON_SHAPE = (
     'Return ONLY a JSON object (no prose, no markdown) with EXACTLY this shape:\n'
     '{"summary": "<one short sentence in Russian>", "score": <int>, "max": <int>, '
-    '"errors": [{"quote": "<what the student said, English>", '
+    '"errors": [{"cat": "gram|lex|order|missing|logic", '
+    '"quote": "<what the student said, English>", '
     '"correction": "<fixed, English>", "explanation": "<по-русски, кратко>"}]}\n'
+    "cat is the error category: gram=grammar, lex=vocabulary, order=word order, "
+    "missing=required element absent, logic=meaning. It feeds the student's "
+    "long-term mistake profile, so choose it carefully.\n"
     "Up to 6 most important errors. Be honest but encouraging (level A2-B1)."
 )
 
@@ -904,8 +978,13 @@ def _feedback_prompt(kind: str, payload: dict) -> str:
     return MONOLOGUE_PROMPT
 
 
-async def _task_feedback_work(kind: str, payload_raw: str, data: bytes) -> dict:
+async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
+                              device: str | None, variant: str,
+                              duration_sec: int) -> dict:
     t0 = time.time()
+    # Выжимки памяти тянем ПАРАЛЛЕЛЬНО с распознаванием: STT занимает 0.5-2 с,
+    # SELECT успевает заведомо раньше — добавка к задержке ровно ноль.
+    mem_task = asyncio.create_task(_load_memory(device, kind))
     try:
         transcript_text = await transcribe_auto(data)
     except SttFailed as e:
@@ -925,13 +1004,18 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes) -> dict:
     except json.JSONDecodeError:
         payload = {}
 
+    mem = await mem_task
+    if mem:
+        print(f"[memory] выжимки в промпте разбора: {', '.join(sorted(mem))}")
+
     client = llm_client()
     try:
         completion = await asyncio.to_thread(
             lambda: client.chat.completions.create(
                 model=LLM_MODEL,
                 messages=[
-                    {"role": "system", "content": _feedback_prompt(kind, payload)},
+                    {"role": "system",
+                     "content": _feedback_prompt(kind, payload) + _memory_prompt_block(mem)},
                     {"role": "user", "content": transcript_text},
                 ],
                 response_format={"type": "json_object"},
@@ -957,6 +1041,9 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes) -> dict:
         except (TypeError, ValueError):
             feedback["score"], feedback["max"] = 0, 10
 
+    # В память — после того как ответ готов, мимо критического пути.
+    _remember(device, kind, variant, feedback, duration_sec)
+
     t2 = time.time()
     return {
         "transcript": transcript_text,
@@ -974,22 +1061,30 @@ async def task_feedback(
     audio: UploadFile = File(...),
     kind: str = Form(...),
     payload: str = Form("{}"),
+    variant: str = Form(""),
+    duration: int = Form(0),
+    x_device: str | None = Header(None),
 ):
     """Разбор ответа на задание устной части (39-42). Отдаётся потоком с
     «сердцебиением» — см. `_json_with_heartbeat`; путь обязан быть в
-    `_STREAM_PATHS`, иначе gzip молча похоронит стриминг."""
+    `_STREAM_PATHS`, иначе gzip молча похоронит стриминг.
+
+    `X-Device` — анонимный id браузера: по нему копится профиль ошибок. Без
+    заголовка разбор работает так же, просто ничего не запоминается."""
     if kind not in {"reading", "dialogue", "interview", "monologue"}:
         raise HTTPException(status_code=422, detail=f"Неизвестный тип задания: {kind}")
     data = await audio.read()
     return StreamingResponse(
-        _json_with_heartbeat(_task_feedback_work(kind, payload, data)),
+        _json_with_heartbeat(
+            _task_feedback_work(kind, payload, data, x_device, variant, duration)
+        ),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
 
 
 @app.post("/talk_stream")
-async def talk_stream(audio: UploadFile = File(...)):
+async def talk_stream(audio: UploadFile = File(...), x_device: str | None = Header(None)):
     """Разговор со СТРИМИНГОМ ответа (Шаг A к <2с бесшовности).
 
     Тот же push-to-talk на входе, но ответ течёт пофразно: LLM токенами →
@@ -1002,6 +1097,10 @@ async def talk_stream(audio: UploadFile = File(...)):
 
     async def gen():
         t0 = time.time()
+        # Профиль ученика тянем параллельно с распознаванием — добавка ноль.
+        # В разговоре используется только личная выжимка, без общей: тьютор
+        # исправляет мягко и по чуть-чуть, сводка всех ошибок ему не нужна.
+        mem_task = asyncio.create_task(_load_memory(x_device, None))
         # 1) STT (batch, после стопа — Шаг B сделает это стримингом во время речи).
         #    Запасной локальный путь — БЫСТРАЯ модель: в живом разговоре полторы
         #    секунды дороже, чем точность одного слова (см. WHISPER_MODEL_FAST).
@@ -1045,11 +1144,25 @@ async def talk_stream(audio: UploadFile = File(...)):
                 first_audio_at = time.time()
             return json.dumps({"text": sentence, "audio_b64": base64.b64encode(wav).decode()}) + "\n"
 
+        # Личная выжимка делает тьютора внимательнее к повторяющимся ошибкам
+        # именно этого ученика. Правило «одна короткая поправка за реплику»
+        # сохраняется — оно уже в SYSTEM_PROMPT.
+        mem = await mem_task
+        sys_prompt = SYSTEM_PROMPT
+        if mem.get("user"):
+            sys_prompt += (
+                "\n\nMemory about this student (recurring mistakes from past sessions): "
+                f"{mem['user']}\n"
+                "If one of these mistakes appears again in their speech, gently point it "
+                "out (still at most one short tip); if they clearly improved, praise it."
+            )
+            print("[memory] профиль ученика подключён к разговору")
+
         try:
             stream = await client.chat.completions.create(
                 model=LLM_MODEL,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": user_text},
                 ],
                 max_tokens=120,
