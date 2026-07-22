@@ -22,6 +22,10 @@ RUN npm ci
 
 COPY tsconfig.json vite.config.ts index.html ./
 COPY src ./src
+# public/ обязателен: vite кладёт его содержимое в корень сборки. Без этой
+# строки прод собирался БЕЗ шрифтов и маскотов — локально всё работало, а на
+# Render файлы молча пропадали (найдено смоук-тестом 23.07.2026).
+COPY public ./public
 RUN npm run build
 
 # ---------- 2) рантайм ----------
