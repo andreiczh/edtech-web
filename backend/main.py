@@ -370,7 +370,15 @@ def _stt_client() -> httpx.AsyncClient:
     """
     global _stt_http
     if _stt_http is None:
-        _stt_http = httpx.AsyncClient(timeout=60.0, trust_env=False)
+        # Таймаут короткий намеренно. Вечером 22.07.2026 загрузки в Mistral на
+        # домашнем канале душились до 17-21 с, но В ИТОГЕ успевали — и запасной
+        # локальный whisper не включался никогда: не было ошибки. С жёстким
+        # порогом деградация сети превращается в честный откат: подождали
+        # STT_TIMEOUT, не вышло — локальная модель разберёт за 1.5-3 с.
+        # На Render это не мешает: там загрузка занимает ~0.4 с.
+        _stt_http = httpx.AsyncClient(
+            timeout=float(os.environ.get("STT_TIMEOUT", "12")), trust_env=False
+        )
     return _stt_http
 
 
@@ -405,6 +413,14 @@ class SttFailed(Exception):
     """
 
 
+# Липкий откат распознавания. Провал Mistral (обычно таймаут загрузки на плохой
+# сети) не должен стоить STT_TIMEOUT секунд НА КАЖДОЙ реплике — после провала
+# следующие 5 минут распознаём сразу локально, а потом молча пробуем Mistral
+# снова: деградация сети у пользователя обычно временная.
+_stt_degraded_until = 0.0
+_STT_DEGRADE_SECONDS = 300.0
+
+
 async def transcribe_auto(data: bytes, local_model: str | None = None) -> str:
     """Распознавание с запасным путём.
 
@@ -412,7 +428,9 @@ async def transcribe_auto(data: bytes, local_model: str | None = None) -> str:
     Запасной — локальный whisper, если он разрешён (см. STT_FALLBACK_LOCAL).
     Понижение уровня печатаем в лог: молчаливая деградация хуже отсутствия.
     """
-    if STT_PROVIDER == "mistral":
+    global _stt_degraded_until
+    remote_allowed = STT_PROVIDER == "mistral" and time.time() >= _stt_degraded_until
+    if remote_allowed:
         try:
             return await transcribe_remote(data)
         except Exception as e:  # noqa: BLE001
@@ -420,7 +438,13 @@ async def transcribe_auto(data: bytes, local_model: str | None = None) -> str:
             if not STT_FALLBACK_LOCAL:
                 print(f"[stt] Mistral не смог ({detail}), откат выключен")
                 raise SttFailed(detail) from e
-            print(f"[stt] Mistral не смог ({detail}), перехожу на локальный whisper")
+            _stt_degraded_until = time.time() + _STT_DEGRADE_SECONDS
+            print(f"[stt] Mistral не смог ({detail}) — следующие "
+                  f"{_STT_DEGRADE_SECONDS:.0f}с распознаю локально")
+    elif STT_PROVIDER == "mistral" and not STT_FALLBACK_LOCAL:
+        # Откат запрещён (Render) — липкая деградация не применяется, каждый
+        # запрос честно идёт в Mistral.
+        return await transcribe_remote(data)
     try:
         return await asyncio.to_thread(transcribe, data, local_model)
     except Exception as e:  # noqa: BLE001
