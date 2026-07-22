@@ -34,12 +34,43 @@ function Assert-Ok($step) {
 # at the very last step - after several minutes of pulling and building.
 $busy = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
 if ($busy) {
-    $owner = (Get-Process -Id $busy[0].OwningProcess -ErrorAction SilentlyContinue).ProcessName
-    Write-Host "Port 8000 is already taken by '$owner' (pid $($busy[0].OwningProcess))." -ForegroundColor Red
-    Write-Host "If that is an old server of ours - close its window and run this again." -ForegroundColor Yellow
-    Write-Host "If it is a VPN / proxy client - change its local port or stop it." -ForegroundColor Yellow
-    Read-Host "Press Enter to close" | Out-Null
-    exit 1
+    $pid8000 = $busy[0].OwningProcess
+    $owner = (Get-Process -Id $pid8000 -ErrorAction SilentlyContinue).ProcessName
+    $cmdline = (Get-CimInstance Win32_Process -Filter "ProcessId=$pid8000" -ErrorAction SilentlyContinue).CommandLine
+
+    # Is it OUR server, or a stranger (VPN / proxy client)? Telling the user to
+    # "close its window" is a dead end when the server was started in the
+    # background and has no window at all - that happened on 22.07.2026.
+    $isOurs = $cmdline -and ($cmdline -match "uvicorn") -and ($cmdline -match "main:app")
+    $alive = $false
+    if ($isOurs) {
+        try {
+            Invoke-RestMethod "http://127.0.0.1:8000/health" -TimeoutSec 5 | Out-Null
+            $alive = $true
+        } catch { $alive = $false }
+    }
+
+    if ($isOurs -and $alive) {
+        Write-Host ""
+        Write-Host "The server is ALREADY RUNNING and answering (pid $pid8000)." -ForegroundColor Green
+        Write-Host "Nothing is broken. Just open:  http://localhost:8000/" -ForegroundColor Green
+        Write-Host ""
+        $ans = Read-Host "Restart it anyway, to pick up new code? [y/N]"
+        if ($ans -notmatch '^[yY]') {
+            Write-Host "Left it running. Open http://localhost:8000/" -ForegroundColor Green
+            Read-Host "Press Enter to close" | Out-Null
+            exit 0
+        }
+        Write-Host "Stopping pid $pid8000 ..." -ForegroundColor Cyan
+        Stop-Process -Id $pid8000 -Force
+        Start-Sleep -Seconds 2
+    } else {
+        Write-Host "Port 8000 is taken by '$owner' (pid $pid8000), and it is NOT our server." -ForegroundColor Red
+        Write-Host "Most likely a VPN / proxy client - change its local port or stop it." -ForegroundColor Yellow
+        Write-Host "Command line: $cmdline" -ForegroundColor DarkGray
+        Read-Host "Press Enter to close" | Out-Null
+        exit 1
+    }
 }
 
 # 1) pull the latest code pushed from the Mac.
