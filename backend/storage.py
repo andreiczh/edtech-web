@@ -56,10 +56,31 @@ def _connect():
     if _IS_PG:
         _conn = psycopg.connect(DATABASE_URL, autocommit=True)
     else:
-        _conn = sqlite3.connect(_SQLITE_PATH, check_same_thread=False)
+        # timeout=5: при конкуренции двух ПРОЦЕССОВ за файл SQLite ждёт снятия
+        # блокировки, а не мгновенно падает «database is locked».
+        _conn = sqlite3.connect(_SQLITE_PATH, check_same_thread=False, timeout=5)
         # WAL: читатели не блокируют писателя — важно, ведь чтение выжимки
         # сидит в горячем пути ответа.
         _conn.execute("PRAGMA journal_mode=WAL")
+
+
+def _drop_connection():
+    """Бросить соединение ПРАВИЛЬНО: с откатом и закрытием.
+
+    Грабли, найденные тестом 23.07.2026: первый же IntegrityError (занятый
+    никнейм) оставлял соединение с открытой транзакцией — «брошенный» объект
+    жил до сборщика мусора и держал блокировку файла, после чего ВСЕ записи
+    падали с «database is locked». Ошибка одного запроса превращалась в отказ
+    всей памяти.
+    """
+    global _conn
+    try:
+        if _conn is not None:
+            _conn.rollback()
+            _conn.close()
+    except Exception:  # noqa: BLE001 — соединение уже мертво, нам всё равно
+        pass
+    _conn = None
 
 
 def _exec(sql: str, params: tuple = ()):  # noqa: ANN202
@@ -68,7 +89,6 @@ def _exec(sql: str, params: tuple = ()):  # noqa: ANN202
     Плейсхолдеры пишем в стиле sqlite («?»), для Postgres меняем на «%s» —
     литералов с вопросительным знаком в наших запросах нет.
     """
-    global _conn
     q = sql.replace("?", "%s") if _IS_PG else sql
     with _lock:
         for attempt in (1, 2):
@@ -80,7 +100,7 @@ def _exec(sql: str, params: tuple = ()):  # noqa: ANN202
                     _conn.commit()
                 return cur
             except Exception:
-                _conn = None
+                _drop_connection()
                 if attempt == 2:
                     raise
 
@@ -109,6 +129,17 @@ def ensure_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_mistakes_kind ON mistakes(kind)",
         "CREATE TABLE IF NOT EXISTS digests ("
         " scope TEXT PRIMARY KEY, text TEXT NOT NULL, updated_at TEXT NOT NULL)",
+        # Аккаунты: никнейм + хэш пароля. id аккаунта становится student_id для
+        # памяти — история следует за человеком между устройствами.
+        "CREATE TABLE IF NOT EXISTS accounts ("
+        " id TEXT PRIMARY KEY, nickname TEXT NOT NULL UNIQUE,"
+        " pass_hash TEXT NOT NULL, exam TEXT NOT NULL, created_at TEXT NOT NULL)",
+        # Банк заданий: payload — JSON с полями варианта (readText/images/steps/...).
+        # active как INTEGER (0/1) — булев тип у движков разный, а этот одинаков.
+        "CREATE TABLE IF NOT EXISTS tasks ("
+        " id TEXT PRIMARY KEY, exam TEXT NOT NULL, task_no INTEGER NOT NULL,"
+        " kind TEXT NOT NULL, payload TEXT NOT NULL,"
+        " active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)",
     ):
         _exec(ddl)
 
@@ -202,6 +233,66 @@ def _rebuild_user_digest(student_id: str) -> None:
 
     if parts:
         _upsert_digest(f"user:{student_id}", " ".join(parts))
+
+
+# ------------------------------------------------------------------ Аккаунты
+
+def is_unique_violation(e: Exception) -> bool:
+    """Занятый никнейм у SQLite и Postgres выглядит по-разному — прячем разницу."""
+    name = type(e).__name__
+    return "IntegrityError" in name or "UniqueViolation" in name or "unique" in str(e).lower()
+
+
+def create_account(nickname: str, pass_hash: str, exam: str) -> str:
+    acc_id = str(uuid.uuid4())
+    _exec("INSERT INTO accounts(id, nickname, pass_hash, exam, created_at)"
+          " VALUES(?,?,?,?,?)", (acc_id, nickname, pass_hash, exam, _now()))
+    return acc_id
+
+
+def get_account(nickname: str):
+    return _exec("SELECT id, nickname, pass_hash, exam FROM accounts WHERE nickname=?",
+                 (nickname,)).fetchone()
+
+
+def solved_variants(student_id: str) -> list[str]:
+    """Какие варианты этот ученик уже сдавал — по записанным результатам.
+    Нужно, чтобы выдача сессий вычёркивала пройденное на ЛЮБОМ устройстве."""
+    rows = _exec("SELECT DISTINCT variant FROM results WHERE student_id=? AND variant<>''",
+                 (student_id,)).fetchall()
+    return [r[0] for r in rows]
+
+
+# ------------------------------------------------------------- Банк заданий
+
+def tasks_active() -> list[dict]:
+    rows = _exec("SELECT id, exam, task_no, kind, payload FROM tasks WHERE active=1"
+                 " ORDER BY created_at").fetchall()
+    return [{"id": r[0], "exam": r[1], "task_no": r[2], "kind": r[3], "payload": r[4]}
+            for r in rows]
+
+
+def tasks_all() -> list[dict]:
+    rows = _exec("SELECT id, exam, task_no, kind, payload, active, created_at FROM tasks"
+                 " ORDER BY created_at DESC").fetchall()
+    return [{"id": r[0], "exam": r[1], "task_no": r[2], "kind": r[3], "payload": r[4],
+             "active": bool(r[5]), "created_at": r[6]} for r in rows]
+
+
+def task_add(exam: str, task_no: int, kind: str, payload_json: str) -> str:
+    tid = str(uuid.uuid4())
+    _exec("INSERT INTO tasks(id, exam, task_no, kind, payload, active, created_at)"
+          " VALUES(?,?,?,?,?,1,?)", (tid, exam, int(task_no), kind, payload_json, _now()))
+    return tid
+
+
+def task_toggle(tid: str) -> bool | None:
+    row = _exec("SELECT active FROM tasks WHERE id=?", (tid,)).fetchone()
+    if row is None:
+        return None
+    new = 0 if row[0] else 1
+    _exec("UPDATE tasks SET active=? WHERE id=?", (new, tid))
+    return bool(new)
 
 
 def _maybe_rebuild_global_digest(kind: str) -> None:

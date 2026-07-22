@@ -9,10 +9,19 @@
  * вариантов этого типа (см. pickSession). DEMO — по одному варианту каждого
  * номера. Итоги показывает SessionScreen.
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
+import { currentUser, identityId, type AuthUser } from './auth/auth'
 import { TopBar, type TopTab } from './design/ui'
-import { pickDemoItems, pickSession, type TaskId } from './ege2/tasks'
+import {
+  pickDemoItems,
+  pickSession,
+  syncRemoteTasks,
+  syncServerProgress,
+  type TaskId,
+} from './ege2/tasks'
+import { AdminScreen } from './screens/AdminScreen'
+import { LoginScreen, RegisterScreen, WelcomeScreen } from './screens/AuthScreens'
 import { ConversationScreen } from './screens/ConversationScreen'
 import { EgeMenuScreen } from './screens/EgeMenuScreen'
 import { SessionScreen, type SessionItem } from './screens/SessionScreen'
@@ -24,6 +33,10 @@ const TABS: TopTab[] = [
 ]
 
 type Route =
+  | { name: 'welcome' }
+  | { name: 'register' }
+  | { name: 'login' }
+  | { name: 'admin' }
   | { name: 'conversation' }
   | { name: 'ege' }
   | { name: 'stats' }
@@ -31,12 +44,30 @@ type Route =
       состояние старой (индекс, результаты) и итоги не сбросились бы. */
   | { name: 'session'; items: SessionItem[]; nonce: number }
 
+function initialRoute(): Route {
+  // /?admin — скрытый вход в админку; сервер всё равно требует ADMIN_KEY.
+  if (new URLSearchParams(window.location.search).has('admin')) return { name: 'admin' }
+  return currentUser() ? { name: 'conversation' } : { name: 'welcome' }
+}
+
 /** Отзыв уходит владельцу продукта; адрес виден и так — это его публичная почта. */
 const FEEDBACK_MAILTO =
   'mailto:andeich_daddy@icloud.com?subject=' + encodeURIComponent('SPEAKO — отзыв')
 
 export default function App() {
-  const [route, setRoute] = useState<Route>({ name: 'conversation' })
+  const [route, setRoute] = useState<Route>(initialRoute)
+
+  // Банк заданий и серверный прогресс подтягиваются при старте и после входа:
+  // сессии начинают вычёркивать варианты, решённые на любом устройстве.
+  useEffect(() => {
+    void syncRemoteTasks()
+    if (currentUser()) void syncServerProgress(identityId())
+  }, [])
+
+  const enterApp = useCallback((_u: AuthUser) => {
+    void syncServerProgress(identityId())
+    setRoute({ name: 'conversation' })
+  }, [])
 
   const activeTab = route.name === 'conversation' ? 'conversation' : 'ege'
 
@@ -85,6 +116,34 @@ export default function App() {
   const onFeedback = useCallback(() => {
     window.location.href = FEEDBACK_MAILTO
   }, [])
+
+  // Экраны входа и админка — отдельные полноэкранные состояния вне каркаса.
+  if (route.name === 'welcome') {
+    return (
+      <WelcomeScreen
+        onStart={() => setRoute({ name: 'register' })}
+        onLogin={() => setRoute({ name: 'login' })}
+      />
+    )
+  }
+  if (route.name === 'register') {
+    return <RegisterScreen onDone={enterApp} />
+  }
+  if (route.name === 'login') {
+    return <LoginScreen onDone={enterApp} onRegister={() => setRoute({ name: 'register' })} />
+  }
+  if (route.name === 'admin') {
+    return (
+      <div className="app" data-theme="blue">
+        <AdminScreen
+          onExit={() => {
+            window.history.replaceState(null, '', window.location.pathname)
+            setRoute(currentUser() ? { name: 'conversation' } : { name: 'welcome' })
+          }}
+        />
+      </div>
+    )
+  }
 
   // Верхние экраны живут в общем каркасе: шапка с тумблером НЕ пересоздаётся
   // при переключении вкладок — бегунок плавно едет, «шва» между Conversation и

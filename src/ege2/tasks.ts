@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Банк заданий устного ЕГЭ и память о прогрессе.
  *
  * По просьбе пользователя каждый номер — это СЕРИЯ: клик по карточке №39 даёт не
@@ -59,7 +59,7 @@ const IMG = {
 
 /* ------------------------------------------------------------------- №39 */
 
-const BRIEF_39 =
+export const BRIEF_39 =
   '№39: Imagine that you are preparing a project with your friend. You have found some ' +
   'interesting material for the presentation and you want to read this text to your friend. ' +
   'You have 1.5 minutes to read the text silently, then be ready to read it out aloud. ' +
@@ -116,7 +116,7 @@ const READ_TEXTS: string[] = [
 
 /* ------------------------------------------------------------------- №40 */
 
-function ad(intro: string, points: string[]): string {
+export function ad(intro: string, points: string[]): string {
   return (
     'Task 2. Study the advertisement.\n' +
     `${intro} In 1.5 minutes you are to ask four direct questions to find out about the ` +
@@ -166,7 +166,7 @@ const DIALOGUE_VARIANTS: Array<{
 
 /* ------------------------------------------------------------------- №41 */
 
-const BRIEF_41 =
+export const BRIEF_41 =
   '№41: You are going to give an interview. You have to answer five questions. Give full ' +
   'answers to the questions (2-3 sentences). Remember that you have 40 seconds to answer ' +
   'each question.'
@@ -211,7 +211,7 @@ const INTERVIEW_SETS: string[][] = [
 
 /* ------------------------------------------------------------------- №42 */
 
-function monologueBrief(topic: string, aspectA: string, aspectB: string): string {
+export function monologueBrief(topic: string, aspectA: string, aspectB: string): string {
   return (
     `Task 4. Imagine that you and your friend are doing a school project “${topic}”. You have ` +
     'found some photos to illustrate it but for technical reasons you cannot send them now. ' +
@@ -295,8 +295,71 @@ export const TASKS: Record<TaskId, TaskDef> = {
 
 export const TASK_ORDER: TaskId[] = [39, 40, 41, 42]
 
+/* ----------------------------------------- Банк заданий с сервера (админка)
+ *
+ * Встроенные варианты — аварийный минимум, который работает без базы. Сверху
+ * подмешиваются варианты из банка на сервере (их добавляет админка): продукт
+ * пополняется без правки кода и деплоя. Если сервер не ответил — молча живём
+ * на встроенных, ученик разницы не видит.
+ */
+
+const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
+
+const remoteVariants: Partial<Record<TaskId, TaskVariant[]>> = {}
+
+export function getVariants(taskId: TaskId): TaskVariant[] {
+  return [...TASKS[taskId].variants, ...(remoteVariants[taskId] ?? [])]
+}
+
+export async function syncRemoteTasks(): Promise<void> {
+  try {
+    const res = await fetch(`${BACKEND}/tasks`)
+    if (!res.ok) return
+    const data = (await res.json()) as {
+      tasks?: Array<{ id: string; exam: string; task_no: number; payload: Record<string, unknown> }>
+    }
+    const next: Partial<Record<TaskId, TaskVariant[]>> = {}
+    for (const t of data.tasks ?? []) {
+      // Пока приложение — про ЕГЭ; ОГЭ-задания лежат в банке до своего раздела.
+      if (t.exam !== 'ege') continue
+      const no = t.task_no as TaskId
+      if (!TASK_ORDER.includes(no)) continue
+      const p = t.payload ?? {}
+      const v: TaskVariant = {
+        // Префикс x отличает серверные варианты от встроенных "39-1".
+        id: `${no}-x${String(t.id).slice(0, 8)}`,
+        brief: typeof p.brief === 'string' && p.brief ? p.brief : TASKS[no].variants[0].brief,
+        readText: typeof p.readText === 'string' ? p.readText : undefined,
+        images: Array.isArray(p.images) ? (p.images as string[]) : undefined,
+        imageCaption: typeof p.imageCaption === 'string' ? p.imageCaption : undefined,
+        steps: Array.isArray(p.steps) ? (p.steps as string[]) : undefined,
+      }
+      ;(next[no] ??= []).push(v)
+    }
+    for (const id of TASK_ORDER) remoteVariants[id] = next[id] ?? []
+  } catch {
+    /* сервер молчит — встроенного банка достаточно */
+  }
+}
+
+/**
+ * Прогресс с сервера: какие варианты ученик сдавал на ЛЮБОМ устройстве.
+ * Сервер знает это из записанных результатов; здесь мы просто доливаем их в
+ * локальные отметки, чтобы выдача сессий вычёркивала уже сделанное.
+ */
+export async function syncServerProgress(identity: string): Promise<void> {
+  try {
+    const res = await fetch(`${BACKEND}/progress`, { headers: { 'X-Device': identity } })
+    if (!res.ok) return
+    const data = (await res.json()) as { solved?: string[] }
+    for (const vid of data.solved ?? []) markVariantSolved(vid)
+  } catch {
+    /* без сети останутся локальные отметки */
+  }
+}
+
 export function variantById(taskId: TaskId, variantId: string): TaskVariant | undefined {
-  return TASKS[taskId].variants.find((v) => v.id === variantId)
+  return getVariants(taskId).find((v) => v.id === variantId)
 }
 
 /* ------------------------------------------- Память о пройденном (localStorage)
@@ -330,8 +393,8 @@ export function markVariantSolved(id: string) {
 
 export function taskProgress(id: TaskId): { done: number; total: number } {
   const solved = new Set(solvedVariantIds())
-  const total = TASKS[id].variants.length
-  return { done: TASKS[id].variants.filter((v) => solved.has(v.id)).length, total }
+  const variants = getVariants(id)
+  return { done: variants.filter((v) => solved.has(v.id)).length, total: variants.length }
 }
 
 /**
@@ -341,14 +404,14 @@ export function taskProgress(id: TaskId): { done: number; total: number } {
  * тупика «всё пройдено, нажимать нечего».
  */
 export function pickSession(id: TaskId, want = 5): TaskVariant[] {
-  const task = TASKS[id]
+  const variants = getVariants(id)
   const solvedOrder = solvedVariantIds()
   const solved = new Set(solvedOrder)
-  const fresh = task.variants.filter((v) => !solved.has(v.id))
+  const fresh = variants.filter((v) => !solved.has(v.id))
   const stale = solvedOrder
-    .map((vid) => task.variants.find((v) => v.id === vid))
+    .map((vid) => variants.find((v) => v.id === vid))
     .filter((v): v is TaskVariant => Boolean(v))
-  return [...fresh, ...stale].slice(0, Math.min(want, task.variants.length))
+  return [...fresh, ...stale].slice(0, Math.min(want, variants.length))
 }
 
 /** DEMO: по одному варианту каждого типа — первый нерешённый (или самый давний). */

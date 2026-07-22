@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Запрос разбора ответа у бэкенда — POST /task_feedback.
  *
  * Ответ приходит потоком с «сердцебиением»: пока сервер распознаёт и считает,
@@ -9,7 +9,7 @@
  * ошибки прокси это HTML, без try человек увидел бы «Unexpected token <».
  */
 import { backendUnreachableMessage, httpErrorMessage } from '../backendError'
-import { deviceId } from './device'
+import { identityId } from '../auth/auth'
 import type { TaskKind } from './tasks'
 
 const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
@@ -64,7 +64,7 @@ export async function requestTaskFeedback(
       body: fd,
       // По X-Device сервер копит профиль ошибок ученика. Не личные данные —
       // случайный uuid браузера, см. device.ts.
-      headers: { 'X-Device': deviceId() },
+      headers: { 'X-Device': identityId() },
     })
   } catch {
     throw new Error(backendUnreachableMessage())

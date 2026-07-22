@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { backendUnreachableMessage, httpErrorMessage } from './backendError'
-import { deviceId } from './ege2/device'
+import { identityId } from './auth/auth'
 
 /**
  * Состояния голосовой сессии.
@@ -128,7 +128,7 @@ export function useConversation(): ConversationApi {
           signal: ac.signal,
           // По X-Device сервер подтягивает профиль ошибок ученика: тьютор
           // мягко ловит повторяющиеся ошибки. Случайный uuid, см. device.ts.
-          headers: { 'X-Device': deviceId() },
+          headers: { 'X-Device': identityId() },
         })
         if (!res.ok || !res.body) {
           let detail: string | null = null

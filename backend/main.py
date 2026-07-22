@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import socket
 import tempfile
 import time
@@ -32,7 +35,7 @@ import aiohttp
 import edge_tts
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -423,16 +426,26 @@ async def _load_memory(device: str | None, kind: str | None) -> dict:
 
 
 def _memory_prompt_block(mem: dict) -> str:
+    """Блок памяти для промпта разбора.
+
+    Память — ДОПОЛНЕНИЕ к разбору, не его основа (требование владельца,
+    23.07.2026). Это обеспечено дважды: конструкцией (основной промпт с
+    критериями всегда идёт первым и целиком, память дописывается в конец, а без
+    неё разбор работает так же) и явными правилами ниже — LLM запрещено
+    импортировать старые ошибки в текущий ответ и менять балл из-за памяти.
+    """
     if not mem:
         return ""
-    block = "\n\nSTUDENT MEMORY (use it to personalise your feedback):\n"
+    block = "\n\nBACKGROUND CONTEXT — secondary to everything above:\n"
     if mem.get("user"):
         block += f"- This student's recent profile: {mem['user']}\n"
     if mem.get("global"):
         block += f"- {mem['global']}\n"
     block += (
-        "If the student repeats one of these mistakes, point it out explicitly; "
-        "if they clearly avoided a previously frequent mistake, praise that in the summary."
+        "Rules for this context: grade ONLY the current answer by the criteria above. "
+        "NEVER list a mistake from memory that is not present in the current answer, "
+        "and never change the score because of memory. Use it only to (a) note when a "
+        "past mistake is repeated NOW, (b) praise clear improvement over the profile."
     )
     return block
 
@@ -455,6 +468,158 @@ def _remember(device: str | None, kind: str, variant: str, feedback: dict,
             print(f"[memory] запись не удалась ({type(e).__name__}: {str(e)[:80]})")
 
     asyncio.create_task(run())
+
+
+# ---------------------------------------------------------------- Аккаунты
+#
+# Регистрация по никнейму и паролю, без почты и восстановления (решение
+# владельца, 23.07.2026): никнейм генерируется на фронте из двух английских
+# слов, ученику прямо говорят записать пару. Хэш — PBKDF2 из стандартной
+# библиотеки: для паролей от аккаунтов без денег и почты этого достаточно,
+# а зависимость не добавляется.
+
+def _hash_pw(password: str) -> str:
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 120_000)
+    return f"{salt}${digest.hex()}"
+
+
+def _check_pw(password: str, stored: str) -> bool:
+    try:
+        salt, expected = stored.split("$", 1)
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 120_000)
+        return hmac.compare_digest(digest.hex(), expected)
+    except ValueError:
+        return False
+
+
+@app.post("/auth/register")
+async def auth_register(body: dict = Body(...)):
+    nickname = str(body.get("nickname") or "").strip()
+    password = str(body.get("password") or "")
+    exam = str(body.get("exam") or "ege")
+    if not (3 <= len(nickname) <= 32):
+        raise HTTPException(status_code=422, detail="Никнейм должен быть от 3 до 32 символов.")
+    if len(password) < 4:
+        raise HTTPException(status_code=422, detail="Пароль — минимум 4 символа.")
+    if exam not in ("ege", "other"):
+        # ОГЭ фронт не пропускает («soon...»), но сервер обязан проверить сам.
+        raise HTTPException(status_code=422, detail="Сейчас доступны ЕГЭ и «другое».")
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна — попробуй чуть позже.")
+    try:
+        acc_id = await asyncio.to_thread(storage.create_account, nickname, _hash_pw(password), exam)
+    except Exception as e:  # noqa: BLE001
+        if storage.is_unique_violation(e):
+            raise HTTPException(status_code=409, detail="Этот никнейм занят — нажми Change.")
+        print(f"[auth] регистрация не удалась: {type(e).__name__}: {str(e)[:120]}")
+        raise HTTPException(status_code=503, detail="Не получилось создать аккаунт — попробуй ещё раз.")
+    return {"id": acc_id, "nickname": nickname, "exam": exam}
+
+
+@app.post("/auth/login")
+async def auth_login(body: dict = Body(...)):
+    nickname = str(body.get("nickname") or "").strip()
+    password = str(body.get("password") or "")
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна — попробуй чуть позже.")
+    row = await asyncio.to_thread(storage.get_account, nickname)
+    if row is None or not _check_pw(password, row[2]):
+        # Не различаем «нет такого» и «пароль не тот» — нечего дарить перебору.
+        raise HTTPException(status_code=401, detail="Неверный никнейм или пароль.")
+    return {"id": row[0], "nickname": row[1], "exam": row[3]}
+
+
+@app.get("/progress")
+async def progress(x_device: str | None = Header(None)):
+    """Какие варианты этот ученик уже сдавал — чтобы выдача сессий вычёркивала
+    пройденное на любом устройстве, а не только в этом браузере."""
+    if not (_storage_ok and x_device):
+        return {"solved": []}
+    try:
+        solved = await asyncio.to_thread(storage.solved_variants, x_device)
+    except Exception:  # noqa: BLE001
+        solved = []
+    return {"solved": solved}
+
+
+# ------------------------------------------------------------ Банк заданий
+
+ADMIN_KEY = os.environ.get("ADMIN_KEY", "").strip()
+
+
+def _require_admin(key: str | None) -> None:
+    if not ADMIN_KEY:
+        raise HTTPException(status_code=503, detail="ADMIN_KEY не задан в окружении сервера.")
+    if not key or not hmac.compare_digest(key, ADMIN_KEY):
+        raise HTTPException(status_code=401, detail="Неверный админ-ключ.")
+
+
+@app.get("/tasks")
+async def tasks_public():
+    """Активные задания из банка. Фронт мешает их со встроенными вариантами;
+    если базы нет — отвечаем пустым списком, встроенный банк никуда не девается."""
+    if not _storage_ok:
+        return {"tasks": []}
+    try:
+        rows = await asyncio.to_thread(storage.tasks_active)
+    except Exception:  # noqa: BLE001
+        return {"tasks": []}
+    for r in rows:
+        try:
+            r["payload"] = json.loads(r["payload"])
+        except json.JSONDecodeError:
+            r["payload"] = {}
+    return {"tasks": rows}
+
+
+@app.post("/admin/tasks")
+async def admin_task_add(body: dict = Body(...), x_admin_key: str | None = Header(None)):
+    _require_admin(x_admin_key)
+    exam = str(body.get("exam") or "ege")
+    kind = str(body.get("kind") or "")
+    try:
+        task_no = int(body.get("task_no") or 0)
+    except (TypeError, ValueError):
+        task_no = 0
+    payload = body.get("payload")
+    if exam not in ("ege", "oge", "other"):
+        raise HTTPException(status_code=422, detail="Раздел: ege, oge или other.")
+    if kind not in ("reading", "dialogue", "interview", "monologue"):
+        raise HTTPException(status_code=422, detail="Тип: reading/dialogue/interview/monologue.")
+    if not (1 <= task_no <= 99):
+        raise HTTPException(status_code=422, detail="Номер задания: от 1 до 99.")
+    if not isinstance(payload, dict) or not payload:
+        raise HTTPException(status_code=422, detail="payload — объект с полями варианта.")
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    tid = await asyncio.to_thread(
+        storage.task_add, exam, task_no, kind, json.dumps(payload, ensure_ascii=False)
+    )
+    return {"id": tid}
+
+
+@app.get("/admin/tasks")
+async def admin_task_list(x_admin_key: str | None = Header(None)):
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        return {"tasks": []}
+    rows = await asyncio.to_thread(storage.tasks_all)
+    for r in rows:
+        try:
+            r["payload"] = json.loads(r["payload"])
+        except json.JSONDecodeError:
+            r["payload"] = {}
+    return {"tasks": rows}
+
+
+@app.post("/admin/tasks/{tid}/toggle")
+async def admin_task_toggle(tid: str, x_admin_key: str | None = Header(None)):
+    _require_admin(x_admin_key)
+    state = await asyncio.to_thread(storage.task_toggle, tid)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Задание не найдено.")
+    return {"active": state}
 
 
 class SttFailed(Exception):
@@ -1151,10 +1316,12 @@ async def talk_stream(audio: UploadFile = File(...), x_device: str | None = Head
         sys_prompt = SYSTEM_PROMPT
         if mem.get("user"):
             sys_prompt += (
-                "\n\nMemory about this student (recurring mistakes from past sessions): "
-                f"{mem['user']}\n"
-                "If one of these mistakes appears again in their speech, gently point it "
-                "out (still at most one short tip); if they clearly improved, praise it."
+                "\n\nBackground context, secondary to everything above — memory about "
+                f"this student: {mem['user']}\n"
+                "Use it ONLY if one of these mistakes appears again in the current "
+                "utterance — then gently point it out (still at most one short tip). "
+                "Never bring up old mistakes on their own, and never let this memory "
+                "change the topic of the conversation."
             )
             print("[memory] профиль ученика подключён к разговору")
 
