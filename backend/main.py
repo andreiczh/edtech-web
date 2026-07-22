@@ -192,6 +192,9 @@ MONOLOGUE_PROMPT = (
 # ответил, и единственным, если работать без интернета.
 STT_PROVIDER = os.environ.get("STT_PROVIDER", "mistral").strip().lower()
 STT_REMOTE_MODEL = os.environ.get("STT_REMOTE_MODEL", "voxtral-mini-latest")
+# Язык распознавания. Пустая строка = пусть модель определяет сама (не советую,
+# см. комментарий в transcribe_remote).
+STT_LANGUAGE = os.environ.get("STT_LANGUAGE", "en")
 
 # Откатываться ли на локальный whisper, если Mistral не ответил.
 #
@@ -372,11 +375,18 @@ def _stt_client() -> httpx.AsyncClient:
 
 
 async def transcribe_remote(data: bytes, filename: str = "speech.webm") -> str:
-    """STT через Mistral (Voxtral). Возвращает распознанный текст."""
+    """STT через Mistral (Voxtral). Возвращает распознанный текст.
+
+    `language` передаём ЯВНО, и это не формальность. Voxtral понимает 13 языков и
+    без подсказки определяет его сам — на чистой речи это незаметно, а на русском
+    акценте модель уплывает и выдаёт правдоподобную чушь вместо сказанного
+    (пользователь поймал это 22.07.2026: «я такого не говорил»). Тренажёр по
+    определению англоязычный, гадать язык ему незачем.
+    """
     r = await _stt_client().post(
         f"{LLM_BASE_URL.rstrip('/')}/audio/transcriptions",
         headers={"Authorization": f"Bearer {_require('LLM_API_KEY')}"},
-        data={"model": STT_REMOTE_MODEL},
+        data={"model": STT_REMOTE_MODEL, "language": STT_LANGUAGE},
         files={"file": (filename, data, "audio/webm")},
     )
     if r.status_code != 200:

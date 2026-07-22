@@ -18,8 +18,12 @@
   --pill: rgba(69, 63, 115, 0.72);
   --pill-strong: rgba(58, 53, 98, 0.9);
 
-  --glass-line: rgba(255, 255, 255, 0.22);
-  --glass-blur: 18px;
+  --glass-line: rgba(255, 255, 255, 0.34);
+  /* Стекло усилено по просьбе: было 18px/150%, стало заметно плотнее.
+     saturate тянем выше blur — именно насыщенность делает стекло «живым»,
+     одно размытие даёт грязно-серое пятно. */
+  --glass-blur: 26px;
+  --glass-sat: 190%;
 
   --shadow-card: 0 10px 24px rgba(28, 24, 56, 0.28);
   --shadow-card-lifted: 0 16px 34px rgba(28, 24, 56, 0.34);
@@ -32,27 +36,42 @@
 
 /* ---------------------------------------------------------------- Стекло */
 
-/* Базовое «жидкое стекло»: размытие + подъём насыщенности + светлая грань
-   сверху. saturate обязателен — без него стекло выглядит серым и мёртвым. */
+/* Базовое «жидкое стекло»: размытие + подъём насыщенности + светлая грань.
+   inset-подсветка сверху и тень снизу внутри — то, что отличает стекло от
+   просто полупрозрачного прямоугольника: у него появляется толщина. */
 .glass {
-  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   border: 1px solid var(--glass-line);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 0 rgba(28, 24, 56, 0.12),
+    var(--shadow-card);
 }
 
-/* Эффект прожатия. Кнопка именно продавливается: уезжает вниз и теряет тень,
-   как физическая клавиша. transition на transform держим коротким (90 мс) —
-   на длинном нажатие ощущается ватным. */
+/* Эффект прожатия и наведения.
+   Пользователь сказал, что ховер «резкий и быстрый, с большой амплитудой» —
+   поэтому наведение теперь длинное и почти незаметное по ходу (240 мс, 1px),
+   а вот САМО НАЖАТИЕ осталось быстрым (110 мс): клавиша должна отзываться
+   мгновенно, иначе кажется, что интерфейс не услышал клик. Разводим их по
+   разным длительностям намеренно. */
 .pressable {
   transition:
-    transform 90ms ease,
-    box-shadow 90ms ease,
-    filter 160ms ease;
+    transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    box-shadow 240ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    background-color 240ms ease,
+    filter 240ms ease;
   will-change: transform;
 }
+.pressable:hover {
+  transform: translateY(-1px);
+}
 .pressable:active {
-  transform: translateY(3px) scale(0.985);
+  transform: translateY(2px) scale(0.99);
   box-shadow: var(--shadow-press);
+  transition:
+    transform 110ms ease,
+    box-shadow 110ms ease;
 }
 .pressable:focus-visible {
   outline: 2px solid var(--orb-2);
@@ -77,6 +96,11 @@
   flex: 1;
   gap: clamp(10px, 1.6vh, 18px);
   padding: var(--pad-screen);
+  /* Экран никогда не выше окна: замер показывал .app 728px при окне 720px, то
+     есть 8 пикселей уезжали под обрез. Виновата была не сетка, а сумма
+     отступов и подписей — вместо подгонки чисел просто запрещаем переполнение,
+     а внутренние блоки уже умеют сжиматься. */
+  overflow: hidden;
 }
 
 .screen__body {
@@ -106,13 +130,46 @@
   color: var(--text);
 }
 
-.topbar2__tabs {
-  display: flex;
-  gap: 6px;
+/* Переключатель вкладок как в присланном референсе: подложка не перекрашивается
+   у каждой кнопки, а ОДНА и ПЛАВНО ЕЗДИТ между ними. Раньше активная вкладка
+   просто мгновенно меняла фон — пользователь справедливо назвал это некрасивым.
+   Позицию бегунка задаёт --i (индекс активной вкладки), ширину --n (сколько их). */
+.segmented {
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   align-items: center;
+  padding: 4px;
+  border-radius: var(--r-pill);
+  background: rgba(40, 36, 74, 0.42);
+  border: 1px solid var(--glass-line);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+/* Сам бегунок. cubic-bezier с лёгким «доездом» — движение читается как физическое,
+   а не как линейный сдвиг. */
+.segmented__thumb {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - 8px) / var(--n));
+  transform: translateX(calc(var(--i) * 100%));
+  border-radius: var(--r-pill);
+  background: linear-gradient(180deg, rgba(126, 118, 205, 0.95), rgba(96, 88, 172, 0.95));
+  box-shadow:
+    0 4px 12px rgba(20, 16, 44, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: transform 320ms cubic-bezier(0.34, 1.2, 0.5, 1);
+  pointer-events: none;
 }
 
 .tab2 {
+  position: relative;
+  z-index: 1;
   appearance: none;
   border: 0;
   background: transparent;
@@ -120,14 +177,24 @@
   font: inherit;
   font-weight: 700;
   font-size: clamp(12px, 1.4vw, 15px);
-  padding: 8px 16px;
+  padding: 8px 18px;
   border-radius: var(--r-pill);
   cursor: pointer;
+  white-space: nowrap;
+  transition: color 260ms ease;
 }
 .tab2--active {
-  background: var(--pill-strong);
   color: var(--text);
-  box-shadow: var(--shadow-press);
+}
+.tab2:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segmented__thumb {
+    transition: none;
+  }
 }
 
 /* ------------------------------------------------------------- Низ экрана */
@@ -140,14 +207,38 @@
   flex-shrink: 0;
 }
 
+/* Подпись должна стоять по центру ЭКРАНА, а не по центру остатка между кнопками:
+   QUIT и Feedback разной ширины, и от этого текст уезжал вбок — пользователь это
+   и заметил. Позиционируем абсолютно от середины полосы, кнопки её не двигают. */
+.bottombar2 {
+  position: relative;
+}
 .bottombar2__caption {
-  flex: 1;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   text-align: center;
   color: var(--text);
   font-size: clamp(13px, 1.6vw, 17px);
-  /* Подпись меняется на каждом шаге разговора, а ширина у слов разная — без
-     фиксированной строки соседние кнопки дёргались бы. */
+  /* Подпись меняется на каждом шаге разговора; фиксируем строку, чтобы полоса
+     не прыгала по высоте. */
   min-height: 1.4em;
+  /* Не даём подписи налезть на кнопки на узком экране */
+  max-width: min(52vw, 420px);
+  pointer-events: none;
+}
+@media (max-width: 480px) {
+  /* На телефоне между двумя кнопками места под подпись нет — уводим её строкой
+     выше, иначе она наезжает на QUIT и Feedback. */
+  .bottombar2 {
+    flex-wrap: wrap;
+    justify-content: space-between;
+    padding-top: 1.9em;
+  }
+  .bottombar2__caption {
+    top: 0;
+    max-width: 100%;
+  }
 }
 
 /* ---------------------------------------------------------------- Пилюли */
@@ -156,8 +247,8 @@
   appearance: none;
   border: 1px solid var(--glass-line);
   background: var(--pill);
-  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   color: var(--text);
   font: inherit;
   font-weight: 700;
@@ -190,7 +281,14 @@
   padding: clamp(14px, 2vw, 22px);
 }
 
-/* Карточка-кнопка (меню ЕГЭ): поднимается на наведении, продавливается на клике */
+/* Карточка-кнопка (меню ЕГЭ): поднимается на наведении, продавливается на клике.
+ *
+ * Переход раньше не был задан вовсе — свойство transition стояло только на
+ * .pressable, а карточки этот класс не носят. Из-за этого ховер срабатывал
+ * мгновенно и «резко», о чём пользователь и сказал. Теперь переход есть, он
+ * длинный и с малой амплитудой: подъём всего на 2px за 260 мс. Нажатие
+ * по-прежнему быстрое (110 мс) — отклик на клик обязан быть мгновенным.
+ */
 .card2--button {
   cursor: pointer;
   text-align: center;
@@ -201,21 +299,37 @@
   gap: 8px;
   appearance: none;
   font: inherit;
+  transition:
+    transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    box-shadow 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    background-color 260ms ease;
+  will-change: transform;
 }
 .card2--button:hover {
   box-shadow: var(--shadow-card-lifted);
   transform: translateY(-2px);
 }
 .card2--button:active {
-  transform: translateY(3px) scale(0.985);
+  transform: translateY(2px) scale(0.99);
   box-shadow: var(--shadow-press);
+  transition:
+    transform 110ms ease,
+    box-shadow 110ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .card2--button,
+  .card2--button:hover,
+  .card2--button:active {
+    transition: none;
+    transform: none;
+  }
 }
 .card2--ghost {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text);
   border: 1px solid var(--glass-line);
-  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
 }
 
 .card2__title {
@@ -232,31 +346,42 @@
   color: var(--text-dim);
 }
 
-/* Сетка меню ЕГЭ: 3 колонки на десктопе, 2 на планшете, 1 на телефоне */
+/* Сетка меню ЕГЭ.
+ *
+ * Требование пользователя: всё на одном экране, никакой прокрутки. Поэтому
+ * высоту карточек НЕ задаём (ни aspect-ratio, ни фиксированной): сетка забирает
+ * ровно ту высоту, что осталась от шапки и подписей, и делит её между рядами.
+ * Раньше стояло aspect-ratio: 1/0.86 — на 900px ширины это давало 331px на
+ * карточку, два ряда 684px, и вместе с шапкой сетка не влезала в 720px.
+ *
+ * Раскладка всегда даёт шесть клеток без переполнения:
+ *   ≥781px  — 3×2
+ *   ≤780px  — 2×3
+ * Варианта в одну колонку нет намеренно: шесть карточек в столбик не помещаются
+ * ни на одном телефоне, а прокрутку тут просили убрать.
+ */
 .cardgrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(12px, 1.8vw, 22px);
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: clamp(10px, 1.6vw, 20px);
   width: min(100%, 900px);
+  align-self: center;
+  flex: 1;
+  min-height: 0;
+  /* Карточки не должны раздуваться на большом мониторе до нелепых размеров */
+  max-height: 560px;
 }
 @media (max-width: 780px) {
   .cardgrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@media (max-width: 460px) {
-  .cardgrid {
-    grid-template-columns: 1fr;
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    max-height: none;
   }
 }
 .cardgrid .card2--button {
-  aspect-ratio: 1 / 0.86;
-}
-@media (max-width: 460px) {
-  .cardgrid .card2--button {
-    aspect-ratio: auto;
-    padding: 22px;
-  }
+  min-height: 0;
+  padding: clamp(8px, 1.4vw, 18px);
 }
 
 /* ------------------------------------------------- Блок ответа ИИ (фото 2) */
@@ -270,7 +395,57 @@
   overscroll-behavior: contain;
   font-size: clamp(15px, 1.8vw, 19px);
   line-height: 1.5;
+  /* Отступ справа — чтобы текст не подлезал под ползунок */
+  padding-right: clamp(16px, 2vw, 26px);
+}
+
+/* --------------------------------------------------- Прокрутка в стиле проекта
+ *
+ * Системный ползунок Chrome на Windows — серо-чёрный прямоугольник, который в
+ * этом макете выглядит инородно (пользователь так и сказал). Переопределяем его:
+ * дорожка невидима, ползунок — мягкая фиолетовая пилюля в палитре проекта,
+ * проявляется на наведении и почти растворяется в покое, чтобы не спорить с
+ * текстом. Firefox не умеет ::-webkit-scrollbar, для него scrollbar-color.
+ */
+.scroll-soft {
   scrollbar-width: thin;
+  scrollbar-color: rgba(122, 114, 190, 0.55) transparent;
+}
+.scroll-soft::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-soft::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-soft::-webkit-scrollbar-thumb {
+  background: rgba(122, 114, 190, 0.38);
+  border-radius: var(--r-pill);
+  /* Прозрачная рамка + background-clip даёт ползунку «воздух» по краям,
+     иначе пилюля прилипает к самому краю блока и снова выглядит системной. */
+  border: 2px solid transparent;
+  background-clip: content-box;
+  transition: background-color 200ms ease;
+}
+.scroll-soft:hover::-webkit-scrollbar-thumb {
+  background: rgba(122, 114, 190, 0.7);
+  background-clip: content-box;
+}
+.scroll-soft::-webkit-scrollbar-thumb:active {
+  background: rgba(140, 131, 214, 0.9);
+  background-clip: content-box;
+}
+/* На тёмном фоне (текст задания, списки) ползунок наоборот светлый */
+.scroll-soft--onDark {
+  scrollbar-color: rgba(255, 255, 255, 0.4) transparent;
+}
+.scroll-soft--onDark::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: content-box;
+}
+.scroll-soft--onDark:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.5);
+  background-clip: content-box;
 }
 .answer p {
   margin: 0 0 0.7em;
@@ -429,6 +604,62 @@
   width: clamp(110px, 18vw, 190px);
   height: auto;
   filter: drop-shadow(0 12px 22px rgba(28, 24, 56, 0.35));
+}
+
+/* ------------------------------------------------- Переходы между экранами
+ *
+ * Пользователь просил, чтобы система ощущалась плавной и бесшовной. Экран не
+ * подменяется мгновенно, а проявляется со сдвигом снизу — этого хватает, чтобы
+ * мозг воспринял переход как движение, а не как перерисовку.
+ *
+ * 4px и 260 мс подобраны намеренно скромно: на переходах между экранами большая
+ * амплитуда быстро надоедает и начинает мешать, особенно когда ходишь по меню
+ * туда-обратно.
+ */
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Обёртка живёт в App и пересоздаётся по ключу маршрута — только поэтому
+   анимация проигрывается заново на каждом переходе, а не один раз при загрузке. */
+.screenwrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.screenwrap > .screen {
+  animation: screen-in 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* Внутри экрана шапка, тело и низ подхватывают ту же волну с небольшой
+   задержкой — так экран «собирается», а не появляется плитой. */
+.screenwrap > .screen > * {
+  animation: screen-in 320ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.screenwrap > .screen > *:nth-child(2) {
+  animation-delay: 45ms;
+}
+.screenwrap > .screen > *:nth-child(3) {
+  animation-delay: 90ms;
+}
+.screenwrap > .screen > *:nth-child(4) {
+  animation-delay: 125ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screenwrap > .screen,
+  .screenwrap > .screen > * {
+    animation: none;
+  }
 }
 
 .rowend {

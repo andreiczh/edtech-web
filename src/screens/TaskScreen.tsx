@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Универсальный экран прохождения задания устной части ЕГЭ (39, 40, 41, 42) —
  * фото 4, 5 и 7 макета. Экран один на все четыре номера намеренно: различия между
  * ними целиком описаны данными в `ege2/tasks.ts` (есть ли текст для чтения,
@@ -289,7 +289,7 @@ export function TaskScreen({
 
       <div className="screen__body">
         {phase === 'intro' && (
-          <div style={scrollArea}>
+          <div className="scroll-soft scroll-soft--onDark" style={scrollArea}>
             <div
               style={{
                 display: 'flex',
@@ -338,7 +338,7 @@ export function TaskScreen({
         )}
 
         {phase === 'run' && (
-          <div style={scrollArea}>
+          <div className="scroll-soft scroll-soft--onDark" style={scrollArea}>
             <RecBadge recording={state === 'recording'} />
             {stepCount > 1 && (
               <span className="statrow__label" style={{ marginTop: 0 }}>
@@ -369,7 +369,7 @@ export function TaskScreen({
         )}
 
         {phase === 'result' && (
-          <div style={scrollArea}>
+          <div className="scroll-soft scroll-soft--onDark" style={scrollArea}>
             <div className="card2" style={{ width: '100%' }}>
               <b>Запись сделана — {fmt(duration)}</b>
               {audioUrl && (

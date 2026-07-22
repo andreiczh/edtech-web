@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Экран статистики (фото 6 макета): вкладки STATS и MISTAKES.
  *
  * ЧЕСТНОСТЬ ДАННЫХ — главное решение этого файла.
@@ -397,7 +397,7 @@ export function StatsScreen({
         </Pill>
       </div>
 
-      <div className="screen__body" style={BODY}>
+      <div className="screen__body scroll-soft scroll-soft--onDark" style={BODY}>
         {tab === 'stats' ? (
           <StatsTab solved={solved} onOpenMistakes={openMistakes} />
         ) : (

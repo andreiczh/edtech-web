@@ -15,11 +15,14 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { CardButton, TopBar, type TopTab } from '../design/ui'
 import { TASKS, TASK_ORDER, firstUnsolved, loadSolved, type TaskId } from '../ege2/tasks'
 
-/* Шесть карточек в одну колонку (360px) выше экрана, а `.app` режет переполнение
-   (overflow:hidden при height:100dvh) — прокрутка обязана быть внутри тела.
-   'safe center' вместо обычного center: при переполнении центрирование срезает
-   верхние карточки, и доскроллить до них уже нечем. */
-const BODY: CSSProperties = { overflowY: 'auto', justifyContent: 'safe center' }
+/* Прокрутки здесь больше нет — по прямой просьбе: «всё должно стоять на одном
+   экране». Раньше карточкам задавалась пропорция (aspect-ratio), из-за неё сетка
+   не влезала в 720px по высоте и появлялся системный ползунок.
+   Теперь высоту диктует сетка (.cardgrid забирает остаток и делит его между
+   рядами, 3×2 на десктопе и 2×3 на узком), поэтому переполнению взяться неоткуда,
+   а overflow:hidden ловит случай, если контент всё же окажется выше — лучше
+   подрезать край, чем показать ползунок, который просили убрать. */
+const BODY: CSSProperties = { overflow: 'hidden', justifyContent: 'center' }
 
 const NOTE: CSSProperties = {
   width: 'min(100%, 900px)',

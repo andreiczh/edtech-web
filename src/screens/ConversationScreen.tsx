@@ -14,7 +14,7 @@
  */
 import { MicButton } from '../components/MicButton'
 import { VoiceOrbs } from '../components/VoiceOrbs'
-import { BottomBar, Pill, TopBar, type TopTab } from '../design/ui'
+import { BottomBar, TopBar, type TopTab } from '../design/ui'
 import { useConversation, type ConversationState } from '../useConversation'
 
 const CAPTIONS: Record<ConversationState, string> = {
@@ -45,15 +45,15 @@ export function ConversationScreen({
     <div className="screen">
       <TopBar tabs={tabs} active={activeTab} onTab={onTab} onProfile={onProfile} />
 
-      <div className="rowend" style={{ justifyContent: 'center' }}>
-        <Pill title="Ограничить время разговора — появится позже">Таймер</Pill>
-      </div>
+      {/* Пилюля «Таймер» с макета убрана по просьбе: в разговоре она ничего не
+          ограничивает и только занимает место над кругами. Вернётся, когда
+          появится сам механизм ограничения времени сессии. */}
 
       <div className="screen__body">
         <VoiceOrbs state={state} />
 
         {(reply || error) && (
-          <div className="card2 answer glass" aria-live="polite">
+          <div className="card2 answer scroll-soft" aria-live="polite">
             {error ? (
               <p className="dialog__err">{error}</p>
             ) : (

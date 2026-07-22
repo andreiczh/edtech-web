@@ -67,6 +67,53 @@ export function CardButton({
 
 export type TopTab = { id: string; label: string; disabled?: boolean }
 
+/**
+ * Переключатель вкладок с ПЛАВНО ЕЗДЯЩИМ бегунком (как в присланном референсе
+ * с тумблером день/ночь). Раньше активная вкладка просто мгновенно меняла фон —
+ * пользователь назвал это некрасивым, и был прав: переключение читалось как
+ * подмена, а не как движение.
+ *
+ * Подложка одна на весь переключатель, её позиция считается из индекса активной
+ * вкладки. Поэтому вкладок может быть сколько угодно, ничего не пересчитывая.
+ */
+export function SegmentedTabs({
+  tabs,
+  active,
+  onTab,
+}: {
+  tabs: TopTab[]
+  active?: string
+  onTab?: (id: string) => void
+}) {
+  const index = Math.max(
+    0,
+    tabs.findIndex((t) => t.id === active),
+  )
+  return (
+    <nav
+      className="segmented"
+      role="tablist"
+      style={{ '--i': index, '--n': tabs.length } as CSSProperties}
+    >
+      <span className="segmented__thumb" aria-hidden="true" />
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={active === t.id}
+          disabled={t.disabled}
+          className={`tab2${active === t.id ? ' tab2--active' : ''}`}
+          onClick={() => onTab?.(t.id)}
+          title={t.disabled ? 'Скоро' : undefined}
+        >
+          {t.label}
+        </button>
+      ))}
+    </nav>
+  )
+}
+
 export function TopBar({
   tabs,
   active,
@@ -82,22 +129,9 @@ export function TopBar({
     <header className="topbar2">
       <span className="topbar2__brand">SPEAKO</span>
 
-      <nav className="topbar2__tabs" role="tablist">
-        {tabs?.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={active === t.id}
-            disabled={t.disabled}
-            className={`tab2 pressable${active === t.id ? ' tab2--active' : ''}`}
-            onClick={() => onTab?.(t.id)}
-            title={t.disabled ? 'Скоро' : undefined}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      {tabs && tabs.length > 0 && (
+        <SegmentedTabs tabs={tabs} active={active} onTab={onTab} />
+      )}
 
       <Pill onClick={onProfile}>Profile</Pill>
     </header>

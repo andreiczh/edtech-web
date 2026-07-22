@@ -58,10 +58,22 @@ export default function App() {
     })
   }, [])
 
-  switch (route.name) {
-    case 'conversation':
-      return (
-        <div className="app" data-theme="blue">
+  // Ключ маршрута нужен обёртке .screenwrap: смена ключа пересоздаёт узел, и
+  // анимация появления проигрывается заново. Без этого переход между экранами
+  // был бы мгновенной подменой — пользователь просил, чтобы система ощущалась
+  // плавной. Для DEMO в ключ входит номер задания, иначе переход между
+  // заданиями внутри демо остался бы без анимации.
+  const routeKey =
+    route.name === 'task'
+      ? `task-${route.id}`
+      : route.name === 'demo'
+        ? `demo-${route.index}`
+        : route.name
+
+  return (
+    <div className="app" data-theme="blue">
+      <div className="screenwrap" key={routeKey}>
+        {route.name === 'conversation' && (
           <ConversationScreen
             tabs={TABS}
             activeTab={activeTab}
@@ -70,12 +82,9 @@ export default function App() {
             onQuit={() => setRoute({ name: 'ege' })}
             onFeedback={onProfile}
           />
-        </div>
-      )
+        )}
 
-    case 'ege':
-      return (
-        <div className="app" data-theme="blue">
+        {route.name === 'ege' && (
           <EgeMenuScreen
             tabs={TABS}
             activeTab={activeTab}
@@ -85,12 +94,9 @@ export default function App() {
             onDemo={() => setRoute({ name: 'demo', index: 0 })}
             onStats={() => setRoute({ name: 'stats' })}
           />
-        </div>
-      )
+        )}
 
-    case 'stats':
-      return (
-        <div className="app" data-theme="blue">
+        {route.name === 'stats' && (
           <StatsScreen
             tabs={TABS}
             activeTab={activeTab}
@@ -98,29 +104,21 @@ export default function App() {
             onProfile={onProfile}
             onBack={backToEge}
           />
-        </div>
-      )
+        )}
 
-    case 'task':
-      return (
-        <div className="app" data-theme="blue">
+        {route.name === 'task' && (
           <TaskScreen taskId={route.id} onExit={backToEge} onFinished={onTaskFinished} />
-        </div>
-      )
+        )}
 
-    case 'demo':
-      return (
-        <div className="app" data-theme="blue">
+        {route.name === 'demo' && (
           <TaskScreen
-            // key заставляет React пересоздать экран между заданиями демо:
-            // без него остались бы таймеры и запись от предыдущего номера.
-            key={TASK_ORDER[route.index]}
             taskId={TASK_ORDER[route.index]}
             onExit={backToEge}
             onFinished={onTaskFinished}
             demoProgress={{ index: route.index + 1, total: TASK_ORDER.length }}
           />
-        </div>
-      )
-  }
+        )}
+      </div>
+    </div>
+  )
 }
