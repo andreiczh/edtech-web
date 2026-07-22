@@ -1,0 +1,27 @@
+# Что НЕ должно попасть в образ.
+# Первая строка тут — самая важная: .env с ключом Mistral. На HF ключ приходит
+# из секретов Space (Settings -> Variables and secrets), а не из файла.
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+.gitattributes
+.claude
+
+node_modules
+dist
+*.tsbuildinfo
+
+backend/.venv
+**/__pycache__
+*.pyc
+
+# Документация и деплой-конфиги фронта: в рантайме бесполезны, только раздувают
+# контекст сборки.
+docs
+*.md
+!README.md
+netlify.toml
+vercel.json
