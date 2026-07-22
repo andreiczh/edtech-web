@@ -10,7 +10,7 @@
  * сервере, отняла бы задание из-за очищенного кэша.
  */
 import { useEffect, useState, type CSSProperties } from 'react'
-import { CardButton, TopBar, type TopTab } from '../design/ui'
+import { CardButton } from '../design/ui'
 import { TASKS, TASK_ORDER, taskProgress, type TaskId } from '../ege2/tasks'
 
 /* Прокрутки здесь нет — по прямой просьбе: «всё должно стоять на одном экране».
@@ -76,18 +76,10 @@ function TaskCard({
 }
 
 export function EgeMenuScreen({
-  tabs,
-  activeTab,
-  onTab,
-  onProfile,
   onOpenTask,
   onDemo,
   onStats,
 }: {
-  tabs: TopTab[]
-  activeTab: string
-  onTab: (id: string) => void
-  onProfile: () => void
   onOpenTask: (id: TaskId) => void
   onDemo: () => void
   onStats: () => void
@@ -105,10 +97,9 @@ export function EgeMenuScreen({
 
   const next = progress.find((p) => p.done < p.total)?.id
 
+  /* Шапку рисует App — общий каркас верхних экранов, см. комментарий там. */
   return (
-    <div className="screen">
-      <TopBar tabs={tabs} active={activeTab} onTab={onTab} onProfile={onProfile} />
-
+    <div className="screenbody">
       <div className="screen__body" style={BODY}>
         <div className="cardgrid">
           {progress.map((p) => (

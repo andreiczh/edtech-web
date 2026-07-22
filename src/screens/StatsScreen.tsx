@@ -11,7 +11,7 @@
  */
 import { useEffect, useState, type CSSProperties } from 'react'
 
-import { Pill, TopBar, type TopTab } from '../design/ui'
+import { Pill } from '../design/ui'
 import {
   TASKS,
   TASK_ORDER,
@@ -323,19 +323,7 @@ function MistakesTab({
 
 type Tab = 'stats' | 'mistakes'
 
-export function StatsScreen({
-  tabs,
-  activeTab,
-  onTab,
-  onProfile,
-  onBack,
-}: {
-  tabs: TopTab[]
-  activeTab: string
-  onTab: (id: string) => void
-  onProfile: () => void
-  onBack: () => void
-}) {
+export function StatsScreen({ onBack }: { onBack: () => void }) {
   const [tab, setTab] = useState<Tab>('stats')
   const [selected, setSelected] = useState<TaskId>(42)
 
@@ -359,10 +347,9 @@ export function StatsScreen({
     setTab('mistakes')
   }
 
+  /* Шапку рисует App — общий каркас верхних экранов, см. комментарий там. */
   return (
-    <div className="screen">
-      <TopBar tabs={tabs} active={activeTab} onTab={onTab} onProfile={onProfile} />
-
+    <div className="screenbody">
       <div style={TABS_ROW}>
         <Pill onClick={() => setTab('stats')} quiet={tab !== 'stats'} active={tab === 'stats'}>
           STATS

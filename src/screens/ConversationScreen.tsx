@@ -14,7 +14,7 @@
  */
 import { MicButton } from '../components/MicButton'
 import { VoiceOrbs } from '../components/VoiceOrbs'
-import { BottomBar, TopBar, type TopTab } from '../design/ui'
+import { BottomBar } from '../design/ui'
 import { useConversation, type ConversationState } from '../useConversation'
 
 const CAPTIONS: Record<ConversationState, string> = {
@@ -24,29 +24,13 @@ const CAPTIONS: Record<ConversationState, string> = {
   speaking: 'Отвечаю…',
 }
 
-export function ConversationScreen({
-  tabs,
-  activeTab,
-  onTab,
-  onProfile,
-  onFeedback,
-}: {
-  tabs: TopTab[]
-  activeTab: string
-  onTab: (id: string) => void
-  onProfile: () => void
-  onFeedback: () => void
-}) {
+export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
   const { state, toggle, transcript, reply, error, latency } = useConversation()
 
+  /* Шапку с тумблером рисует App: она общая для верхних экранов и не
+     пересоздаётся при переключении вкладок — в этом и есть «бесшовность». */
   return (
-    <div className="screen">
-      <TopBar tabs={tabs} active={activeTab} onTab={onTab} onProfile={onProfile} />
-
-      {/* Пилюля «Таймер» с макета убрана по просьбе: в разговоре она ничего не
-          ограничивает и только занимает место над кругами. Вернётся, когда
-          появится сам механизм ограничения времени сессии. */}
-
+    <div className="screenbody">
       <div className="screen__body">
         <VoiceOrbs state={state} />
 

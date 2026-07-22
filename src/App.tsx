@@ -11,7 +11,7 @@
  */
 import { useCallback, useState } from 'react'
 
-import type { TopTab } from './design/ui'
+import { TopBar, type TopTab } from './design/ui'
 import { pickDemoItems, pickSession, type TaskId } from './ege2/tasks'
 import { ConversationScreen } from './screens/ConversationScreen'
 import { EgeMenuScreen } from './screens/EgeMenuScreen'
@@ -19,7 +19,7 @@ import { SessionScreen, type SessionItem } from './screens/SessionScreen'
 import { StatsScreen } from './screens/StatsScreen'
 
 const TABS: TopTab[] = [
-  { id: 'conversation', label: 'conversation' },
+  { id: 'conversation', label: 'Conversation' },
   { id: 'ege', label: 'ЕГЭ' },
 ]
 
@@ -86,48 +86,38 @@ export default function App() {
     window.location.href = FEEDBACK_MAILTO
   }, [])
 
-  // Ключ маршрута пересоздаёт обёртку — так анимация появления проигрывается на
-  // каждом переходе, а не один раз при загрузке приложения.
-  const routeKey = route.name === 'session' ? `session-${route.nonce}` : route.name
+  // Верхние экраны живут в общем каркасе: шапка с тумблером НЕ пересоздаётся
+  // при переключении вкладок — бегунок плавно едет, «шва» между Conversation и
+  // ЕГЭ нет. Кроссфейдом (ключом .swap) меняется только тело. Сессия задания —
+  // отдельный полноэкранный поток со своей шапкой и полной анимацией входа.
+  if (route.name === 'session') {
+    return (
+      <div className="app" data-theme="blue">
+        <div className="screenwrap" key={`session-${route.nonce}`}>
+          <SessionScreen items={route.items} onExit={backToEge} onRestart={restartSession} />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="app" data-theme="blue">
-      <div className="screenwrap" key={routeKey}>
-        {route.name === 'conversation' && (
-          <ConversationScreen
-            tabs={TABS}
-            activeTab={activeTab}
-            onTab={onTab}
-            onProfile={onProfile}
-            onFeedback={onFeedback}
-          />
-        )}
+      <div className="screen">
+        <TopBar tabs={TABS} active={activeTab} onTab={onTab} onProfile={onProfile} />
 
-        {route.name === 'ege' && (
-          <EgeMenuScreen
-            tabs={TABS}
-            activeTab={activeTab}
-            onTab={onTab}
-            onProfile={onProfile}
-            onOpenTask={startSession}
-            onDemo={startDemo}
-            onStats={() => setRoute({ name: 'stats' })}
-          />
-        )}
+        <div className="swap" key={route.name}>
+          {route.name === 'conversation' && <ConversationScreen onFeedback={onFeedback} />}
 
-        {route.name === 'stats' && (
-          <StatsScreen
-            tabs={TABS}
-            activeTab={activeTab}
-            onTab={onTab}
-            onProfile={onProfile}
-            onBack={backToEge}
-          />
-        )}
+          {route.name === 'ege' && (
+            <EgeMenuScreen
+              onOpenTask={startSession}
+              onDemo={startDemo}
+              onStats={() => setRoute({ name: 'stats' })}
+            />
+          )}
 
-        {route.name === 'session' && (
-          <SessionScreen items={route.items} onExit={backToEge} onRestart={restartSession} />
-        )}
+          {route.name === 'stats' && <StatsScreen onBack={backToEge} />}
+        </div>
       </div>
     </div>
   )

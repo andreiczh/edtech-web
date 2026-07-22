@@ -147,6 +147,20 @@
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  /* Перетаскивание: без touch-action браузер на телефоне утащит страницу
+     вместо бегунка, а user-select не даст выделять подписи вкладок. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+.segmented--drag {
+  cursor: grabbing;
+}
+/* Под пальцем бегунок должен липнуть, а не плыть — на время перетаскивания
+   пружинная кривая заменяется коротким линейным догоном. */
+.segmented--drag .segmented__thumb {
+  transition: transform 90ms ease-out;
 }
 
 /* Сам бегунок. cubic-bezier с лёгким «доездом» — движение читается как физическое,
@@ -637,6 +651,46 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
+}
+
+/* --------------------------------------- Бесшовная смена вкладок (без «шва»)
+ *
+ * Верхние экраны (Conversation / ЕГЭ / статистика) живут в ОДНОМ каркасе:
+ * шапка с брендом и тумблером не пересоздаётся при переключении, поэтому
+ * бегунок плавно едет, а страница не «перелистывается». Меняется только тело —
+ * мягким кроссфейдом без сдвига: движение здесь читалось бы как смена страницы,
+ * ровно то, от чего просили уйти.
+ */
+.swap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: swap-in 300ms ease both;
+}
+@keyframes swap-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Тело экрана без собственной шапки — раскладка как у .screen, но без padding:
+   отступы и шапку даёт общий каркас. */
+.screenbody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 1.6vh, 18px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swap {
+    animation: none;
+  }
 }
 
 .screenwrap > .screen {

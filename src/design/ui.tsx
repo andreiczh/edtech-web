@@ -3,7 +3,7 @@
  * прожатие кнопки выглядели одинаково везде, их описывают здесь, а не в каждом
  * экране заново.
  */
-import { useState, type CSSProperties, type ReactNode } from 'react'
+import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 /* ------------------------------------------------------------------ Кнопки */
 
@@ -85,15 +85,58 @@ export function SegmentedTabs({
   active?: string
   onTab?: (id: string) => void
 }) {
-  const index = Math.max(
+  const navRef = useRef<HTMLElement>(null)
+  const draggingRef = useRef(false)
+  /* Во время перетаскивания бегунок следует за пальцем/курсором, а не за
+     активной вкладкой — dragIdx временно перебивает индекс из пропсов. */
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+
+  const activeIndex = Math.max(
     0,
     tabs.findIndex((t) => t.id === active),
   )
+
+  const idxFromX = (clientX: number) => {
+    const el = navRef.current
+    if (!el) return activeIndex
+    const r = el.getBoundingClientRect()
+    const rel = (clientX - r.left) / Math.max(1, r.width)
+    return Math.min(tabs.length - 1, Math.max(0, Math.floor(rel * tabs.length)))
+  }
+
+  const commit = (idx: number) => {
+    const t = tabs[idx]
+    if (t && !t.disabled && t.id !== active) onTab?.(t.id)
+  }
+
   return (
     <nav
-      className="segmented"
+      ref={navRef}
+      className={`segmented${dragIdx !== null ? ' segmented--drag' : ''}`}
       role="tablist"
-      style={{ '--i': index, '--n': tabs.length } as CSSProperties}
+      style={{ '--i': dragIdx ?? activeIndex, '--n': tabs.length } as CSSProperties}
+      /* Тумблер можно не только кликать, но и ЗАЖАТЬ И ПОТЯНУТЬ, как физический
+         переключатель (просьба пользователя, референс — тумблер день/ночь).
+         Pointer capture держит перетаскивание, даже когда курсор ушёл с полосы.
+         Клик продолжает работать: он превращается в down+up в одной точке. */
+      onPointerDown={(e) => {
+        draggingRef.current = true
+        navRef.current?.setPointerCapture(e.pointerId)
+        setDragIdx(idxFromX(e.clientX))
+      }}
+      onPointerMove={(e) => {
+        if (draggingRef.current) setDragIdx(idxFromX(e.clientX))
+      }}
+      onPointerUp={(e) => {
+        if (!draggingRef.current) return
+        draggingRef.current = false
+        setDragIdx(null)
+        commit(idxFromX(e.clientX))
+      }}
+      onPointerCancel={() => {
+        draggingRef.current = false
+        setDragIdx(null)
+      }}
     >
       <span className="segmented__thumb" aria-hidden="true" />
       {tabs.map((t) => (
@@ -226,27 +269,60 @@ function ExitIcon() {
   )
 }
 
-/* Настоящего арта маскота в репозитории нет — есть только скриншоты макета,
-   а картинку из чата на диск не вытащить. Поэтому компонент сначала пробует
-   файл `public/mascot.png` (vite копирует public/ в корень сборки): положи туда
-   PNG маскота — он подхватится на всех экранах без правок кода. Пока файла нет,
-   рисуется векторная замена, максимально близкая к референсу: лежащий пухлый
-   фиолетовый зверёк с крылышками-ушками, подмигивает.
-   Флаг на уровне модуля — чтобы не дёргать 404 на каждом монтировании. */
-let mascotFileMissing = false
+/* Маскоты. Их два:
+ *   /mascot.png     — ОСНОВНОЙ (фиолетовый лежащий), лицо бренда;
+ *   /mascot-alt.png — экспериментальный (синий круглый).
+ * Файлы кладутся в public/ — vite копирует их в корень сборки.
+ *
+ * Правило пользователя: «одна линия — один маскот», два зверя не должны
+ * встретиться в одной сессии. Поэтому выбор делается ОДИН раз на вкладку
+ * (sessionStorage) и дальше не меняется: основной показывается почти всем,
+ * экспериментальный — небольшой доле сессий. Принудительно посмотреть вариант:
+ * открыть сайт с ?mascot=alt или ?mascot=main.
+ *
+ * Пока файлов нет, рисуется векторная замена. Флаги 404 — на уровне модуля,
+ * чтобы не дёргать сеть на каждом монтировании. */
+type MascotVariant = 'main' | 'alt'
+
+const ALT_SHARE = 0.15 // доля сессий с экспериментальным маскотом
+
+function pickMascotVariant(): MascotVariant {
+  try {
+    const forced = new URLSearchParams(window.location.search).get('mascot')
+    if (forced === 'alt' || forced === 'main') {
+      sessionStorage.setItem('pingo.mascot', forced)
+      return forced
+    }
+    const saved = sessionStorage.getItem('pingo.mascot')
+    if (saved === 'alt' || saved === 'main') return saved
+    const v: MascotVariant = Math.random() < ALT_SHARE ? 'alt' : 'main'
+    sessionStorage.setItem('pingo.mascot', v)
+    return v
+  } catch {
+    return 'main'
+  }
+}
+
+const MASCOT_VARIANT = pickMascotVariant()
+/* Цепочка файлов: у alt-сессии при отсутствии её файла — откат на основной,
+   и только потом на вектор. Основной никогда не откатывается в alt. */
+const MASCOT_CHAIN =
+  MASCOT_VARIANT === 'alt' ? ['/mascot-alt.png', '/mascot.png'] : ['/mascot.png']
+const mascotFileMissing: Record<string, boolean> = {}
 
 export function Mascot({ style }: { style?: CSSProperties }) {
-  const [missing, setMissing] = useState(mascotFileMissing)
-  if (!missing) {
+  const [, bump] = useState(0)
+  const src = MASCOT_CHAIN.find((f) => !mascotFileMissing[f])
+  if (src) {
     return (
       <img
         className="mascot"
-        src="/mascot.png"
+        src={src}
         alt=""
         style={style}
         onError={() => {
-          mascotFileMissing = true
-          setMissing(true)
+          mascotFileMissing[src] = true
+          bump((n) => n + 1)
         }}
       />
     )
