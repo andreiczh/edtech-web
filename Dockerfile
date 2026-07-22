@@ -54,7 +54,16 @@ COPY --chown=user --from=front /build/dist dist/
 # main.py ищет фронт как backend/../dist — раскладка выше это повторяет.
 WORKDIR $HOME/app/backend
 
-# 7860 — порт, который HF Spaces ждёт по умолчанию (см. app_port в README.md).
+# Порт берём из переменной PORT, а если её нет — 7860.
+#
+# Так один и тот же образ разворачивается где угодно, а не только на Hugging Face:
+# HF ждёт фиксированный порт (7860, см. app_port в README.md) и переменную не
+# передаёт, а Render, Koyeb, Cloud Run, Railway и почти все остальные наоборот —
+# назначают порт сами через PORT и требуют слушать именно его. Зашитый 7860 сделал
+# бы образ пригодным ровно для одной площадки.
+#
+# Форма CMD — shell (не exec), иначе ${PORT} не раскроется, uvicorn получит
+# строку "${PORT}" и упадёт на старте.
 # Без --reload: он роняет запросы в полёте (DECISIONS §5, п.4).
 EXPOSE 7860
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD python -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-7860}
