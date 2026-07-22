@@ -75,8 +75,13 @@ export function MonologuePractice({ onExit }: { onExit?: () => void }) {
       const fd = new FormData()
       fd.append('audio', blob, 'monologue.webm')
       const res = await fetch(`${BACKEND}/monologue`, { method: 'POST', body: fd })
+      // Ответ приходит потоком с «сердцебиением»: бэкенд шлёт переводы строк,
+      // пока считает, иначе туннели рвут молчащий запрос (serveo — на 5.1с).
+      // Ведущие переводы строк валидны для JSON, res.json() их проглатывает.
+      // Но статус уходит ДО результата, поэтому ошибка приезжает полем detail
+      // с кодом 200 — проверяем и код, и поле.
       const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`)
+      if (!res.ok || data.detail) throw new Error(data.detail || `HTTP ${res.status}`)
       setResult(data as MonoResult)
       setPhase('done')
     } catch (e) {

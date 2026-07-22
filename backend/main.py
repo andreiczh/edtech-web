@@ -42,7 +42,9 @@ load_dotenv()
 # Пути, отдающие ПОТОК: их сжимать нельзя, см. GZipExceptStreams ниже.
 # Новый потоковый эндпоинт — дописать его путь сюда, иначе стриминг у него
 # молча выключится (ответ придёт целиком в самом конце).
-_STREAM_PATHS = {"/talk_stream"}
+# /monologue тоже здесь: он шлёт «сердцебиение» переводами строк, а zlib копил бы
+# их в буфере — и смысл сердцебиения пропал бы целиком.
+_STREAM_PATHS = {"/talk_stream", "/monologue"}
 
 
 class GZipExceptStreams:
@@ -352,14 +354,55 @@ async def talk(audio: UploadFile = File(...)):
     }
 
 
+async def _json_with_heartbeat(work):
+    """Отдаём JSON потоком: пока считаем — шлём переводы строк.
+
+    Зачем. Бесплатные туннели и часть прокси рвут запрос, который не отдал ни
+    байта за несколько секунд. Замерено 22.07.2026 на serveo: обрыв ровно на
+    5.1с, а `/monologue` честно считает 6-15с → через туннель он не работал
+    никогда, отдавая 502. `/talk_stream` выживал только потому, что первый чанк
+    уходит через ~3с. Здесь мы делаем то же самое искусственно.
+
+    Ведущие переводы строк — валидный JSON, поэтому `res.json()` на фронте
+    парсит ответ как раньше, менять разбор не нужно.
+
+    Плата: статус ответа уходит ДО того, как результат посчитан, поэтому ошибка
+    больше не может приехать кодом 502 — она приезжает полем `detail` в теле с
+    кодом 200. Фронт проверяет и код, и это поле.
+    """
+    task = asyncio.create_task(work)
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=2.0)
+        if done:
+            break
+        yield "\n"
+    try:
+        yield json.dumps(task.result(), ensure_ascii=False)
+    except HTTPException as e:
+        yield json.dumps({"detail": e.detail}, ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001
+        yield json.dumps({"detail": f"Внутренняя ошибка: {e}"}, ensure_ascii=False)
+
+
 @app.post("/monologue")
 async def monologue(audio: UploadFile = File(...)):
     """Разбор монолога (ЕГЭ Задание 4): полное аудио → batch STT → ОДИН
     структурный проход LLM → JSON-фидбэк (3 критерия + ошибки). Без TTS —
-    разбор текстовый, для экрана результата. Фаза 1 (baseline, без стриминга).
+    разбор текстовый, для экрана результата.
+
+    Отдаётся потоком с «сердцебиением» — см. `_json_with_heartbeat`. Тело ответа
+    и его разбор на фронте от этого не меняются.
     """
-    t0 = time.time()
     data = await audio.read()
+    return StreamingResponse(
+        _json_with_heartbeat(_monologue_work(data)),
+        media_type="application/json",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+async def _monologue_work(data: bytes) -> dict:
+    t0 = time.time()
 
     # 1) STT — весь монолог разом (Фаза 2 сделает это стримингом во время речи).
     try:
