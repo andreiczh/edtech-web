@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { backendUnreachableMessage } from '../backendError'
+
 /**
  * Практика монолога (ЕГЭ Задание 4) с реальным ИИ-разбором.
  * Записал ответ → POST /monologue (STT→LLM) → структурный фидбэк по 3 критериям
- * ФИПИ + карточки ошибок. Фаза 1: batch, без стриминга (замер показал, что STT
- * длинного ответа быстрый — стриминг не нужен). Самодостаточный экран, не трогает
- * симуляцию экзаменационной станции.
+ * ФИПИ + карточки ошибок. Фаза 1: batch, без стриминга.
+ *
+ * Здесь раньше стояло «замер показал, что STT длинного ответа быстрый — стриминг
+ * не нужен». Замер был неверный: 82 с речи это 16.8-18.1 с распознавания, а не 7 с
+ * на всё (docs/DECISIONS.md §3, опровержение от 22.07.2026). Распознавание кусками
+ * во время записи снимает здесь 11-13 с и остаётся самой крупной незакрытой
+ * оптимизацией.
  */
 
 const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
@@ -87,7 +93,7 @@ export function MonologuePractice({ onExit }: { onExit?: () => void }) {
     } catch (e) {
       const msg =
         e instanceof TypeError
-          ? 'Не достучались до бэкенда. Он запущен на :8000?'
+          ? backendUnreachableMessage()
           : e instanceof Error
             ? e.message
             : String(e)

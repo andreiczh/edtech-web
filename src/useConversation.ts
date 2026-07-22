@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { backendUnreachableMessage } from './backendError'
+
 /**
  * Состояния голосовой сессии.
  *  - idle       — покой, ждём нажатия
@@ -112,7 +114,11 @@ export function useConversation(): ConversationApi {
       const ac = new AbortController()
       abortRef.current = ac
 
-      try {
+      // Получили ли мы хоть что-то из потока. Решает, можно ли повторить запрос:
+      // после первого чанка повтор проиграл бы часть ответа дважды.
+      let gotData = false
+
+      const runOnce = async () => {
         const fd = new FormData()
         fd.append('audio', blob, 'speech.webm')
         const res = await fetch(`${BACKEND}/talk_stream`, {
@@ -158,6 +164,7 @@ export function useConversation(): ConversationApi {
               continue
             }
             if (msg.error) throw new Error(msg.error)
+            gotData = true
             if (msg.user != null) setTranscript(msg.user)
             if (msg.text) {
               setReply((r) => (r ? `${r} ${msg.text}` : (msg.text as string)))
@@ -174,11 +181,26 @@ export function useConversation(): ConversationApi {
         if (!playingRef.current && queueRef.current.length === 0) {
           setState((s) => (s === 'processing' || s === 'speaking' ? 'idle' : s))
         }
+      }
+
+      try {
+        try {
+          await runOnce()
+        } catch (e) {
+          // Одна автоматическая повторная попытка на сетевой сбой. Замерено
+          // 22.07.2026: соединение через бесплатный туннель рвётся на загрузке
+          // аудио примерно раз в несколько попыток, а запись при этом уже
+          // сделана — терять её и заставлять человека говорить заново незачем.
+          // Повторяем ТОЛЬКО если из потока ещё ничего не пришло, иначе часть
+          // ответа проиграется дважды.
+          if (!(e instanceof TypeError) || gotData || ac.signal.aborted) throw e
+          await runOnce()
+        }
       } catch (e) {
         if (ac.signal.aborted) return // barge-in: состояние уже переведено в listening
         const msg =
           e instanceof TypeError
-            ? 'Не достучались до бэкенда. Он запущен на :8000?'
+            ? backendUnreachableMessage()
             : e instanceof Error
               ? e.message
               : String(e)
