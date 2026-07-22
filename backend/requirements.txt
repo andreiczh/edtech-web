@@ -3,6 +3,11 @@ uvicorn[standard]
 python-multipart
 openai
 faster-whisper
+# aiohttp и httpx приезжают как зависимости edge-tts и openai, но main.py импортирует
+# их НАПРЯМУЮ — чтобы привязать исходящие сокеты к физическому интерфейсу
+# (OUTBOUND_LOCAL_IP). Раз импортируем сами, то и объявляем сами.
+aiohttp
+httpx
 # Верхняя граница осознанная: edge-tts зависит от недокументированного протокола
 # Microsoft и ломался на мажорных обновлениях (403 / NoAudioReceived). Точную
 # рабочую версию запинить, когда узнаем её с Windows-ноута.

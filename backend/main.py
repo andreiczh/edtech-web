@@ -20,6 +20,7 @@ import base64
 import json
 import os
 import re
+import socket
 import tempfile
 import time
 
@@ -27,7 +28,9 @@ import time
 # про symlinks при каждой загрузке модели — глушим, чтобы не путать с ошибкой.
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
+import aiohttp
 import edge_tts
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -193,6 +196,54 @@ TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AriaNeural")
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.mistral.ai/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "mistral-small-latest")
 
+# Отправлять НАШ трафик мимо VPN, привязав сокеты к физическому интерфейсу.
+#
+# Зачем. На машине постоянно включён VPN-клиент (sing-box/xray, TUN happ-tun), и
+# маршрут по умолчанию ведёт через него. Но Mistral и edge-tts выбирались как раз
+# за то, что работают из РФ БЕЗ VPN, — туннель им не нужен, а крюк они оплачивают.
+#
+# Замерено 22.07.2026, чередующийся A/B (сеть дрейфует по минутам, поэтому только
+# чередование, не два блока подряд):
+#   LLM, время до первого токена: через VPN медиана 4.76 с (0.57-15.66),
+#                                 мимо VPN медиана 0.34 с (0.24-0.52)
+#   TTS, короткая фраза:          через VPN медиана 1.71 с (0.58-19.14),
+#                                 мимо VPN медиана 0.42 с (0.35-0.57)
+# Дело не столько в медиане, сколько в разбросе: мимо туннеля он исчезает совсем.
+#
+# Выключить VPN целиком нельзя — через него работает сам Claude Code. Привязка
+# сокетов трогает ТОЛЬКО наши запросы, остальная система остаётся в туннеле.
+#
+# Значение — IPv4 физического интерфейса (Wi-Fi / Ethernet), НЕ адрес TUN.
+# Посмотреть:  Get-NetIPAddress -AddressFamily IPv4
+# Пусто — работаем как раньше, через маршрут по умолчанию.
+OUTBOUND_LOCAL_IP = os.environ.get("OUTBOUND_LOCAL_IP", "").strip()
+
+
+def _usable_local_ip() -> str | None:
+    """Адрес ещё существует на машине?
+
+    После смены сети (другой Wi-Fi, новый адрес по DHCP) записанный в .env адрес
+    исчезнет, и тогда КАЖДЫЙ исходящий запрос упадёт на bind — сервер выглядел бы
+    полностью сломанным из-за строчки в конфиге. Поэтому проверяем на старте и при
+    неудаче молча возвращаемся к обычной маршрутизации, громко сказав об этом.
+    """
+    if not OUTBOUND_LOCAL_IP:
+        return None
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind((OUTBOUND_LOCAL_IP, 0))
+        return OUTBOUND_LOCAL_IP
+    except OSError as e:
+        print(f"[startup] OUTBOUND_LOCAL_IP={OUTBOUND_LOCAL_IP} больше не существует "
+              f"на этой машине ({e}). Работаю через обычный маршрут — это медленнее. "
+              f"Посмотри новый адрес: Get-NetIPAddress -AddressFamily IPv4")
+        return None
+    finally:
+        probe.close()
+
+
+_LOCAL_IP = _usable_local_ip()
+
 # STT-модели грузим лениво и по одному разу на имя (первая загрузка качает веса).
 # Держать оба инстанса в памяти дёшево: base.en ~150 МБ, tiny.en ~75 МБ.
 _whisper: dict[str, WhisperModel] = {}
@@ -236,11 +287,15 @@ async def synthesize(text: str) -> bytes:
     """TTS через edge-tts (нейро-голоса Microsoft). Возвращает mp3-байты.
 
     Пишем во ВРЕМЕННЫЙ файл (не в cwd), чтобы не мусорить в рабочей папке.
+
+    Коннектор создаём НА КАЖДЫЙ вызов: edge-tts оборачивает сессию в `async with`
+    и закрывает коннектор на выходе, переиспользовать его нельзя.
     """
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
         path = f.name
     try:
-        communicate = edge_tts.Communicate(text, TTS_VOICE)
+        connector = aiohttp.TCPConnector(local_addr=(_LOCAL_IP, 0)) if _LOCAL_IP else None
+        communicate = edge_tts.Communicate(text, TTS_VOICE, connector=connector)
         await communicate.save(path)
         with open(path, "rb") as fh:
             return fh.read()
@@ -266,17 +321,27 @@ def llm_client() -> OpenAI:
         _llm = OpenAI(
             base_url=LLM_BASE_URL, api_key=_require("LLM_API_KEY"),
             timeout=_LLM_TIMEOUT, max_retries=_LLM_RETRIES,
+            http_client=httpx.Client(
+                transport=httpx.HTTPTransport(local_address=_LOCAL_IP),
+                timeout=_LLM_TIMEOUT, trust_env=False,
+            ),
         )
     return _llm
 
 
 def async_llm_client() -> AsyncOpenAI:
     # Асинхронный клиент — для стриминга токенов (/talk_stream).
+    # Свой транспорт нужен ради local_address: см. OUTBOUND_LOCAL_IP выше.
+    # trust_env=False — чтобы системный прокси VPN не подхватился обратно.
     global _async_llm
     if _async_llm is None:
         _async_llm = AsyncOpenAI(
             base_url=LLM_BASE_URL, api_key=_require("LLM_API_KEY"),
             timeout=_LLM_TIMEOUT, max_retries=_LLM_RETRIES,
+            http_client=httpx.AsyncClient(
+                transport=httpx.AsyncHTTPTransport(local_address=_LOCAL_IP),
+                timeout=_LLM_TIMEOUT, trust_env=False,
+            ),
         )
     return _async_llm
 
