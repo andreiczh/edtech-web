@@ -6,6 +6,13 @@
 # Windows PowerShell 5.1 читает их в системной кодировке (CP1251 на RU-винде).
 *.ps1 text eol=crlf
 
+# Зеркальное правило: эти файлы читает Linux внутри Docker-образа. CRLF там ломает
+# перенос строки "\" в RUN/ENV, то есть сборка на Hugging Face падала бы, а причина
+# выглядела бы как ошибка в команде. Индекс и так хранит LF, но правило страхует
+# рабочую копию от "* text=auto".
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+
 # Бинарники не трогать.
 *.png binary
 *.jpg binary
