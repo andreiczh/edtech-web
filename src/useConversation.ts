@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { backendUnreachableMessage } from './backendError'
+import { backendUnreachableMessage, httpErrorMessage } from './backendError'
 
 /**
  * Состояния голосовой сессии.
@@ -127,14 +127,14 @@ export function useConversation(): ConversationApi {
           signal: ac.signal,
         })
         if (!res.ok || !res.body) {
-          let detail = `HTTP ${res.status}`
+          let detail: string | null = null
           try {
             const j = await res.json()
-            detail = j.detail || detail
+            detail = j.detail ?? null
           } catch {
-            /* тело не JSON — оставим статус */
+            /* тело не JSON (например, страница ошибки туннеля) — так и запомним */
           }
-          throw new Error(detail)
+          throw new Error(httpErrorMessage(res.status, detail))
         }
 
         const reader = res.body.getReader()

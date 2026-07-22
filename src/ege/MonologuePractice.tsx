@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { backendUnreachableMessage } from '../backendError'
+import { backendUnreachableMessage, httpErrorMessage } from '../backendError'
 
 /**
  * Практика монолога (ЕГЭ Задание 4) с реальным ИИ-разбором.
@@ -86,8 +86,23 @@ export function MonologuePractice({ onExit }: { onExit?: () => void }) {
       // Ведущие переводы строк валидны для JSON, res.json() их проглатывает.
       // Но статус уходит ДО результата, поэтому ошибка приезжает полем detail
       // с кодом 200 — проверяем и код, и поле.
-      const data = await res.json()
-      if (!res.ok || data.detail) throw new Error(data.detail || `HTTP ${res.status}`)
+      //
+      // res.json() тут может и упасть: страница ошибки туннеля — это HTML, а не
+      // JSON, и тогда человек увидел бы «Unexpected token <» вместо причины.
+      let data: unknown = null
+      let parsed = true
+      try {
+        data = await res.json()
+      } catch {
+        parsed = false
+      }
+      const detail =
+        parsed && data && typeof data === 'object' && 'detail' in data
+          ? String((data as { detail: unknown }).detail)
+          : null
+      if (!res.ok || !parsed || detail) {
+        throw new Error(httpErrorMessage(res.status, detail))
+      }
       setResult(data as MonoResult)
       setPhase('done')
     } catch (e) {
