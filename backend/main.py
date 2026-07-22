@@ -193,6 +193,15 @@ MONOLOGUE_PROMPT = (
 STT_PROVIDER = os.environ.get("STT_PROVIDER", "mistral").strip().lower()
 STT_REMOTE_MODEL = os.environ.get("STT_REMOTE_MODEL", "voxtral-mini-latest")
 
+# Откатываться ли на локальный whisper, если Mistral не ответил.
+#
+# Дома — да: интернет может пропасть, а модель уже скачана.
+# На хостинге — НЕТ, и это не перестраховка. Найдено тестом 22.07.2026: на битом
+# аудио Mistral отказывает, срабатывает откат, и контейнер на 512 МБ пытается
+# поднять модель на 150 МБ. Один такой запрос способен уронить сервис по памяти —
+# то есть плохая запись одного ученика выключила бы приложение всем.
+STT_FALLBACK_LOCAL = os.environ.get("STT_FALLBACK_LOCAL", "1").strip() not in ("0", "false", "no")
+
 # СИНТЕЗ РЕЧИ: edge-tts основной, Mistral — запасной.
 #
 # edge-tts быстрее (замер 22.07.2026: медиана 0.42 с против 1.09 с у Mistral) и
@@ -375,21 +384,37 @@ async def transcribe_remote(data: bytes, filename: str = "speech.webm") -> str:
     return (r.json().get("text") or "").strip()
 
 
+class SttFailed(Exception):
+    """Распознать не удалось — ни основным путём, ни запасным.
+
+    Отдельный тип нужен, чтобы эндпоинты могли показать ученику человеческую
+    фразу, а техническую причину написать в лог. До 22.07.2026 наружу улетало
+    «STT (faster-whisper) ошибка: [Errno 1094995529] Invalid data found when
+    processing input: '/tmp/tmphwai8heq.webm'» — код ffmpeg и путь к временному
+    файлу на экране у школьника.
+    """
+
+
 async def transcribe_auto(data: bytes, local_model: str | None = None) -> str:
     """Распознавание с запасным путём.
 
     Основной путь — Mistral: быстрее и не требует ни памяти, ни процессора.
-    Если он не ответил (нет сети, кончилась квота, сменился API) — молча
-    переходим на локальный whisper, чтобы приложение не падало целиком.
+    Запасной — локальный whisper, если он разрешён (см. STT_FALLBACK_LOCAL).
     Понижение уровня печатаем в лог: молчаливая деградация хуже отсутствия.
     """
     if STT_PROVIDER == "mistral":
         try:
             return await transcribe_remote(data)
         except Exception as e:  # noqa: BLE001
-            print(f"[stt] Mistral не смог ({type(e).__name__}: {str(e)[:120]}), "
-                  f"перехожу на локальный whisper")
-    return await asyncio.to_thread(transcribe, data, local_model)
+            detail = f"{type(e).__name__}: {str(e)[:160]}"
+            if not STT_FALLBACK_LOCAL:
+                print(f"[stt] Mistral не смог ({detail}), откат выключен")
+                raise SttFailed(detail) from e
+            print(f"[stt] Mistral не смог ({detail}), перехожу на локальный whisper")
+    try:
+        return await asyncio.to_thread(transcribe, data, local_model)
+    except Exception as e:  # noqa: BLE001
+        raise SttFailed(f"{type(e).__name__}: {str(e)[:160]}") from e
 
 
 async def synthesize_edge(text: str) -> bytes:
@@ -592,7 +617,9 @@ def health():
     return {
         "ok": True,
         "stt": (
-            f"mistral:{STT_REMOTE_MODEL} (запасной: faster-whisper {WHISPER_MODEL_FAST}/{WHISPER_MODEL})"
+            f"mistral:{STT_REMOTE_MODEL}"
+            + (f" (запасной: faster-whisper {WHISPER_MODEL_FAST}/{WHISPER_MODEL})"
+               if STT_FALLBACK_LOCAL else " (без отката, локальный whisper выключен)")
             if STT_PROVIDER == "mistral"
             else f"faster-whisper:{WHISPER_MODEL_FAST} (разговор) / {WHISPER_MODEL} (монолог), local"
         ),
@@ -724,8 +751,12 @@ async def _monologue_work(data: bytes) -> dict:
     #    здесь каждое слово транскрипта превращается в балл ФИПИ.
     try:
         transcript_text = await transcribe_auto(data)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"STT (faster-whisper) ошибка: {e}")
+    except SttFailed as e:
+        print(f"[stt] монолог не распознан: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail="Не удалось распознать запись — она пустая или повреждена. Запиши ещё раз.",
+        )
     t1 = time.time()
 
     if not transcript_text:
@@ -788,8 +819,16 @@ async def talk_stream(audio: UploadFile = File(...)):
         #    секунды дороже, чем точность одного слова (см. WHISPER_MODEL_FAST).
         try:
             user_text = await transcribe_auto(data, WHISPER_MODEL_FAST)
-        except Exception as e:  # noqa: BLE001
-            yield json.dumps({"error": f"STT (faster-whisper) ошибка: {e}"}) + "\n"
+        except SttFailed as e:
+            # Ученику — человеческая фраза, причина уходит в лог сервера.
+            # Чаще всего сюда попадает пустая или слишком короткая запись.
+            print(f"[stt] не распознал: {e}")
+            yield json.dumps(
+                {"done": True, "user": "",
+                 "reply": "Не расслышал — запись пустая или слишком короткая. Скажи ещё раз.",
+                 "latency": {"stt": round(time.time() - t0, 2), "first_audio": 0,
+                             "total": round(time.time() - t0, 2)}}
+            ) + "\n"
             return
         t1 = time.time()
         if not user_text:
