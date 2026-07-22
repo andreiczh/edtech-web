@@ -172,7 +172,25 @@ MONOLOGUE_PROMPT = (
 
 # Настройки через .env (все с разумными дефолтами).
 #
-# ДВЕ STT-модели, по одной на режим — это осознанный размен, а не недосмотр.
+# ОТКУДА БЕРЁТСЯ РАСПОЗНАВАНИЕ: "mistral" (по сети) или "local" (faster-whisper).
+#
+# Замерено 22.07.2026 на этой машине, одно и то же аудио:
+#                      реплика ~10 с   монолог ~65 с   совпадение с эталоном
+#   Mistral Voxtral        0.54 с          1.22 с              100%
+#   локально tiny.en       1.50 с          7-10 с              100%
+#   локально base.en       3.20 с         13-17 с              эталон
+#
+# Дело не только в скорости. faster-whisper — единственная причина, по которой
+# бэкенду нужны ~700 МБ-1 ГБ памяти и настоящий процессор. Все бесплатные хостинги
+# дают 512 МБ и 0.1 vCPU, то есть именно whisper делал приложение неразмещаемым.
+# Без него бэкенд — тонкая прослойка, которая влезает куда угодно.
+#
+# Локальный whisper НЕ выброшен: он остаётся запасным путём, если Mistral не
+# ответил, и единственным, если работать без интернета.
+STT_PROVIDER = os.environ.get("STT_PROVIDER", "mistral").strip().lower()
+STT_REMOTE_MODEL = os.environ.get("STT_REMOTE_MODEL", "voxtral-mini-latest")
+
+# ДВЕ локальные STT-модели, по одной на режим — осознанный размен, не недосмотр.
 # Замерено 22.07.2026 на этом ноуте (4 ядра, int8), реплика ~10 с:
 #   tiny.en  1.4-2.5 с   base.en  3.2-3.3 с   small.en  7.6-11 с (непригодна)
 # Текст при этом совпал с base.en на 100% (реплика) и 98.4% (монолог 65 с).
@@ -283,6 +301,57 @@ def transcribe(data: bytes, model: str | None = None) -> str:
         os.unlink(path)
 
 
+_stt_http: httpx.AsyncClient | None = None
+
+
+def _stt_client() -> httpx.AsyncClient:
+    """Отдельный HTTP-клиент для загрузки аудио в Mistral.
+
+    Почему отдельный, а не общий с LLM. Остальные запросы мы намеренно шлём мимо
+    VPN (OUTBOUND_LOCAL_IP) — так вчетверо быстрее. Но ЗАГРУЗКА ФАЙЛА по прямому
+    маршруту рвётся: замерено 22.07.2026, три модели подряд, каждая ReadError
+    через 15-19 с, тогда как через VPN те же запросы отвечают 200 за 0.5-2.7 с.
+    Похоже на тот же DPI, который рубил туннель на крупных загрузках.
+
+    Поэтому здесь local_address НЕ задаём — пусть идёт маршрутом по умолчанию.
+    На хостинге никакого VPN нет, и обе ветки совпадут.
+    """
+    global _stt_http
+    if _stt_http is None:
+        _stt_http = httpx.AsyncClient(timeout=60.0, trust_env=False)
+    return _stt_http
+
+
+async def transcribe_remote(data: bytes, filename: str = "speech.webm") -> str:
+    """STT через Mistral (Voxtral). Возвращает распознанный текст."""
+    r = await _stt_client().post(
+        f"{LLM_BASE_URL.rstrip('/')}/audio/transcriptions",
+        headers={"Authorization": f"Bearer {_require('LLM_API_KEY')}"},
+        data={"model": STT_REMOTE_MODEL},
+        files={"file": (filename, data, "audio/webm")},
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Mistral STT вернул {r.status_code}: {r.text[:200]}")
+    return (r.json().get("text") or "").strip()
+
+
+async def transcribe_auto(data: bytes, local_model: str | None = None) -> str:
+    """Распознавание с запасным путём.
+
+    Основной путь — Mistral: быстрее и не требует ни памяти, ни процессора.
+    Если он не ответил (нет сети, кончилась квота, сменился API) — молча
+    переходим на локальный whisper, чтобы приложение не падало целиком.
+    Понижение уровня печатаем в лог: молчаливая деградация хуже отсутствия.
+    """
+    if STT_PROVIDER == "mistral":
+        try:
+            return await transcribe_remote(data)
+        except Exception as e:  # noqa: BLE001
+            print(f"[stt] Mistral не смог ({type(e).__name__}: {str(e)[:120]}), "
+                  f"перехожу на локальный whisper")
+    return await asyncio.to_thread(transcribe, data, local_model)
+
+
 async def synthesize(text: str) -> bytes:
     """TTS через edge-tts (нейро-голоса Microsoft). Возвращает mp3-байты.
 
@@ -369,12 +438,33 @@ def _split_sentence(buf: str) -> tuple[str, str]:
 
 @app.on_event("startup")
 async def _warmup():
-    # Прогреваем ОБЕ STT-модели при СТАРТЕ: первая загрузка идёт здесь и видна в
-    # консоли, а не виснет на первом запросе (иначе соединение рвётся).
-    for name in dict.fromkeys([WHISPER_MODEL, WHISPER_MODEL_FAST]):
-        print(f"[startup] Загружаю faster-whisper:{name} (первый раз качает модель, подожди)...")
-        await asyncio.to_thread(get_whisper, name)
-    print("[startup] STT-модели готовы. Сервер принимает запросы.")
+    # Локальные модели греем ТОЛЬКО если распознаём локально. Иначе не грузим их
+    # вовсе: в этом и смысл перехода на Mistral — не занимать под whisper ~700 МБ
+    # памяти, которых на бесплатном хостинге просто нет. Если Mistral однажды не
+    # ответит, модель подгрузится лениво в момент отката (первый раз медленно —
+    # это честная цена за то, что в обычном режиме её нет в памяти совсем).
+    if STT_PROVIDER == "mistral":
+        print(f"[startup] STT: Mistral {STT_REMOTE_MODEL} (локальный whisper — только запасной путь)")
+        # Прогреваем СОЕДИНЕНИЕ, а не модель. Замерено 22.07.2026: первые два
+        # запроса после старта заняли 7.9 и 15.1 с, дальше стабильно 0.43-0.54 с.
+        # Разница — TLS-хендшейк и разогрев маршрута; платить за него должен старт
+        # сервера, а не первая реплика ученика.
+        try:
+            t = time.time()
+            await _stt_client().get(
+                f"{LLM_BASE_URL.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {os.environ.get('LLM_API_KEY', '')}"},
+            )
+            print(f"[startup] соединение с Mistral прогрето за {time.time() - t:.1f}с")
+        except Exception as e:  # noqa: BLE001
+            print(f"[startup] прогрев не удался ({type(e).__name__}) — не страшно, "
+                  f"первая реплика просто будет медленнее")
+    else:
+        for name in dict.fromkeys([WHISPER_MODEL, WHISPER_MODEL_FAST]):
+            print(f"[startup] Загружаю faster-whisper:{name} (первый раз качает модель, подожди)...")
+            await asyncio.to_thread(get_whisper, name)
+        print("[startup] STT-модели готовы.")
+    print("[startup] Сервер принимает запросы.")
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -391,7 +481,11 @@ def test_page():
 def health():
     return {
         "ok": True,
-        "stt": f"faster-whisper:{WHISPER_MODEL_FAST} (разговор) / {WHISPER_MODEL} (монолог), local",
+        "stt": (
+            f"mistral:{STT_REMOTE_MODEL} (запасной: faster-whisper {WHISPER_MODEL_FAST}/{WHISPER_MODEL})"
+            if STT_PROVIDER == "mistral"
+            else f"faster-whisper:{WHISPER_MODEL_FAST} (разговор) / {WHISPER_MODEL} (монолог), local"
+        ),
         "tts": f"edge-tts:{TTS_VOICE}",
         "llm_base": LLM_BASE_URL,
         "llm_model": LLM_MODEL,
@@ -404,9 +498,9 @@ async def talk(audio: UploadFile = File(...)):
     t0 = time.time()
     data = await audio.read()
 
-    # 1) STT (локальная CPU-работа → в отдельный поток, чтобы не блокировать сервер)
+    # 1) STT
     try:
-        user_text = await asyncio.to_thread(transcribe, data)
+        user_text = await transcribe_auto(data)
     except Exception as e:  # noqa: BLE001 — покажем причину в UI
         raise HTTPException(status_code=502, detail=f"STT (faster-whisper) ошибка: {e}")
     t1 = time.time()
@@ -510,9 +604,10 @@ async def monologue(audio: UploadFile = File(...)):
 async def _monologue_work(data: bytes) -> dict:
     t0 = time.time()
 
-    # 1) STT — весь монолог разом (Фаза 2 сделает это стримингом во время речи).
+    # 1) STT — весь монолог разом. Запасной локальный путь берёт ТОЧНУЮ модель:
+    #    здесь каждое слово транскрипта превращается в балл ФИПИ.
     try:
-        transcript_text = await asyncio.to_thread(transcribe, data)
+        transcript_text = await transcribe_auto(data)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"STT (faster-whisper) ошибка: {e}")
     t1 = time.time()
@@ -573,10 +668,10 @@ async def talk_stream(audio: UploadFile = File(...)):
     async def gen():
         t0 = time.time()
         # 1) STT (batch, после стопа — Шаг B сделает это стримингом во время речи).
-        #    Здесь БЫСТРАЯ модель: в живом разговоре полторы секунды дороже, чем
-        #    точность одного слова (см. WHISPER_MODEL_FAST).
+        #    Запасной локальный путь — БЫСТРАЯ модель: в живом разговоре полторы
+        #    секунды дороже, чем точность одного слова (см. WHISPER_MODEL_FAST).
         try:
-            user_text = await asyncio.to_thread(transcribe, data, WHISPER_MODEL_FAST)
+            user_text = await transcribe_auto(data, WHISPER_MODEL_FAST)
         except Exception as e:  # noqa: BLE001
             yield json.dumps({"error": f"STT (faster-whisper) ошибка: {e}"}) + "\n"
             return
