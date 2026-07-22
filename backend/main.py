@@ -181,9 +181,12 @@ MONOLOGUE_PROMPT = (
 #   локально base.en       3.20 с         13-17 с              эталон
 #
 # Дело не только в скорости. faster-whisper — единственная причина, по которой
-# бэкенду нужны ~700 МБ-1 ГБ памяти и настоящий процессор. Все бесплатные хостинги
-# дают 512 МБ и 0.1 vCPU, то есть именно whisper делал приложение неразмещаемым.
-# Без него бэкенд — тонкая прослойка, которая влезает куда угодно.
+# бэкенду нужны настоящая память и настоящий процессор. Замерено: с локальными
+# моделями процесс держит 332 МБ (пик 449 МБ при загрузке обеих), без них — 99 МБ.
+# Бесплатные хостинги дают 512 МБ и 0.1 vCPU, а faster-whisper к тому же почти не
+# ускоряется от числа потоков (RTF base.en: 0.275 на одном против 0.193 на четырёх),
+# то есть на облачной «десятой доле ядра» он не поедет в принципе. Без него бэкенд —
+# тонкая I/O-прослойка, которая влезает куда угодно.
 #
 # Локальный whisper НЕ выброшен: он остаётся запасным путём, если Mistral не
 # ответил, и единственным, если работать без интернета.
@@ -646,7 +649,13 @@ async def monologue(audio: UploadFile = File(...)):
     data = await audio.read()
     return StreamingResponse(
         _json_with_heartbeat(_monologue_work(data)),
-        media_type="application/json",
+        # text/event-stream вместо application/json — намеренно. Тело у нас не SSE,
+        # но именно на этот Content-Type прокси (nginx и большинство облачных)
+        # отключают буферизацию, а на JSON — нет. Фронт читает сырое тело через
+        # body.getReader(), заголовок ему безразличен. Мы уже дважды теряли стриминг
+        # на буферизации (gzip, DECISIONS §5 п.7), и на чужом хостинге проверить это
+        # заранее нельзя — дешевле подстраховаться заголовком.
+        media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
 
@@ -795,7 +804,9 @@ async def talk_stream(audio: UploadFile = File(...)):
 
     return StreamingResponse(
         gen(),
-        media_type="application/x-ndjson",
+        # text/event-stream, а не application/x-ndjson — см. объяснение у /monologue:
+        # на этот тип прокси отключают буферизацию, фронту заголовок безразличен.
+        media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
 

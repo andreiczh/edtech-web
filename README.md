@@ -66,10 +66,13 @@ cd backend
 
 ## Публичная ссылка
 
-Хостинг — **Hugging Face Spaces** (Docker). Туннель с ноутбука не вышел: из РФ
-`cloudflared` не поднимает соединение с edge, детали в [`docs/DECISIONS.md`](docs/DECISIONS.md) §2.
-Пошаговая инструкция по деплою: [`docs/DEPLOY-HF.md`](docs/DEPLOY-HF.md).
-Собирается по `Dockerfile` в корне, порт 7860 (`app_port` в заголовке этого файла).
+Хостинг — **Render** (free, Docker из этого репозитория, `render.yaml` в корне).
+Инструкция: [`docs/DEPLOY-RENDER.md`](docs/DEPLOY-RENDER.md).
+
+Туннели и Hugging Face отпали: serveo и pinggy показывают друзьям страницу-заглушку
+вместо приложения, Cloudflare режется российскими провайдерами с 09.06.2025, а HF
+около 8 июля 2026 закрыл бесплатные Docker-Spaces. Подробности с датами и проверками —
+[`docs/DECISIONS.md`](docs/DECISIONS.md) §2.
 
 ## Структура
 
