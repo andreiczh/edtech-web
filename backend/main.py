@@ -190,6 +190,22 @@ MONOLOGUE_PROMPT = (
 STT_PROVIDER = os.environ.get("STT_PROVIDER", "mistral").strip().lower()
 STT_REMOTE_MODEL = os.environ.get("STT_REMOTE_MODEL", "voxtral-mini-latest")
 
+# СИНТЕЗ РЕЧИ: edge-tts основной, Mistral — запасной.
+#
+# edge-tts быстрее (замер 22.07.2026: медиана 0.42 с против 1.09 с у Mistral) и
+# бесплатен, поэтому он основной. Но он использует недокументированный доступ к
+# голосам Microsoft, и есть свидетельства, что с IP дата-центров он перестал
+# работать. Проверить это можно только с хостинга, а сломалась бы озвучка целиком.
+# Поэтому запасной путь заведён заранее и проверен: Mistral отвечает на том же
+# ключе, что STT и LLM.
+#
+# Цена запасного пути — голос. У Mistral для английского только мужские голоса
+# ("Paul"), тогда как сейчас звучит женский en-US-AriaNeural. Для тренажёра это
+# приемлемо, но заметно, поэтому переключение автоматическое и только при отказе.
+TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "edge").strip().lower()
+TTS_REMOTE_MODEL = os.environ.get("TTS_REMOTE_MODEL", "voxtral-mini-tts-latest")
+TTS_REMOTE_VOICE = os.environ.get("TTS_REMOTE_VOICE", "en_paul_neutral")
+
 # ДВЕ локальные STT-модели, по одной на режим — осознанный размен, не недосмотр.
 # Замерено 22.07.2026 на этом ноуте (4 ядра, int8), реплика ~10 с:
 #   tiny.en  1.4-2.5 с   base.en  3.2-3.3 с   small.en  7.6-11 с (непригодна)
@@ -352,7 +368,7 @@ async def transcribe_auto(data: bytes, local_model: str | None = None) -> str:
     return await asyncio.to_thread(transcribe, data, local_model)
 
 
-async def synthesize(text: str) -> bytes:
+async def synthesize_edge(text: str) -> bytes:
     """TTS через edge-tts (нейро-голоса Microsoft). Возвращает mp3-байты.
 
     Пишем во ВРЕМЕННЫЙ файл (не в cwd), чтобы не мусорить в рабочей папке.
@@ -371,6 +387,40 @@ async def synthesize(text: str) -> bytes:
     finally:
         if os.path.exists(path):
             os.unlink(path)
+
+
+async def synthesize_mistral(text: str) -> bytes:
+    """TTS через Mistral. Тот же ключ, что у STT и LLM."""
+    r = await _stt_client().post(
+        f"{LLM_BASE_URL.rstrip('/')}/audio/speech",
+        headers={"Authorization": f"Bearer {_require('LLM_API_KEY')}"},
+        json={"model": TTS_REMOTE_MODEL, "input": text, "voice": TTS_REMOTE_VOICE},
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Mistral TTS вернул {r.status_code}: {r.text[:200]}")
+    return r.content
+
+
+_tts_degraded = False
+
+
+async def synthesize(text: str) -> bytes:
+    """Синтез с запасным путём: edge-tts, при отказе — Mistral.
+
+    Один отказ переключает на запасной путь до конца жизни процесса: если
+    edge-tts недоступен с этого IP (а такое подозревают на хостингах), он не
+    станет доступен через фразу, и платить таймаутом на каждой реплике незачем.
+    """
+    global _tts_degraded
+    if TTS_PROVIDER == "mistral" or _tts_degraded:
+        return await synthesize_mistral(text)
+    try:
+        return await synthesize_edge(text)
+    except Exception as e:  # noqa: BLE001
+        print(f"[tts] edge-tts отказал ({type(e).__name__}: {str(e)[:100]}), "
+              f"перехожу на Mistral {TTS_REMOTE_VOICE} до перезапуска")
+        _tts_degraded = True
+        return await synthesize_mistral(text)
 
 
 # Клиенты создаём ОДИН раз на процесс, а не на каждый запрос: иначе каждый вызов
