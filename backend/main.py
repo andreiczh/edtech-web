@@ -148,9 +148,24 @@ MONOLOGUE_PROMPT = (
 )
 
 # Настройки через .env (все с разумными дефолтами).
-# base.en — лёгкая англ.-модель: быстрее и легче по памяти, чем small (важно для
-# слабого ноута). Точнее/тяжелее по возрастанию: base.en < small.en < small.
+#
+# ДВЕ STT-модели, по одной на режим — это осознанный размен, а не недосмотр.
+# Замерено 22.07.2026 на этом ноуте (4 ядра, int8), реплика ~10 с:
+#   tiny.en  1.4-2.5 с   base.en  3.2-3.3 с   small.en  7.6-11 с (непригодна)
+# Текст при этом совпал с base.en на 100% (реплика) и 98.4% (монолог 65 с).
+#
+# Почему по-разному в двух режимах:
+#   - разговор: ученик ждёт ответа вживую, полторы секунды решают всё, а ошибка
+#     в одном слове тут же тонет в диалоге -> tiny.en;
+#   - монолог: ждать всё равно секунд десять, зато каждое слово транскрипта
+#     превращается в балл ФИПИ и в разбор ошибок -> base.en, точность важнее.
+#
+# ⚠️ Проверено ТОЛЬКО на синтетической американской речи. Русский школьный акцент
+# — тяжёлый случай, и tiny.en может терять отрицания, вопросы и модальные
+# (can/can't). Если разговор начнёт «недослышивать» — вернуть base.en одной
+# строкой: WHISPER_MODEL_FAST=base.en в backend/.env.
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base.en")
+WHISPER_MODEL_FAST = os.environ.get("WHISPER_MODEL_FAST", "tiny.en")
 TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AriaNeural")
 # Mistral — дефолт: подтверждённо работает из РФ без VPN и активируется без
 # карты. (DeepSeek не начислил бесплатный грант — 402 Insufficient Balance;
@@ -158,16 +173,17 @@ TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AriaNeural")
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.mistral.ai/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "mistral-small-latest")
 
-# STT-модель грузим лениво и один раз (первый вызов скачает веса ~150–500 МБ).
-_whisper: WhisperModel | None = None
+# STT-модели грузим лениво и по одному разу на имя (первая загрузка качает веса).
+# Держать оба инстанса в памяти дёшево: base.en ~150 МБ, tiny.en ~75 МБ.
+_whisper: dict[str, WhisperModel] = {}
 
 
-def get_whisper() -> WhisperModel:
-    global _whisper
-    if _whisper is None:
+def get_whisper(name: str | None = None) -> WhisperModel:
+    key = name or WHISPER_MODEL
+    if key not in _whisper:
         # int8 на CPU — самый лёгкий режим для ноутбука без GPU.
-        _whisper = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
-    return _whisper
+        _whisper[key] = WhisperModel(key, device="cpu", compute_type="int8")
+    return _whisper[key]
 
 
 def _require(name: str) -> str:
@@ -180,13 +196,17 @@ def _require(name: str) -> str:
     return val
 
 
-def transcribe(data: bytes) -> str:
-    """STT локально через faster-whisper. На вход — байты webm/opus из браузера."""
+def transcribe(data: bytes, model: str | None = None) -> str:
+    """STT локально через faster-whisper. На вход — байты webm/opus из браузера.
+
+    `model` — какую модель взять. Разговор зовёт быструю, монолог точную,
+    объяснение размена см. у WHISPER_MODEL_FAST.
+    """
     with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
         f.write(data)
         path = f.name
     try:
-        segments, _info = get_whisper().transcribe(path, language="en", beam_size=1)
+        segments, _info = get_whisper(model).transcribe(path, language="en", beam_size=1)
         return " ".join(seg.text for seg in segments).strip()
     finally:
         os.unlink(path)
@@ -264,11 +284,12 @@ def _split_sentence(buf: str) -> tuple[str, str]:
 
 @app.on_event("startup")
 async def _warmup():
-    # Прогреваем STT-модель при СТАРТЕ: первая загрузка (~150 МБ) идёт здесь и
-    # видна в консоли, а не виснет на первом /talk (иначе соединение рвётся).
-    print(f"[startup] Загружаю faster-whisper:{WHISPER_MODEL} (первый раз качает модель, подожди)...")
-    await asyncio.to_thread(get_whisper)
-    print("[startup] STT-модель готова. Сервер принимает запросы.")
+    # Прогреваем ОБЕ STT-модели при СТАРТЕ: первая загрузка идёт здесь и видна в
+    # консоли, а не виснет на первом запросе (иначе соединение рвётся).
+    for name in dict.fromkeys([WHISPER_MODEL, WHISPER_MODEL_FAST]):
+        print(f"[startup] Загружаю faster-whisper:{name} (первый раз качает модель, подожди)...")
+        await asyncio.to_thread(get_whisper, name)
+    print("[startup] STT-модели готовы. Сервер принимает запросы.")
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -285,7 +306,7 @@ def test_page():
 def health():
     return {
         "ok": True,
-        "stt": f"faster-whisper:{WHISPER_MODEL} (local)",
+        "stt": f"faster-whisper:{WHISPER_MODEL_FAST} (разговор) / {WHISPER_MODEL} (монолог), local",
         "tts": f"edge-tts:{TTS_VOICE}",
         "llm_base": LLM_BASE_URL,
         "llm_model": LLM_MODEL,
@@ -466,9 +487,11 @@ async def talk_stream(audio: UploadFile = File(...)):
 
     async def gen():
         t0 = time.time()
-        # 1) STT (batch, после стопа — Шаг B сделает это стримингом во время речи)
+        # 1) STT (batch, после стопа — Шаг B сделает это стримингом во время речи).
+        #    Здесь БЫСТРАЯ модель: в живом разговоре полторы секунды дороже, чем
+        #    точность одного слова (см. WHISPER_MODEL_FAST).
         try:
-            user_text = await asyncio.to_thread(transcribe, data)
+            user_text = await asyncio.to_thread(transcribe, data, WHISPER_MODEL_FAST)
         except Exception as e:  # noqa: BLE001
             yield json.dumps({"error": f"STT (faster-whisper) ошибка: {e}"}) + "\n"
             return
