@@ -47,6 +47,9 @@ export function logout() {
   cached = null
   try {
     localStorage.removeItem(KEY)
+    // История диалога — часть личной сессии: следующий человек за этим же
+    // компьютером не должен унаследовать чужой разговор.
+    sessionStorage.removeItem('pingo.dialog.v1')
   } catch {
     /* ignore */
   }

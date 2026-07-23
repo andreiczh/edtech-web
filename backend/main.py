@@ -124,6 +124,10 @@ SYSTEM_PROMPT = (
     "- Always finish with one simple follow-up question to keep the conversation going.\n"
     "- Correct only mistakes that break meaning or are clearly wrong. Do it briefly and "
     "kindly (\"You can say ...\"), then move on — do not nitpick every small error.\n"
+    "- USE the conversation history you are given: remember the student's name and the "
+    "facts they told you, refer back to them naturally, never ask a question they have "
+    "already answered, and never repeat a question you already asked — dig deeper or "
+    "change the angle instead.\n"
     "- Match the student's level, speak clearly, and encourage them.\n"
     "- Reply in English only."
 )
@@ -495,10 +499,29 @@ def _client_ip(request: Request) -> str:
 
 
 def _check_voice_rate(identity: str) -> None:
-    # 20 запросов в минуту на человека: живой ученик физически делает 6-10
-    # (реплика = минимум пара секунд речи + ответ). В лимит упрётся только скрипт.
+    """Три слоя защиты бюджета Mistral (замер лимитов ключа 23.07.2026:
+    LLM 50 запросов/мин на ВСЕХ — это и есть узкое место всей системы).
+
+    1. 20/мин на человека: живой ученик делает 6-10 (реплика = секунды речи +
+       ответ), в лимит упрётся только скрипт.
+    2. 300/день на человека: усердный ученик делает 100-150 реплик за день;
+       кап ловит уведённый аккаунт и зацикленный клиент, не мешая людям.
+    3. 45/мин ГЛОБАЛЬНО — ниже провайдерских 50: когда все ученики разом
+       упираются в бюджет, они получают наш вежливый 429 «сервис занят», а не
+       ошибку Mistral посреди начатого стрима с уже сожжённым STT.
+    """
     if not _rate_ok(f"v:{identity}", 20, 60.0):
         raise HTTPException(status_code=429, detail="Слишком много запросов подряд — подожди минутку.")
+    if not _rate_ok(f"vd:{identity}", 300, 86_400.0):
+        raise HTTPException(
+            status_code=429,
+            detail="Дневной лимит занятий исчерпан — продолжим завтра. Так мы бережём общий бюджет.",
+        )
+    if not _rate_ok("v:__global__", 45, 60.0):
+        raise HTTPException(
+            status_code=429,
+            detail="Сервис сейчас занят другими учениками — попробуй через минуту.",
+        )
 
 
 async def _load_memory(device: str | None, kind: str | None) -> dict:

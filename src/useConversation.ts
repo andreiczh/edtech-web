@@ -3,6 +3,29 @@
 import { backendUnreachableMessage, httpErrorMessage } from './backendError'
 import { identityId } from './auth/auth'
 
+const DIALOG_KEY = 'pingo.dialog.v1'
+
+function loadDialogHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
+  try {
+    const raw = sessionStorage.getItem(DIALOG_KEY)
+    if (!raw) return []
+    const items = JSON.parse(raw) as Array<{ role: string; content: string }>
+    return items
+      .filter((i) => (i.role === 'user' || i.role === 'assistant') && i.content)
+      .slice(-10) as Array<{ role: 'user' | 'assistant'; content: string }>
+  } catch {
+    return []
+  }
+}
+
+function saveDialogHistory(items: Array<{ role: 'user' | 'assistant'; content: string }>) {
+  try {
+    sessionStorage.setItem(DIALOG_KEY, JSON.stringify(items))
+  } catch {
+    /* приватный режим — история проживёт до размонтирования, и ладно */
+  }
+}
+
 /**
  * Состояния голосовой сессии.
  *  - idle       — покой, ждём нажатия
@@ -46,10 +69,14 @@ export function useConversation(): ConversationApi {
   const playingRef = useRef(false)
   const streamDoneRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
-  /** Память диалога: последние 10 реплик сессии (5 обменов). Живёт только в
-      этой вкладке — сервер историю не хранит намеренно (приватность + ноль
-      состояния), закрыл вкладку — тьютор всё забыл. */
-  const historyRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([])
+  /** Память диалога: последние 10 реплик (5 обменов). Живёт в sessionStorage —
+      переживает переключение вкладок ПРИЛОЖЕНИЯ (Conversation → ЕГЭ → назад
+      раньше стирало историю: компонент размонтировался, и тьютор всё забывал),
+      но умирает вместе со вкладкой БРАУЗЕРА. Сервер историю не хранит
+      намеренно: приватность + ноль состояния. */
+  const historyRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>(
+    loadDialogHistory(),
+  )
 
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
@@ -203,6 +230,7 @@ export function useConversation(): ConversationApi {
             { role: 'user' as const, content: finalUser },
             { role: 'assistant' as const, content: finalReply },
           ].slice(-10)
+          saveDialogHistory(historyRef.current)
         }
         // Стрим кончился, а звука нет/уже доиграл — вернёмся в покой.
         if (!playingRef.current && queueRef.current.length === 0) {
