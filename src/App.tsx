@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 
+import { syncSettingsFromServer, useSettings } from './account/me'
 import { currentUser, identityId, type AuthUser } from './auth/auth'
 import { TopBar, type TopTab } from './design/ui'
 import {
@@ -24,6 +25,7 @@ import { AdminScreen } from './screens/AdminScreen'
 import { LoginScreen, RegisterScreen, WelcomeScreen } from './screens/AuthScreens'
 import { ConversationScreen } from './screens/ConversationScreen'
 import { EgeMenuScreen } from './screens/EgeMenuScreen'
+import { ProfileScreen } from './screens/ProfileScreen'
 import { SessionScreen, type SessionItem } from './screens/SessionScreen'
 import { StatsScreen } from './screens/StatsScreen'
 
@@ -40,6 +42,7 @@ type Route =
   | { name: 'conversation' }
   | { name: 'ege' }
   | { name: 'stats' }
+  | { name: 'profile' }
   /** nonce пересоздаёт сессию при «Пройти ещё раз» — иначе React сохранил бы
       состояние старой (индекс, результаты) и итоги не сбросились бы. */
   | { name: 'session'; items: SessionItem[]; nonce: number }
@@ -56,29 +59,44 @@ const FEEDBACK_MAILTO =
 
 export default function App() {
   const [route, setRoute] = useState<Route>(initialRoute)
+  /* Тема (тёмная/светлая) — настройка кабинета, применяется атрибутом на
+     корневом .app: CSS-переменные переопределяются одним селектором. */
+  const { theme } = useSettings()
 
-  // Банк заданий и серверный прогресс подтягиваются при старте и после входа:
-  // сессии начинают вычёркивать варианты, решённые на любом устройстве.
+  // Банк заданий, серверный прогресс и настройки аккаунта подтягиваются при
+  // старте и после входа: сессии вычёркивают решённое на любом устройстве,
+  // а тема и громкость следуют за аккаунтом.
   useEffect(() => {
     void syncRemoteTasks()
-    if (currentUser()) void syncServerProgress(identityId())
+    if (currentUser()) {
+      void syncServerProgress(identityId())
+      void syncSettingsFromServer()
+    }
   }, [])
 
   const enterApp = useCallback((_u: AuthUser) => {
     void syncServerProgress(identityId())
+    void syncSettingsFromServer()
     setRoute({ name: 'conversation' })
   }, [])
 
-  const activeTab = route.name === 'conversation' ? 'conversation' : 'ege'
+  /* В кабинете бегунок вкладок остаётся там, где был до его открытия:
+     кабинет — не вкладка, и прыжок бегунка читался бы как смена раздела. */
+  const [lastTab, setLastTab] = useState<'conversation' | 'ege'>('conversation')
+  const activeTab =
+    route.name === 'conversation'
+      ? 'conversation'
+      : route.name === 'profile'
+        ? lastTab
+        : 'ege'
 
   const onTab = useCallback((id: string) => {
+    setLastTab(id === 'conversation' ? 'conversation' : 'ege')
     setRoute(id === 'conversation' ? { name: 'conversation' } : { name: 'ege' })
   }, [])
 
   const onProfile = useCallback(() => {
-    // Личный кабинет по макету не нарисован. Отправляем в статистику — это
-    // ближайшее осмысленное место, а не мёртвая кнопка.
-    setRoute({ name: 'stats' })
+    setRoute({ name: 'profile' })
   }, [])
 
   const backToEge = useCallback(() => setRoute({ name: 'ege' }), [])
@@ -134,7 +152,7 @@ export default function App() {
   }
   if (route.name === 'admin') {
     return (
-      <div className="app" data-theme="blue">
+      <div className="app" data-theme="blue" data-mode={theme}>
         <AdminScreen
           onExit={() => {
             window.history.replaceState(null, '', window.location.pathname)
@@ -151,7 +169,7 @@ export default function App() {
   // отдельный полноэкранный поток со своей шапкой и полной анимацией входа.
   if (route.name === 'session') {
     return (
-      <div className="app" data-theme="blue">
+      <div className="app" data-theme="blue" data-mode={theme}>
         <div className="screenwrap" key={`session-${route.nonce}`}>
           <SessionScreen items={route.items} onExit={backToEge} onRestart={restartSession} />
         </div>
@@ -160,7 +178,7 @@ export default function App() {
   }
 
   return (
-    <div className="app" data-theme="blue">
+    <div className="app" data-theme="blue" data-mode={theme}>
       <div className="screen">
         <TopBar tabs={TABS} active={activeTab} onTab={onTab} onProfile={onProfile} />
 
@@ -176,6 +194,13 @@ export default function App() {
           )}
 
           {route.name === 'stats' && <StatsScreen onBack={backToEge} />}
+
+          {route.name === 'profile' && (
+            <ProfileScreen
+              onOpenStats={() => setRoute({ name: 'stats' })}
+              onLogout={() => setRoute({ name: 'welcome' })}
+            />
+          )}
         </div>
       </div>
     </div>

@@ -1087,3 +1087,336 @@ body {
   gap: 10px;
   width: 100%;
 }
+
+/* ------------------------------------------------------------ Светлая тема
+ *
+ * Настройка кабинета: атрибут data-mode на корневом .app. Меняются только
+ * ПЕРЕМЕННЫЕ и три точечных переопределения — вся геометрия, стекло и
+ * анимации общие для обеих тем, поэтому темы не могут разъехаться.
+ * Карточки .card2 и так светлые — они остаются как есть в обеих темах.
+ */
+.app[data-mode='light'] {
+  --text: #453f78;
+  --text-dim: rgba(69, 63, 120, 0.62);
+  --pill: rgba(255, 255, 255, 0.62);
+  --pill-strong: rgba(255, 255, 255, 0.85);
+  --glass-line: rgba(255, 255, 255, 0.8);
+  --shadow-card: 0 10px 24px rgba(84, 78, 136, 0.18);
+  --shadow-card-lifted: 0 16px 34px rgba(84, 78, 136, 0.26);
+  --shadow-press: 0 3px 8px rgba(84, 78, 136, 0.22);
+  --mic-bg: #ffffff;
+  background: radial-gradient(130% 105% at 50% -10%, #f7f5fd 0%, #e8e4f7 45%, #d9d4ee 100%);
+  color-scheme: light;
+}
+/* Дорожка тумблера на светлом фоне — тёмная не нужна, хватает лёгкой тени */
+.app[data-mode='light'] .segmented {
+  background: rgba(84, 78, 136, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+/* Бегунок остаётся фиолетовым — подпись активной вкладки должна быть белой,
+   иначе тёмные чернила светлой темы пропадают на нём. */
+.app[data-mode='light'] .tab2--active {
+  color: #fff;
+}
+.app[data-mode='light'] .card2--ghost {
+  background: rgba(255, 255, 255, 0.5);
+}
+.app[data-mode='light'] .countdown__track {
+  border-color: rgba(84, 78, 136, 0.28);
+}
+.app[data-mode='light'] .countdown--urgent .countdown__time {
+  color: #c2503c;
+}
+/* «Светлые на тёмном» ползунки прокрутки в светлой теме стали бы невидимыми */
+.app[data-mode='light'] .scroll-soft--onDark {
+  scrollbar-color: rgba(122, 114, 190, 0.55) transparent;
+}
+.app[data-mode='light'] .scroll-soft--onDark::-webkit-scrollbar-thumb {
+  background: rgba(122, 114, 190, 0.38);
+  background-clip: content-box;
+}
+.app[data-mode='light'] .scroll-soft--onDark:hover::-webkit-scrollbar-thumb {
+  background: rgba(122, 114, 190, 0.7);
+  background-clip: content-box;
+}
+
+/* --------------------------------------------------------- Личный кабинет */
+
+.profilehead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  flex-wrap: wrap;
+}
+.profilehead__id {
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 1.6vw, 16px);
+  min-width: 0;
+}
+.profilehead__avatar {
+  width: clamp(46px, 6vw, 60px);
+  height: clamp(46px, 6vw, 60px);
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--orb-2), var(--orb-4));
+  color: #fff;
+  font-weight: 800;
+  font-size: clamp(16px, 2vw, 22px);
+  letter-spacing: 0.04em;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-card);
+}
+.profilehead__names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.profilehead__nick {
+  font-weight: 800;
+  font-size: clamp(18px, 2.4vw, 26px);
+  color: var(--text);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.profilehead__role {
+  font-size: clamp(11px, 1.3vw, 14px);
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.profilehead__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.profilehead__note {
+  width: 100%;
+  margin: 0;
+  font-size: clamp(11px, 1.3vw, 13px);
+  color: var(--text);
+}
+.profilehead__note--err {
+  color: #ff9b9b;
+}
+.app[data-mode='light'] .profilehead__note--err {
+  color: #b4485c;
+}
+
+/* Три ячейки: стрик / уровень / неделя. На телефоне — столбиком. */
+.profilegrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(10px, 1.6vw, 18px);
+}
+@media (max-width: 720px) {
+  .profilegrid {
+    grid-template-columns: 1fr;
+  }
+}
+.profilecell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+  padding: clamp(14px, 2vw, 20px);
+}
+.profilecell__sub {
+  font-size: clamp(10px, 1.2vw, 12px);
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+/* Огонёк стрика: горит только когда сегодняшний день уже засчитан — сам
+   значок подталкивает закрыть день, без единого слова. */
+.flame {
+  width: clamp(26px, 3.4vw, 34px);
+  height: auto;
+  color: rgba(255, 255, 255, 0.28);
+  transition: color 0.4s ease, filter 0.4s ease;
+}
+.app[data-mode='light'] .flame {
+  color: rgba(84, 78, 136, 0.25);
+}
+.flame--lit,
+.app[data-mode='light'] .flame--lit {
+  color: var(--orb-4);
+  filter: drop-shadow(0 4px 12px rgba(255, 143, 120, 0.5));
+}
+
+/* Полоса XP — то же семейство, что полоса таймера: белая дорожка, фиолетовое
+   заполнение. Узнаётся как «прогресс» без легенды. */
+.xpbar {
+  width: min(100%, 220px);
+  height: 12px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(28, 24, 56, 0.18);
+}
+.app[data-mode='light'] .xpbar {
+  border-color: rgba(84, 78, 136, 0.28);
+}
+.xpbar__fill {
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, #b9b3ea, #8d86d6);
+  transition: width 0.6s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* Неделя столбиками: активные дни — мятные (цвет «успеха» проекта) */
+.weekbars {
+  display: flex;
+  align-items: flex-end;
+  gap: clamp(5px, 0.9vw, 10px);
+  height: clamp(58px, 8vw, 84px);
+}
+.weekbars__col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  height: 100%;
+}
+.weekbars__bar {
+  width: clamp(10px, 1.4vw, 16px);
+  min-height: 6px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.22);
+  transition: height 0.5s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.app[data-mode='light'] .weekbars__bar {
+  background: rgba(84, 78, 136, 0.18);
+}
+.weekbars__bar--on,
+.app[data-mode='light'] .weekbars__bar--on {
+  background: linear-gradient(180deg, var(--orb-3), #6fae9e);
+}
+.weekbars__day {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+/* ---------------------------------------------------- Настройки в кабинете */
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(12px, 1.8vh, 18px);
+}
+.settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 18px;
+  flex-wrap: wrap;
+}
+.settings__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.settings__name {
+  font-weight: 800;
+  color: var(--text);
+  font-size: clamp(13px, 1.5vw, 16px);
+}
+.settings__hint {
+  font-size: clamp(10px, 1.2vw, 12px);
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+/* Тумблер-переключатель — младший брат бегунка вкладок: та же пружинная
+   кривая, тот же фиолетовый градиент во включённом состоянии. */
+.switch {
+  appearance: none;
+  position: relative;
+  width: 54px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--glass-line);
+  background: rgba(40, 36, 74, 0.42);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.25s ease;
+}
+.app[data-mode='light'] .switch {
+  background: rgba(84, 78, 136, 0.2);
+}
+.switch--on,
+.app[data-mode='light'] .switch--on {
+  background: linear-gradient(180deg, rgba(126, 118, 205, 0.95), rgba(96, 88, 172, 0.95));
+}
+.switch__thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(20, 16, 44, 0.4);
+  transition: transform 0.25s cubic-bezier(0.34, 1.2, 0.5, 1);
+}
+.switch--on .switch__thumb {
+  transform: translateX(24px);
+}
+.switch:focus-visible {
+  outline: 2px solid var(--orb-2);
+  outline-offset: 3px;
+}
+
+/* Ползунок громкости — дорожка как у полосы XP, ручка как бегунок тумблера */
+.slider {
+  appearance: none;
+  -webkit-appearance: none;
+  width: clamp(150px, 24vw, 240px);
+  height: 12px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: inset 0 1px 3px rgba(28, 24, 56, 0.18);
+  cursor: pointer;
+}
+.app[data-mode='light'] .slider {
+  border-color: rgba(84, 78, 136, 0.28);
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #9d96e0, #7a72c4);
+  border: 2px solid #fff;
+  box-shadow: 0 3px 8px rgba(20, 16, 44, 0.35);
+}
+.slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #9d96e0, #7a72c4);
+  border: 2px solid #fff;
+  box-shadow: 0 3px 8px rgba(20, 16, 44, 0.35);
+}
+.slider:focus-visible {
+  outline: 2px solid var(--orb-2);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch__thumb,
+  .xpbar__fill,
+  .weekbars__bar {
+    transition: none;
+  }
+}

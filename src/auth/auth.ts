@@ -43,6 +43,12 @@ function saveUser(u: AuthUser) {
   }
 }
 
+/** Ник сменился на сервере — обновляем локальную копию аккаунта. */
+export function applyNickname(nickname: string) {
+  const u = currentUser()
+  if (u) saveUser({ ...u, nickname })
+}
+
 export function logout() {
   cached = null
   try {

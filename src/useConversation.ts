@@ -1,5 +1,6 @@
 ﻿import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { getSettings } from './account/me'
 import { backendUnreachableMessage, httpErrorMessage } from './backendError'
 import { identityId } from './auth/auth'
 
@@ -93,6 +94,9 @@ export function useConversation(): ConversationApi {
     }
     playingRef.current = true
     const audio = new Audio(`data:audio/mpeg;base64,${next}`)
+    // Громкость из настроек читается на каждом чанке: сдвинул ползунок —
+    // уже следующая фраза звучит тише, без перезапуска разговора.
+    audio.volume = getSettings().volume
     audioRef.current = audio
     audio.onended = () => {
       audioRef.current = null

@@ -47,8 +47,10 @@ export async function requestTaskFeedback(
   blob: Blob,
   kind: TaskKind,
   payload: Record<string, unknown>,
-  /** Для памяти об ошибках: какой вариант решался и сколько секунд говорил */
-  meta?: { variantId?: string; durationSec?: number },
+  /** Для памяти об ошибках: какой вариант решался и сколько секунд говорил.
+      sessionDone — последний вариант серии: сервер добавит бонус XP за
+      доведённую до конца сессию. */
+  meta?: { variantId?: string; durationSec?: number; sessionDone?: boolean },
 ): Promise<FeedbackResponse> {
   const fd = new FormData()
   fd.append('audio', blob, 'answer.webm')
@@ -56,6 +58,7 @@ export async function requestTaskFeedback(
   fd.append('payload', JSON.stringify(payload))
   if (meta?.variantId) fd.append('variant', meta.variantId)
   if (meta?.durationSec) fd.append('duration', String(meta.durationSec))
+  if (meta?.sessionDone) fd.append('session_done', '1')
 
   let res: Response
   try {

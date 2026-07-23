@@ -28,7 +28,7 @@ import socket
 import tempfile
 import time
 from collections import deque
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 # На Windows без Developer Mode huggingface_hub печатает безобидный warning
 # про symlinks при каждой загрузке модели — глушим, чтобы не путать с ошибкой.
@@ -708,9 +708,10 @@ def _track_llm(completion) -> None:
         _track_usage(llm_req=1)
 
 def _remember(device: str | None, kind: str, variant: str, feedback: dict,
-              duration_sec: int) -> None:
+              duration_sec: int, session_done: bool = False) -> None:
     """Запись итога в память — строго fire-and-forget: ученик ответа не ждёт,
-    а упавшая база не должна отнимать у него разбор."""
+    а упавшая база не должна отнимать у него разбор. Здесь же начисляется XP
+    за задание (внутри save_result — там честно видно, повтор это или нет)."""
     if not (_storage_ok and device):
         return
 
@@ -720,9 +721,26 @@ def _remember(device: str | None, kind: str, variant: str, feedback: dict,
                 storage.save_result, device, kind, variant,
                 int(feedback.get("score") or 0), int(feedback.get("max") or 0),
                 duration_sec, feedback.get("errors") or [],
+                session_done,
             )
         except Exception as e:  # noqa: BLE001
             print(f"[memory] запись не удалась ({type(e).__name__}: {str(e)[:80]})")
+
+    asyncio.create_task(run())
+
+
+def _note_reply_bg(device: str | None) -> None:
+    """Реплика разговора состоялась — день засчитан, XP начислен (с дневным
+    потолком, см. storage.note_reply). Fire-and-forget: разговор эти записи
+    не ждёт, а без базы просто не будет стрика — не разговора."""
+    if not (_storage_ok and device):
+        return
+
+    async def run():
+        try:
+            await asyncio.to_thread(storage.note_reply, device)
+        except Exception as e:  # noqa: BLE001
+            print(f"[xp] реплика не записана ({type(e).__name__}: {str(e)[:60]})")
 
     asyncio.create_task(run())
 
@@ -811,6 +829,168 @@ async def progress(x_device: str | None = Header(None)):
     except Exception:  # noqa: BLE001
         solved = []
     return {"solved": solved}
+
+
+# ------------------------------------------------- Личный кабинет: стрик и XP
+
+# Уровни: порог следующего = 50·L·(L+1) XP суммарно (уровень 1 → 100, 2 → 300,
+# 3 → 600, 4 → 1000...). Первые уровни берутся за день-другой — быстрая награда
+# новичку, дальше шаг растёт. Имена — экзаменационная легенда до «Examiner».
+_LEVEL_NAMES = ["Beginner", "Rookie", "Learner", "Talker", "Speaker",
+                "Storyteller", "Debater", "Orator", "Expert", "Examiner"]
+
+
+def _level_info(xp: int) -> dict:
+    level = 1
+    while xp >= 50 * level * (level + 1) and level < 99:
+        level += 1
+    start, nxt = 50 * (level - 1) * level, 50 * level * (level + 1)
+    return {
+        "level": level,
+        "name": _LEVEL_NAMES[min(level - 1, len(_LEVEL_NAMES) - 1)],
+        "xp": xp,
+        "level_start": start,
+        "next_at": nxt,
+        "progress": round((xp - start) / (nxt - start), 3),
+    }
+
+
+def _compute_streak(active: set[str], today_str: str) -> dict:
+    """Стрик из множества активных дней (московских). Хранится не он, а дни —
+    вычисленный стрик невозможно рассинхронизировать.
+
+    Заморозка: ОДНА пропущенная дата на календарную (ISO) неделю не рвёт
+    цепочку — сгоревший двадцатидневный стрик это главный момент, где теряют
+    учеников. Два пропуска в одну неделю — цепочка рвётся честно. Сегодняшний
+    день без занятий цепочку не трогает: его ещё можно закрыть.
+    """
+    today = date.fromisoformat(today_str)
+    # Потраченной считается только заморозка-МОСТ: пропуск, за которым цепочка
+    # продолжилась. Обрыв в пустоту до начала цепочки заморозку не ест — иначе
+    # новичок с первым днём занятий видел бы «заморозки нет».
+    bridged: set[tuple[int, int]] = set()
+    pending: list[tuple[int, int]] = []
+    streak = 0
+    cur = today if today_str in active else today - timedelta(days=1)
+    while streak < 3650:
+        if cur.isoformat() in active:
+            streak += 1
+            bridged.update(pending)
+            pending.clear()
+        else:
+            week = cur.isocalendar()[:2]
+            if week in bridged or week in pending:
+                break
+            pending.append(week)
+        cur -= timedelta(days=1)
+    return {
+        "days": streak,
+        "active_today": today_str in active,
+        "freeze_available": today.isocalendar()[:2] not in bridged,
+    }
+
+
+@app.get("/me/stats")
+async def me_stats(x_device: str | None = Header(None),
+                   x_admin_key: str | None = Header(None)):
+    """Стрик, уровень, XP и неделя столбиками — всё для личного кабинета одним
+    запросом. Числа считает сервер из activity_days; фронт только рисует."""
+    await _require_account(x_device, x_admin_key)
+    if not (_storage_ok and x_device):
+        raise HTTPException(status_code=503, detail="Статистика недоступна — база не отвечает.")
+    summary = await asyncio.to_thread(storage.activity_summary, x_device)
+    active = {d["day"] for d in summary["days"] if d["replies"] + d["tasks"] > 0}
+    today = date.fromisoformat(summary["today"])
+    by_day = {d["day"]: d for d in summary["days"]}
+    week = []
+    for i in range(6, -1, -1):
+        key = (today - timedelta(days=i)).isoformat()
+        d = by_day.get(key)
+        week.append({"day": key, "xp": d["xp"] if d else 0,
+                     "actions": d["replies"] + d["tasks"] if d else 0})
+    return {
+        "level": _level_info(summary["xp_total"]),
+        "streak": _compute_streak(active, summary["today"]),
+        "week": week,
+        "totals": {"replies": summary["replies_total"],
+                   "tasks": summary["tasks_total"],
+                   "xp": summary["xp_total"]},
+    }
+
+
+# --------------------------------------------- Личный кабинет: настройки и ник
+
+def _sanitize_settings(raw: dict) -> dict:
+    """Белый список настроек: чужие ключи и дикие значения в базу не попадают.
+    Настройки следуют за аккаунтом между устройствами, как и память."""
+    out: dict = {}
+    if raw.get("theme") in ("dark", "light"):
+        out["theme"] = raw["theme"]
+    vol = raw.get("volume")
+    if isinstance(vol, (int, float)) and not isinstance(vol, bool) and 0 <= vol <= 1:
+        out["volume"] = round(float(vol), 2)
+    if isinstance(raw.get("show_text"), bool):
+        out["show_text"] = raw["show_text"]
+    return out
+
+
+@app.get("/me/settings")
+async def me_settings_get(x_device: str | None = Header(None),
+                          x_admin_key: str | None = Header(None)):
+    await _require_account(x_device, x_admin_key)
+    if not (_storage_ok and x_device):
+        return {"settings": {}}
+    try:
+        raw = json.loads(await asyncio.to_thread(storage.get_settings, x_device))
+    except Exception:  # noqa: BLE001
+        raw = {}
+    return {"settings": _sanitize_settings(raw if isinstance(raw, dict) else {})}
+
+
+@app.post("/me/settings")
+async def me_settings_post(body: dict = Body(...),
+                           x_device: str | None = Header(None),
+                           x_admin_key: str | None = Header(None)):
+    await _require_account(x_device, x_admin_key)
+    if not x_device:
+        raise HTTPException(status_code=401, detail="Нужен аккаунт.")
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна — настройки не сохранились.")
+    clean = _sanitize_settings(body if isinstance(body, dict) else {})
+    await asyncio.to_thread(storage.save_settings, x_device, json.dumps(clean))
+    return {"settings": clean}
+
+
+@app.post("/me/nickname")
+async def me_nickname(request: Request, body: dict = Body(...),
+                      x_device: str | None = Header(None),
+                      x_admin_key: str | None = Header(None)):
+    """Смена ника: имя по-прежнему только генерируется (фронт), сервер проверяет
+    те же правила, что при регистрации. Ник — это логин, поэтому под тем же
+    рейт-лимитом, что /auth/*."""
+    await _require_account(x_device, x_admin_key)
+    if not _rate_ok(f"a:{_client_ip(request)}", 12, 60.0):
+        raise HTTPException(status_code=429, detail="Слишком много попыток — подожди минутку.")
+    if not x_device:
+        raise HTTPException(status_code=401, detail="Нужен аккаунт.")
+    nickname = str(body.get("nickname") or "").strip()
+    if not re.fullmatch(r"[A-Za-z]{4,32}", nickname):
+        raise HTTPException(
+            status_code=422,
+            detail="Никнейм — два английских слова без цифр, он генерируется кнопкой.",
+        )
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна — попробуй чуть позже.")
+    try:
+        ok = await asyncio.to_thread(storage.rename_account, x_device, nickname)
+    except Exception as e:  # noqa: BLE001
+        if storage.is_unique_violation(e):
+            raise HTTPException(status_code=409, detail="Этот никнейм занят — попробуй ещё раз.")
+        print(f"[auth] смена ника не удалась: {type(e).__name__}: {str(e)[:120]}")
+        raise HTTPException(status_code=503, detail="Не получилось сменить ник — попробуй ещё раз.")
+    if not ok:
+        raise HTTPException(status_code=401, detail="Аккаунт не найден.")
+    return {"id": x_device, "nickname": nickname}
 
 
 # ------------------------------------------------------------ Банк заданий
@@ -1508,7 +1688,7 @@ def _feedback_prompt(kind: str, payload: dict) -> str:
 
 async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                               device: str | None, variant: str,
-                              duration_sec: int) -> dict:
+                              duration_sec: int, session_done: bool = False) -> dict:
     t0 = time.time()
     # Выжимки памяти тянем ПАРАЛЛЕЛЬНО с распознаванием: STT занимает 0.5-2 с,
     # SELECT успевает заведомо раньше — добавка к задержке ровно ноль.
@@ -1568,7 +1748,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
             feedback["score"], feedback["max"] = 0, 10
 
     # В память — после того как ответ готов, мимо критического пути.
-    _remember(device, kind, variant, feedback, duration_sec)
+    _remember(device, kind, variant, feedback, duration_sec, session_done)
 
     t2 = time.time()
     return {
@@ -1589,6 +1769,10 @@ async def task_feedback(
     payload: str = Form("{}"),
     variant: str = Form(""),
     duration: int = Form(0),
+    # «1» на последнем варианте серии — бонус XP за доведённую до конца сессию.
+    # Флаг клиентский, но цена ему 25 XP под общими рейт-лимитами — воровать тут
+    # нечего, а серверу пришлось бы ради него хранить состояние сессий.
+    session_done: int = Form(0),
     x_device: str | None = Header(None),
     x_admin_key: str | None = Header(None),
 ):
@@ -1605,7 +1789,8 @@ async def task_feedback(
     data = await audio.read()
     return StreamingResponse(
         _json_with_heartbeat(
-            _task_feedback_work(kind, payload, data, x_device, variant, duration)
+            _task_feedback_work(kind, payload, data, x_device, variant, duration,
+                                bool(session_done))
         ),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
@@ -1778,6 +1963,10 @@ async def talk_stream(audio: UploadFile = File(...),
         except Exception as e:  # noqa: BLE001
             yield json.dumps({"error": f"LLM ошибка ({LLM_MODEL}): {e}"}) + "\n"
             return
+
+        # Реплика состоялась целиком — только теперь она считается занятием
+        # (стрик + XP). Оборванные и ошибочные ходы в статистику не попадают.
+        _note_reply_bg(x_device)
 
         t2 = time.time()
         yield json.dumps(

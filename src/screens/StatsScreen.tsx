@@ -1,16 +1,15 @@
 /**
  * Экран статистики (фото 6 макета): вкладки STATS и MISTAKES.
  *
- * ЧЕСТНОСТЬ ДАННЫХ — главное решение этого файла. Базы нет, поэтому реально
- * только то, что успело осесть в localStorage этого браузера:
- *   - какие варианты пройдены (прогресс) — реальное;
- *   - последний разбор каждого задания (баллы и ошибки) — реальное, пишется
- *     сессией после каждого ответа;
- *   - DAY STREAK — взять неоткуда (дни занятий не логируются), число
- *     демонстрационное, приглушено и подписано «демо».
+ * ЧЕСТНОСТЬ ДАННЫХ — главное решение этого файла: показываем только то, что
+ * где-то реально записано, а если сервер недоступен — прочерк, не выдумку.
+ *   - DAY STREAK — с сервера (/me/stats): дни занятий пишутся в базу;
+ *   - прогресс по вариантам и последний разбор — localStorage + серверная
+ *     синхронизация отметок.
  */
 import { useEffect, useState, type CSSProperties } from 'react'
 
+import { fetchMeStats, type MeStats } from '../account/me'
 import { Pill } from '../design/ui'
 import {
   TASKS,
@@ -20,10 +19,6 @@ import {
   type StoredFeedback,
   type TaskId,
 } from '../ege2/tasks'
-
-/** Выдуманное число макета. Отдельная константа с говорящим именем, чтобы при
- *  подключении базы было видно, что именно выкинуть. */
-const DEMO_STREAK = '4'
 
 /* -------------------------------------------------------------- Раскладка */
 
@@ -55,13 +50,6 @@ const BODY: CSSProperties = {
 }
 
 const BLOCK: CSSProperties = { width: 'min(100%, 940px)' }
-
-const NOTE: CSSProperties = {
-  ...BLOCK,
-  fontSize: 'clamp(11px, 1.2vw, 13px)',
-  lineHeight: 1.45,
-  color: 'var(--text-dim)',
-}
 
 const TABS_ROW: CSSProperties = {
   display: 'flex',
@@ -137,10 +125,12 @@ function StatItem({
 function StatsTab({
   progress,
   feedback,
+  me,
   onOpenMistakes,
 }: {
   progress: Array<{ id: TaskId; done: number; total: number }>
   feedback: Partial<Record<TaskId, StoredFeedback>>
+  me: MeStats | null
   onOpenMistakes: (id: TaskId) => void
 }) {
   const done = progress.reduce((s, p) => s + p.done, 0)
@@ -158,20 +148,16 @@ function StatsTab({
 
   return (
     <>
-      <div className="card2 card2--ghost glass" style={NOTE}>
-        <p style={{ margin: 0 }}>
-          Реальны прогресс по вариантам и последний разбор каждого задания — они хранятся в
-          этом браузере. Дни занятий пока никуда не пишутся, поэтому DAY STREAK —
-          демонстрационное число.
-        </p>
-      </div>
-
       <div className="statrow" style={BLOCK}>
         <StatItem
-          value={DEMO_STREAK}
+          value={me ? String(me.streak.days) : '—'}
           label="DAY STREAK"
-          demo
-          title="Дни занятий нигде не сохраняются — число выдуманное."
+          demo={false}
+          title={
+            me
+              ? 'Дни занятий подряд — считает сервер по всем твоим устройствам.'
+              : 'Сервер недоступен — стрик не получен.'
+          }
         />
         <StatItem
           value={`${pct}%`}
@@ -327,6 +313,18 @@ export function StatsScreen({ onBack }: { onBack: () => void }) {
   const [tab, setTab] = useState<Tab>('stats')
   const [selected, setSelected] = useState<TaskId>(42)
 
+  /* Стрик приходит с сервера; null — сервер недоступен, покажем прочерк. */
+  const [me, setMe] = useState<MeStats | null>(null)
+  useEffect(() => {
+    let alive = true
+    void fetchMeStats().then((s) => {
+      if (alive) setMe(s)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
   /* Отметки и разборы пишет сессия. Обычно статистика монтируется заново после
      возврата, но если вкладку переключали при живом экране — добираем по фокусу. */
   const [progress, setProgress] = useState(() =>
@@ -365,7 +363,7 @@ export function StatsScreen({ onBack }: { onBack: () => void }) {
 
       <div className="screen__body scroll-soft scroll-soft--onDark" style={BODY}>
         {tab === 'stats' ? (
-          <StatsTab progress={progress} feedback={feedback} onOpenMistakes={openMistakes} />
+          <StatsTab progress={progress} feedback={feedback} me={me} onOpenMistakes={openMistakes} />
         ) : (
           <MistakesTab selected={selected} onSelect={setSelected} feedback={feedback} />
         )}
@@ -374,7 +372,7 @@ export function StatsScreen({ onBack }: { onBack: () => void }) {
       <div className="rowbetween">
         <Pill onClick={onBack}>← Назад</Pill>
         <span style={{ fontSize: 'clamp(10px, 1.1vw, 12px)', color: 'var(--text-dim)' }}>
-          Появится база — статистика переедет с этого браузера на аккаунт
+          Стрик и прогресс — на аккаунте, тексты разборов — в этом браузере
         </span>
       </div>
     </div>

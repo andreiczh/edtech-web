@@ -167,6 +167,7 @@ export function TaskScreen({
         const res = await requestTaskFeedback(blob, task.kind, feedbackPayload(task, variant), {
           variantId: variant.id,
           durationSec: Math.max(0, Math.round((Date.now() - startedAtRef.current) / 1000)),
+          sessionDone: !progress || progress.index >= progress.total,
         })
         setFeedback(res.feedback)
         setTranscript(res.transcript)

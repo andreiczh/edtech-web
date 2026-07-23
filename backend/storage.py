@@ -147,6 +147,19 @@ def ensure_schema() -> None:
         "CREATE TABLE IF NOT EXISTS usage_daily ("
         " day TEXT NOT NULL, metric TEXT NOT NULL, value INTEGER NOT NULL,"
         " PRIMARY KEY (day, metric))",
+        # Streak и XP: по строке на (ученик, день). Дни — МОСКОВСКИЕ (аудитория
+        # РФ): день занятий должен кончаться в полночь по часам ученика, а не в
+        # 3 утра. Стрик НЕ хранится — вычисляется из этих строк, поэтому его
+        # невозможно рассинхронизировать и не нужно чинить.
+        "CREATE TABLE IF NOT EXISTS activity_days ("
+        " student_id TEXT NOT NULL, day TEXT NOT NULL,"
+        " replies INTEGER NOT NULL DEFAULT 0, tasks INTEGER NOT NULL DEFAULT 0,"
+        " xp INTEGER NOT NULL DEFAULT 0,"
+        " PRIMARY KEY (student_id, day))",
+        # Настройки аккаунта (тема, громкость, показывать ли текст) — один JSON
+        # на ученика: следуют за человеком между устройствами, как и память.
+        "CREATE TABLE IF NOT EXISTS settings ("
+        " student_id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL)",
     ):
         _exec(ddl)
 
@@ -174,7 +187,8 @@ def get_digests(student_id: str | None, kind: str | None) -> dict:
 # ------------------------------------------------------------------ Запись
 
 def save_result(student_id: str, kind: str, variant: str, score: int,
-                max_score: int, duration_sec: int, errors: list) -> None:
+                max_score: int, duration_sec: int, errors: list,
+                session_done: bool = False) -> None:
     """Сохранить итог одного ответа и обновить выжимки. Зовётся фоном."""
     now = _now()
     if _IS_PG:
@@ -183,10 +197,17 @@ def save_result(student_id: str, kind: str, variant: str, score: int,
     else:
         _exec("INSERT OR IGNORE INTO students(id, created_at) VALUES(?, ?)",
               (student_id, now))
+    # Повтор ли это: проверка ДО вставки нового результата — единственное место,
+    # где «решал ли он этот вариант раньше» можно узнать честно. От ответа
+    # зависит цена XP (повтор — половинная), поэтому XP начисляется здесь же.
+    repeat = bool(variant) and _exec(
+        "SELECT 1 FROM results WHERE student_id=? AND variant=? LIMIT 1",
+        (student_id, variant[:64])).fetchone() is not None
     _exec("INSERT INTO results(id, student_id, kind, variant, score, max_score,"
           " duration_sec, created_at) VALUES(?,?,?,?,?,?,?,?)",
           (str(uuid.uuid4()), student_id, kind, variant[:64], int(score),
            int(max_score), int(duration_sec), now))
+    note_task(student_id, int(score), repeat=repeat, session_done=session_done)
 
     for e in (errors or [])[:10]:
         if not isinstance(e, dict):
@@ -212,6 +233,95 @@ def _upsert_digest(scope: str, text: str) -> None:
           " ON CONFLICT (scope) DO UPDATE SET text=excluded.text,"
           " updated_at=excluded.updated_at",
           (scope, text[:700], _now()))
+
+
+# ------------------------------------------------------------- Streak и XP
+#
+# Принцип: XP выдаёт СЕРВЕР за то, что полезно для экзамена, и цена встроена в
+# конструкцию — накрутка упирается не в отдельную защиту, а в дневные потолки
+# и рейт-лимиты, которые уже есть. Фронт эти числа только показывает.
+
+REPLY_XP = 5           # реплика в разговоре
+REPLY_XP_DAILY_CAP = 30  # XP дают первые N реплик в день (дальше — только счёт)
+TASK_XP_BASE = 10      # решённый вариант задания
+SESSION_BONUS_XP = 25  # закрытая серия из 5 вариантов
+
+
+def _msk_day() -> str:
+    """Московская дата: день занятий должен кончаться в полночь ПО ЧАСАМ УЧЕНИКА
+    (аудитория — РФ), а не в 3 утра, как вышло бы с UTC. МСК = UTC+3 без
+    переводов — сдвиг константой честен."""
+    return (datetime.now(timezone.utc) + timedelta(hours=3)).strftime("%Y-%m-%d")
+
+
+def _bump_activity(student_id: str, replies: int, tasks: int, xp: int) -> None:
+    _exec("INSERT INTO activity_days(student_id, day, replies, tasks, xp)"
+          " VALUES(?,?,?,?,?)"
+          " ON CONFLICT (student_id, day) DO UPDATE SET"
+          " replies = activity_days.replies + excluded.replies,"
+          " tasks = activity_days.tasks + excluded.tasks,"
+          " xp = activity_days.xp + excluded.xp",
+          (student_id, _msk_day(), replies, tasks, xp))
+
+
+def note_reply(student_id: str) -> None:
+    """Реплика разговора: +1 к счёту дня, XP — только за первые N реплик,
+    чтобы «hello-hello» не превращался в ферму опыта."""
+    row = _exec("SELECT replies FROM activity_days WHERE student_id=? AND day=?",
+                (student_id, _msk_day())).fetchone()
+    done_today = int(row[0]) if row else 0
+    _bump_activity(student_id, replies=1, tasks=0,
+                   xp=REPLY_XP if done_today < REPLY_XP_DAILY_CAP else 0)
+
+
+def note_task(student_id: str, score: int, repeat: bool, session_done: bool) -> None:
+    """Решённый вариант: база + балл разбора (XP мягко тянет к качеству, а не
+    только к активности). Повтор уже решённого — половинная цена. Закрытая
+    серия из 5 — бонус за доведённое до конца."""
+    xp = TASK_XP_BASE + max(0, min(int(score), 20))
+    if repeat:
+        xp //= 2
+    if session_done:
+        xp += SESSION_BONUS_XP
+    _bump_activity(student_id, replies=0, tasks=1, xp=xp)
+
+
+def activity_summary(student_id: str) -> dict:
+    """Всё для экрана статистики одним запросом: дни (для стрика и недельных
+    столбиков) и итоговые суммы. 400 дней хватает на год стрика."""
+    rows = _exec("SELECT day, replies, tasks, xp FROM activity_days"
+                 " WHERE student_id=? ORDER BY day DESC LIMIT 400",
+                 (student_id,)).fetchall()
+    days = [{"day": r[0], "replies": int(r[1]), "tasks": int(r[2]), "xp": int(r[3])}
+            for r in rows]
+    return {
+        "days": days,
+        "xp_total": sum(d["xp"] for d in days),
+        "replies_total": sum(d["replies"] for d in days),
+        "tasks_total": sum(d["tasks"] for d in days),
+        "today": _msk_day(),
+    }
+
+
+# ------------------------------------------------------ Настройки аккаунта
+
+def get_settings(student_id: str) -> str:
+    row = _exec("SELECT data FROM settings WHERE student_id=?", (student_id,)).fetchone()
+    return row[0] if row else "{}"
+
+
+def save_settings(student_id: str, data: str) -> None:
+    _exec("INSERT INTO settings(student_id, data, updated_at) VALUES(?,?,?)"
+          " ON CONFLICT (student_id) DO UPDATE SET data=excluded.data,"
+          " updated_at=excluded.updated_at",
+          (student_id, data, _now()))
+
+
+def rename_account(acc_id: str, nickname: str) -> bool:
+    """Сменить ник. False — аккаунта нет; занятый ник летит наружу
+    IntegrityError, как и при регистрации (main.py превращает его в 409)."""
+    cur = _exec("UPDATE accounts SET nickname=? WHERE id=?", (nickname, acc_id))
+    return bool(getattr(cur, "rowcount", 0))
 
 
 # ------------------------------------------------------------ Расход Mistral

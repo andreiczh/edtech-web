@@ -12,6 +12,7 @@
  *  - если ответ длинный, прокручивается САМА карточка (max-height + overflow),
  *    иначе кнопка микрофона уезжала бы за нижнюю панель.
  */
+import { useSettings } from '../account/me'
 import { MicButton } from '../components/MicButton'
 import { BottomBar } from '../design/ui'
 import { useConversation, type ConversationState } from '../useConversation'
@@ -25,13 +26,17 @@ const CAPTIONS: Record<ConversationState, string> = {
 
 export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
   const { state, toggle, transcript, reply, error, latency } = useConversation()
+  /* Режим «чисто аудио» (настройка кабинета): карточка с текстом ответа не
+     рисуется вовсе — только круги и голос, как в живом разговоре. Ошибки
+     показываются ВСЕГДА: молчание вместо объяснения — худший из отказов. */
+  const { showText } = useSettings()
 
   /* Шапку с тумблером рисует App: она общая для верхних экранов и не
      пересоздаётся при переключении вкладок — в этом и есть «бесшовность». */
   return (
     <div className="screenbody">
       <div className="screen__body">
-        {(reply || error) && (
+        {((showText && reply) || error) && (
           <div className="card2 answer scroll-soft" aria-live="polite">
             {error ? (
               <p className="dialog__err">{error}</p>

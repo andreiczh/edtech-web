@@ -15,7 +15,11 @@
       "Bash(npm run dev:*)",
       "Bash(npm.cmd install:*)",
       "Bash(npm.cmd run build:*)",
-      "Bash(npm.cmd run dev:*)"
+      "Bash(npm.cmd run dev:*)",
+      "Bash(ssh -o StrictHostKeyChecking=accept-new -R:*)",
+      "Bash(ssh -p 443 -R:*)",
+      "Bash(npx localtunnel:*)",
+      "Bash(cloudflared tunnel --url http://127.0.0.1:8000:*)"
     ],
     "ask": [
       "Bash(git push:*)",
