@@ -26,6 +26,7 @@ import secrets
 import socket
 import tempfile
 import time
+from collections import deque
 
 # На Windows без Developer Mode huggingface_hub печатает безобидный warning
 # про symlinks при каждой загрузке модели — глушим, чтобы не путать с ошибкой.
@@ -35,7 +36,7 @@ import aiohttp
 import edge_tts
 import httpx
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -409,6 +410,93 @@ async def transcribe_remote(data: bytes, filename: str = "speech.webm") -> str:
 
 _storage_ok = False
 
+# ------------------------------------------------------- Входной шлюз API
+#
+# Тяжёлые эндпоинты (STT+LLM+TTS жгут квоту ключа Mistral) закрыты для
+# посторонних: фронт после входа шлёт X-Device = id аккаунта, сервер проверяет,
+# что такой аккаунт существует. Любой curl со случайным uuid получает 401.
+#
+# Скорость: проверка — один SELECT по первичному ключу, и тот кэшируется на
+# 10 минут, так что голосовая петля платит за шлюз ноль почти всегда.
+#
+# Отказ базы = шлюз ОТКРЫТ (fail-open, с криком в лог): назначение шлюза —
+# отсечь халявщиков, а не охранять секреты. Уронить занятия всем ученикам
+# из-за минутной икоты Neon — хуже, чем пропустить одного постороннего.
+#
+# REQUIRE_ACCOUNT=0 выключает шлюз (локальная отладка). ADMIN_KEY проходит
+# всегда — этим пользуются смоук-тесты.
+
+REQUIRE_ACCOUNT = os.environ.get("REQUIRE_ACCOUNT", "1").strip() not in ("0", "false", "no")
+
+_ACCOUNT_CACHE: dict[str, float] = {}
+_ACCOUNT_CACHE_TTL = 600.0
+
+
+async def _require_account(x_device: str | None, x_admin_key: str | None = None) -> None:
+    if not REQUIRE_ACCOUNT:
+        return
+    admin = os.environ.get("ADMIN_KEY", "")
+    if admin and x_admin_key and hmac.compare_digest(x_admin_key, admin):
+        return
+    if not x_device:
+        raise HTTPException(status_code=401, detail="Нужен аккаунт — войди в приложение.")
+    now = time.monotonic()
+    until = _ACCOUNT_CACHE.get(x_device)
+    if until and until > now:
+        return
+    if not _storage_ok:
+        print("[gate] база недоступна — пропускаю без проверки (fail-open)")
+        return
+    try:
+        ok = await asyncio.to_thread(storage.account_exists, x_device)
+    except Exception as e:  # noqa: BLE001
+        print(f"[gate] проверка аккаунта не удалась ({type(e).__name__}) — fail-open")
+        return
+    if not ok:
+        raise HTTPException(status_code=401, detail="Нужен аккаунт — войди в приложение.")
+    # Кэш растёт только от НАСТОЯЩИХ аккаунтов — раздуть память мусорными
+    # заголовками нельзя; страховочный сброс на всякий случай.
+    if len(_ACCOUNT_CACHE) > 10_000:
+        _ACCOUNT_CACHE.clear()
+    _ACCOUNT_CACHE[x_device] = now + _ACCOUNT_CACHE_TTL
+
+
+# Рейт-лимит в памяти процесса. Инстанс один (Render free), распределённый
+# лимитер не нужен. Скользящее окно на deque: память O(limit) на ключ,
+# словарь подчищается целиком при переполнении — грубо, но ограниченно.
+_RATE: dict[str, deque] = {}
+
+
+def _rate_ok(key: str, limit: int, window_sec: float) -> bool:
+    now = time.monotonic()
+    dq = _RATE.get(key)
+    if dq is None:
+        if len(_RATE) > 5_000:
+            _RATE.clear()
+        dq = deque()
+        _RATE[key] = dq
+    while dq and now - dq[0] > window_sec:
+        dq.popleft()
+    if len(dq) >= limit:
+        return False
+    dq.append(now)
+    return True
+
+
+def _client_ip(request: Request) -> str:
+    # Render стоит за прокси: настоящий адрес — первый в X-Forwarded-For.
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _check_voice_rate(identity: str) -> None:
+    # 20 запросов в минуту на человека: живой ученик физически делает 6-10
+    # (реплика = минимум пара секунд речи + ответ). В лимит упрётся только скрипт.
+    if not _rate_ok(f"v:{identity}", 20, 60.0):
+        raise HTTPException(status_code=429, detail="Слишком много запросов подряд — подожди минутку.")
+
 
 async def _load_memory(device: str | None, kind: str | None) -> dict:
     """Выжимки для промпта. Единственное место, где память сидит в горячем пути,
@@ -494,7 +582,12 @@ def _check_pw(password: str, stored: str) -> bool:
 
 
 @app.post("/auth/register")
-async def auth_register(body: dict = Body(...)):
+async def auth_register(request: Request, body: dict = Body(...)):
+    # 12 попыток в минуту с одного адреса: живой человек столько не нажмёт,
+    # а скрипту, штампующему аккаунты (или перебирающему пароли в login),
+    # этого мало.
+    if not _rate_ok(f"a:{_client_ip(request)}", 12, 60.0):
+        raise HTTPException(status_code=429, detail="Слишком много попыток — подожди минутку.")
     nickname = str(body.get("nickname") or "").strip()
     password = str(body.get("password") or "")
     exam = str(body.get("exam") or "ege")
@@ -524,7 +617,9 @@ async def auth_register(body: dict = Body(...)):
 
 
 @app.post("/auth/login")
-async def auth_login(body: dict = Body(...)):
+async def auth_login(request: Request, body: dict = Body(...)):
+    if not _rate_ok(f"a:{_client_ip(request)}", 12, 60.0):
+        raise HTTPException(status_code=429, detail="Слишком много попыток — подожди минутку.")
     nickname = str(body.get("nickname") or "").strip()
     password = str(body.get("password") or "")
     if not _storage_ok:
@@ -944,7 +1039,11 @@ def health():
 
 
 @app.post("/talk")
-async def talk(audio: UploadFile = File(...)):
+async def talk(audio: UploadFile = File(...),
+               x_device: str | None = Header(None),
+               x_admin_key: str | None = Header(None)):
+    await _require_account(x_device, x_admin_key)
+    _check_voice_rate(x_device or "admin")
     t0 = time.time()
     data = await audio.read()
 
@@ -1035,7 +1134,9 @@ async def _json_with_heartbeat(work):
 
 
 @app.post("/monologue")
-async def monologue(audio: UploadFile = File(...)):
+async def monologue(audio: UploadFile = File(...),
+                    x_device: str | None = Header(None),
+                    x_admin_key: str | None = Header(None)):
     """Разбор монолога (ЕГЭ Задание 4): полное аудио → batch STT → ОДИН
     структурный проход LLM → JSON-фидбэк (3 критерия + ошибки). Без TTS —
     разбор текстовый, для экрана результата.
@@ -1043,6 +1144,8 @@ async def monologue(audio: UploadFile = File(...)):
     Отдаётся потоком с «сердцебиением» — см. `_json_with_heartbeat`. Тело ответа
     и его разбор на фронте от этого не меняются.
     """
+    await _require_account(x_device, x_admin_key)
+    _check_voice_rate(x_device or "admin")
     data = await audio.read()
     return StreamingResponse(
         _json_with_heartbeat(_monologue_work(data)),
@@ -1267,13 +1370,16 @@ async def task_feedback(
     variant: str = Form(""),
     duration: int = Form(0),
     x_device: str | None = Header(None),
+    x_admin_key: str | None = Header(None),
 ):
     """Разбор ответа на задание устной части (39-42). Отдаётся потоком с
     «сердцебиением» — см. `_json_with_heartbeat`; путь обязан быть в
     `_STREAM_PATHS`, иначе gzip молча похоронит стриминг.
 
-    `X-Device` — анонимный id браузера: по нему копится профиль ошибок. Без
-    заголовка разбор работает так же, просто ничего не запоминается."""
+    `X-Device` — id аккаунта (или устройства): по нему и копится профиль
+    ошибок, и работает входной шлюз."""
+    await _require_account(x_device, x_admin_key)
+    _check_voice_rate(x_device or "admin")
     if kind not in {"reading", "dialogue", "interview", "monologue"}:
         raise HTTPException(status_code=422, detail=f"Неизвестный тип задания: {kind}")
     data = await audio.read()
@@ -1286,8 +1392,43 @@ async def task_feedback(
     )
 
 
+def _sanitize_history(raw: str) -> list[dict]:
+    """История диалога от клиента — по 10 последних реплик.
+
+    Память диалога НАМЕРЕННО клиентская: живёт в вкладке браузера и приходит с
+    каждым запросом. Серверу это даёт ноль состояния и ноль хранения (мы решили
+    не хранить транскрипты речи), а истории — естественную смерть вместе со
+    вкладкой. Цена — ~400 токенов промпта, около +0.05 с у Mistral.
+
+    Клиенту, впрочем, не верим: максимум 10 реплик, роли только user/assistant,
+    каждая обрезается до 300 символов — иначе curl мог бы затолкать в промпт
+    роман и оплатить его нашим ключом.
+    """
+    try:
+        items = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(items, list):
+        return []
+    out = []
+    for it in items[-10:]:
+        if not isinstance(it, dict):
+            continue
+        role = it.get("role")
+        content = str(it.get("content") or "").strip()
+        if role not in ("user", "assistant") or not content:
+            continue
+        out.append({"role": role, "content": content[:300]})
+    return out
+
+
 @app.post("/talk_stream")
-async def talk_stream(audio: UploadFile = File(...), x_device: str | None = Header(None)):
+async def talk_stream(audio: UploadFile = File(...),
+                      history: str = Form("[]"),
+                      x_device: str | None = Header(None),
+                      x_admin_key: str | None = Header(None)):
+    await _require_account(x_device, x_admin_key)
+    _check_voice_rate(x_device or "admin")
     """Разговор со СТРИМИНГОМ ответа (Шаг A к <2с бесшовности).
 
     Тот же push-to-talk на входе, но ответ течёт пофразно: LLM токенами →
@@ -1362,11 +1503,18 @@ async def talk_stream(audio: UploadFile = File(...), x_device: str | None = Head
             )
             print("[memory] профиль ученика подключён к разговору")
 
+        # Память ДИАЛОГА: последние реплики сессии между system и текущей фразой.
+        # Тьютор помнит, о чём шла речь, и перестаёт отвечать с чистого листа.
+        past = _sanitize_history(history)
+        if past:
+            print(f"[dialog] история: {len(past)} реплик")
+
         try:
             stream = await client.chat.completions.create(
                 model=LLM_MODEL,
                 messages=[
                     {"role": "system", "content": sys_prompt},
+                    *past,
                     {"role": "user", "content": user_text},
                 ],
                 max_tokens=120,

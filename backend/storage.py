@@ -255,6 +255,13 @@ def get_account(nickname: str):
                  (nickname,)).fetchone()
 
 
+def account_exists(acc_id: str) -> bool:
+    """Для входного шлюза API: is этот id настоящим аккаунтом. Один SELECT по
+    первичному ключу; main.py кэширует ответ, чтобы не ходить сюда на каждый
+    запрос голосовой петли."""
+    return _exec("SELECT 1 FROM accounts WHERE id=?", (acc_id,)).fetchone() is not None
+
+
 def solved_variants(student_id: str) -> list[str]:
     """Какие варианты этот ученик уже сдавал — по записанным результатам.
     Нужно, чтобы выдача сессий вычёркивала пройденное на ЛЮБОМ устройстве."""

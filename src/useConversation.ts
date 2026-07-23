@@ -46,6 +46,10 @@ export function useConversation(): ConversationApi {
   const playingRef = useRef(false)
   const streamDoneRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
+  /** Память диалога: последние 10 реплик сессии (5 обменов). Живёт только в
+      этой вкладке — сервер историю не хранит намеренно (приватность + ноль
+      состояния), закрыл вкладку — тьютор всё забыл. */
+  const historyRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([])
 
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
@@ -118,16 +122,23 @@ export function useConversation(): ConversationApi {
       // Получили ли мы хоть что-то из потока. Решает, можно ли повторить запрос:
       // после первого чанка повтор проиграл бы часть ответа дважды.
       let gotData = false
+      // Итог этой реплики — чтобы по done-чанку дописать её в историю диалога.
+      let finalUser = ''
+      let finalReply = ''
 
       const runOnce = async () => {
         const fd = new FormData()
         fd.append('audio', blob, 'speech.webm')
+        // Память диалога: последние 10 реплик ЭТОЙ сессии уходят с запросом —
+        // тьютор помнит, о чём шла речь. Хранится только в этой вкладке
+        // (historyRef): сервер намеренно ничего не запоминает, закрыл вкладку —
+        // диалог забыт. Дёшево по построению: ~10 коротких строк.
+        fd.append('history', JSON.stringify(historyRef.current))
         const res = await fetch(`${BACKEND}/talk_stream`, {
           method: 'POST',
           body: fd,
           signal: ac.signal,
-          // По X-Device сервер подтягивает профиль ошибок ученика: тьютор
-          // мягко ловит повторяющиеся ошибки. Случайный uuid, см. device.ts.
+          // По X-Device сервер узнаёт аккаунт: и входной шлюз, и профиль ошибок.
           headers: { 'X-Device': identityId() },
         })
         if (!res.ok || !res.body) {
@@ -177,10 +188,22 @@ export function useConversation(): ConversationApi {
             if (msg.done) {
               if (msg.reply) setReply(msg.reply)
               if (msg.latency) setLatency(msg.latency)
+              if (msg.user) finalUser = msg.user
+              if (msg.reply) finalReply = msg.reply
             }
           }
         }
         streamDoneRef.current = true
+        // Реплика состоялась целиком — дописываем пару в историю и режем до
+        // 10 последних записей (5 обменов): больше не нужно ни тьютору, ни
+        // токенам. Ошибочные и пустые обмены в историю не попадают.
+        if (finalUser && finalReply) {
+          historyRef.current = [
+            ...historyRef.current,
+            { role: 'user' as const, content: finalUser },
+            { role: 'assistant' as const, content: finalReply },
+          ].slice(-10)
+        }
         // Стрим кончился, а звука нет/уже доиграл — вернёмся в покой.
         if (!playingRef.current && queueRef.current.length === 0) {
           setState((s) => (s === 'processing' || s === 'speaking' ? 'idle' : s))
