@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import calendar
 import hashlib
 import hmac
 import json
@@ -27,6 +28,7 @@ import socket
 import tempfile
 import time
 from collections import deque
+from datetime import datetime, timezone
 
 # На Windows без Developer Mode huggingface_hub печатает безобидный warning
 # про symlinks при каждой загрузке модели — глушим, чтобы не путать с ошибкой.
@@ -498,6 +500,92 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+# --------------------------------------------------- Месячный бюджет Mistral
+#
+# Месячные квоты ключа в API не видны (только в консоли владельца), поэтому
+# потолок ставим СВОЙ, консервативный, и охраняем его так, чтобы обычный ученик
+# ничего не заметил:
+#   - до 80% бюджета — жизнь как жизнь, никаких ограничений сверх обычных;
+#   - дальше лимиты УЖИМАЮТСЯ, а не запрещаются, и только если расход
+#     опережает календарь (80% бюджета 29-го числа — не повод никого душить);
+#   - жёсткий отказ — только на 100%, и это отказ НАШЕГО потолка, а не ошибка
+#     Mistral посреди начатого ответа.
+# Считаем запросы LLM: по замеру 23.07.2026 именно они — узкое место, токены
+# и близко не выбираются. 0 = бюджет выключен.
+MONTHLY_LLM_BUDGET = int(os.environ.get("MONTHLY_LLM_BUDGET", "30000") or 0)
+
+# Счётчик месяца в памяти процесса: инкремент на каждый вызов LLM, изредка
+# сверяется с базой (переживает рестарты — Render передеплоивается часто).
+_BUDGET = {"month": "", "used": 0, "synced": 0.0}
+
+
+def _budget_month() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m")
+
+
+def _month_elapsed_frac() -> float:
+    now = datetime.now(timezone.utc)
+    days = calendar.monthrange(now.year, now.month)[1]
+    return (now.day - 1 + now.hour / 24.0) / days
+
+
+def _budget_note_llm(n: int) -> None:
+    month = _budget_month()
+    if _BUDGET["month"] != month:
+        _BUDGET.update(month=month, used=0, synced=0.0)
+    _BUDGET["used"] += n
+
+
+def _budget_sync_bg() -> None:
+    """Фоновая сверка счётчика с базой: после рестарта память пустая, а месяц —
+    нет. Берём максимум из двух: база отстаёт от памяти на fire-and-forget
+    записи, память отстаёт от базы после рестарта."""
+    if not _storage_ok:
+        return
+
+    async def run():
+        try:
+            month_db = await asyncio.to_thread(storage.month_report)
+            db_used = int(month_db.get("llm_req", 0))
+            month_now = _budget_month()
+            if _BUDGET["month"] == month_now:
+                _BUDGET["used"] = max(_BUDGET["used"], db_used)
+            else:
+                # Свежий процесс (month="") или смена месяца: база — истина.
+                # Без этой ветки стартовая сверка молча промахивалась мимо
+                # неинициализированного счётчика и used жил нулём до 10 минут.
+                _BUDGET.update(month=month_now, used=db_used)
+            print(f"[budget] сверка: {_BUDGET['used']}/{MONTHLY_LLM_BUDGET} за {month_now}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[budget] сверка с базой не удалась ({type(e).__name__})")
+
+    try:
+        asyncio.create_task(run())
+    except RuntimeError:
+        pass
+
+
+def _budget_state() -> dict:
+    """Снимок бюджета для /health и решения о лимитах. mode:
+    off / normal / eco (80%+ и опережаем календарь) / low (95%+) / empty."""
+    if MONTHLY_LLM_BUDGET <= 0:
+        return {"mode": "off"}
+    month = _budget_month()
+    if _BUDGET["month"] != month:
+        _BUDGET.update(month=month, used=0, synced=0.0)
+    used, frac = _BUDGET["used"], _BUDGET["used"] / MONTHLY_LLM_BUDGET
+    ahead = frac > _month_elapsed_frac()
+    mode = "normal"
+    if frac >= 1.0:
+        mode = "empty"
+    elif frac >= 0.95 and ahead:
+        mode = "low"
+    elif frac >= 0.80 and ahead:
+        mode = "eco"
+    return {"mode": mode, "used": used, "budget": MONTHLY_LLM_BUDGET,
+            "pct": round(frac * 100, 1)}
+
+
 def _check_voice_rate(identity: str) -> None:
     """Три слоя защиты бюджета Mistral (замер лимитов ключа 23.07.2026:
     LLM 50 запросов/мин на ВСЕХ — это и есть узкое место всей системы).
@@ -509,15 +597,36 @@ def _check_voice_rate(identity: str) -> None:
     3. 45/мин ГЛОБАЛЬНО — ниже провайдерских 50: когда все ученики разом
        упираются в бюджет, они получают наш вежливый 429 «сервис занят», а не
        ошибку Mistral посреди начатого стрима с уже сожжённым STT.
+
+    Поверх — месячный бюджет: при перерасходе лимиты ужимаются (см. _BUDGET),
+    полный отказ — только когда месяц выбран целиком.
     """
-    if not _rate_ok(f"v:{identity}", 20, 60.0):
+    per_min, per_day, per_glob = 20, 300, 45
+    state = _budget_state()
+    if state["mode"] != "off":
+        now = time.monotonic()
+        if now - _BUDGET["synced"] > 600:
+            _BUDGET["synced"] = now
+            _budget_sync_bg()
+        if state["mode"] == "empty":
+            raise HTTPException(
+                status_code=429,
+                detail="Месячный запас занятий исчерпан — он обновится 1 числа. "
+                       "Спасибо, что занимаешься так много!",
+            )
+        if state["mode"] == "low":
+            per_min, per_day, per_glob = 6, 60, 15
+        elif state["mode"] == "eco":
+            per_min, per_day, per_glob = 10, 150, 30
+
+    if not _rate_ok(f"v:{identity}", per_min, 60.0):
         raise HTTPException(status_code=429, detail="Слишком много запросов подряд — подожди минутку.")
-    if not _rate_ok(f"vd:{identity}", 300, 86_400.0):
+    if not _rate_ok(f"vd:{identity}", per_day, 86_400.0):
         raise HTTPException(
             status_code=429,
             detail="Дневной лимит занятий исчерпан — продолжим завтра. Так мы бережём общий бюджет.",
         )
-    if not _rate_ok("v:__global__", 45, 60.0):
+    if not _rate_ok("v:__global__", per_glob, 60.0):
         raise HTTPException(
             status_code=429,
             detail="Сервис сейчас занят другими учениками — попробуй через минуту.",
@@ -570,6 +679,10 @@ def _track_usage(**metrics) -> None:
     Зачем: лимиты ключа не безлимитные (LLM 50 req/мин и 50k токенов/мин по
     заголовкам API), а месячные квоты видны только в консоли. Считаем сами —
     сводка в /admin/usage и кратко в /health."""
+    # Месячный бюджет питается отсюда же — единая точка учёта вызовов LLM.
+    # Инкремент в памяти, база не при чём: работает и при упавшем storage.
+    if metrics.get("llm_req"):
+        _budget_note_llm(int(metrics["llm_req"]))
     if not _storage_ok:
         return
 
@@ -788,8 +901,11 @@ async def admin_usage(x_admin_key: str | None = Header(None)):
     if not _storage_ok:
         return {"days": {}, "limits": {}}
     days = await asyncio.to_thread(storage.usage_report, 14)
+    month = await asyncio.to_thread(storage.month_report)
     return {
         "days": days,
+        "month": month,
+        "budget": _budget_state(),
         "limits_per_minute": {
             "llm_requests": 50, "llm_tokens": 50_000,
             "stt_requests": 60, "stt_audio_seconds": 3600,
@@ -1085,6 +1201,13 @@ async def _warmup():
         _storage_ok = False
         print(f"[startup] память НЕдоступна ({type(e).__name__}: {e}) — работаю без неё")
 
+    # Месячный бюджет: после рестарта память процесса пустая, а месяц — нет.
+    # Сверяемся с базой сразу, не дожидаясь ленивого триггера в _check_voice_rate.
+    # Строго ПОСЛЕ включения памяти: _budget_sync_bg без _storage_ok — no-op.
+    if MONTHLY_LLM_BUDGET > 0:
+        _BUDGET["synced"] = time.monotonic()
+        _budget_sync_bg()
+
     print("[startup] Сервер принимает запросы.")
 
 
@@ -1117,6 +1240,8 @@ def health():
         # Сводка расхода за сегодня — секретов не содержит, а увидеть «сколько
         # уже сожгли» можно без ключа админки. Полная разбивка — /admin/usage.
         "usage_today": _usage_today(),
+        # Месячный бюджет вызовов LLM: mode normal/eco/low/empty (см. _BUDGET).
+        "budget_month": _budget_state(),
     }
 
 

@@ -229,6 +229,18 @@ def bump_usage(metrics: dict) -> None:
               (day, metric, v))
 
 
+def month_report() -> dict:
+    """{метрика: сумма} за текущий календарный месяц (UTC). Кормит месячный
+    бюджет в main.py: тот держит счётчик в памяти, а сюда ходит изредка —
+    восстановиться после рестарта и сверить дрейф."""
+    month = _now()[:7]
+    rows = _exec(
+        "SELECT metric, COALESCE(SUM(value),0) FROM usage_daily"
+        " WHERE day LIKE ? GROUP BY metric",
+        (month + "%",)).fetchall()
+    return {metric: int(value) for metric, value in rows}
+
+
 def usage_report(days: int = 14) -> dict:
     """{день: {метрика: значение}} за последние N дней, новые сверху."""
     rows = _exec(
