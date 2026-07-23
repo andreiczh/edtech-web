@@ -405,7 +405,10 @@ async def transcribe_remote(data: bytes, filename: str = "speech.webm") -> str:
     )
     if r.status_code != 200:
         raise _RemoteSttError(r.status_code, r.text)
-    return (r.json().get("text") or "").strip()
+    body = r.json()
+    u = body.get("usage") or {}
+    _track_usage(stt_req=1, stt_audio_seconds=u.get("prompt_audio_seconds") or 0)
+    return (body.get("text") or "").strip()
 
 
 _storage_ok = False
@@ -537,6 +540,36 @@ def _memory_prompt_block(mem: dict) -> str:
     )
     return block
 
+
+def _track_usage(**metrics) -> None:
+    """Свой счётчик расхода Mistral — фоном, мимо критического пути.
+
+    Зачем: лимиты ключа не безлимитные (LLM 50 req/мин и 50k токенов/мин по
+    заголовкам API), а месячные квоты видны только в консоли. Считаем сами —
+    сводка в /admin/usage и кратко в /health."""
+    if not _storage_ok:
+        return
+
+    async def run():
+        try:
+            await asyncio.to_thread(storage.bump_usage, metrics)
+        except Exception as e:  # noqa: BLE001
+            print(f"[usage] не записал ({type(e).__name__}: {str(e)[:60]})")
+
+    try:
+        asyncio.create_task(run())
+    except RuntimeError:
+        pass  # вне event loop — в наших путях не случается
+
+
+def _track_llm(completion) -> None:
+    u = getattr(completion, "usage", None)
+    if u is not None:
+        _track_usage(llm_req=1,
+                     llm_prompt_tokens=getattr(u, "prompt_tokens", 0) or 0,
+                     llm_completion_tokens=getattr(u, "completion_tokens", 0) or 0)
+    else:
+        _track_usage(llm_req=1)
 
 def _remember(device: str | None, kind: str, variant: str, feedback: dict,
               duration_sec: int) -> None:
@@ -723,6 +756,25 @@ async def admin_task_toggle(tid: str, x_admin_key: str | None = Header(None)):
     return {"active": state}
 
 
+@app.get("/admin/usage")
+async def admin_usage(x_admin_key: str | None = Header(None)):
+    """Расход Mistral по дням: свой счётчик вместо консоли, которую видно
+    только владельцу. Лимиты ключа для ориентира — из заголовков API
+    (замер 23.07.2026)."""
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        return {"days": {}, "limits": {}}
+    days = await asyncio.to_thread(storage.usage_report, 14)
+    return {
+        "days": days,
+        "limits_per_minute": {
+            "llm_requests": 50, "llm_tokens": 50_000,
+            "stt_requests": 60, "stt_audio_seconds": 3600,
+            "tts_input_characters": 12_000,
+        },
+    }
+
+
 class SttFailed(Exception):
     """Распознать не удалось — ни основным путём, ни запасным.
 
@@ -824,6 +876,9 @@ async def synthesize_edge(text: str) -> bytes:
         connector = aiohttp.TCPConnector(local_addr=(_LOCAL_IP, 0)) if _LOCAL_IP else None
         communicate = edge_tts.Communicate(text, TTS_VOICE, connector=connector)
         await communicate.save(path)
+        # edge-tts бесплатный, но метрика нужна: если однажды придётся уйти на
+        # платный TTS целиком, объём уже будет известен.
+        _track_usage(tts_edge_chars=len(text))
         with open(path, "rb") as fh:
             return fh.read()
     finally:
@@ -840,6 +895,7 @@ async def synthesize_mistral(text: str) -> bytes:
     )
     if r.status_code != 200:
         raise RuntimeError(f"Mistral TTS вернул {r.status_code}: {r.text[:200]}")
+    _track_usage(tts_mistral_chars=len(text))
     return r.content
 
 
@@ -1035,7 +1091,20 @@ def health():
         "llm_model": LLM_MODEL,
         "llm_key": bool(os.environ.get("LLM_API_KEY")),
         "memory": storage.describe() if _storage_ok else "выключена",
+        # Сводка расхода за сегодня — секретов не содержит, а увидеть «сколько
+        # уже сожгли» можно без ключа админки. Полная разбивка — /admin/usage.
+        "usage_today": _usage_today(),
     }
+
+
+def _usage_today() -> dict:
+    if not _storage_ok:
+        return {}
+    try:
+        report = storage.usage_report(1)
+        return next(iter(report.values()), {}) if report else {}
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 @app.post("/talk")
@@ -1079,6 +1148,7 @@ async def talk(audio: UploadFile = File(...),
         )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"LLM ошибка ({LLM_MODEL}): {e}")
+    _track_llm(completion)
     ai_text = (completion.choices[0].message.content or "").strip()
     t2 = time.time()
 
@@ -1195,6 +1265,7 @@ async def _monologue_work(data: bytes) -> dict:
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"LLM ошибка ({LLM_MODEL}): {e}")
 
+    _track_llm(completion)
     raw = (completion.choices[0].message.content or "").strip()
     try:
         feedback = json.loads(raw)
@@ -1332,6 +1403,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"LLM ошибка ({LLM_MODEL}): {e}")
 
+    _track_llm(completion)
     raw = (completion.choices[0].message.content or "").strip()
     try:
         feedback = json.loads(raw)
@@ -1520,7 +1592,12 @@ async def talk_stream(audio: UploadFile = File(...),
                 max_tokens=120,
                 stream=True,
             )
+            stream_usage = None
             async for chunk in stream:
+                # usage приезжает в последнем чанке стрима (если провайдер его
+                # шлёт) — запоминаем для счётчика расхода.
+                if getattr(chunk, "usage", None) is not None:
+                    stream_usage = chunk.usage
                 delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
                 if not delta:
                     continue
@@ -1536,6 +1613,17 @@ async def talk_stream(audio: UploadFile = File(...),
             tail = buf.strip()
             if tail:
                 yield await emit(tail)
+            # Учёт расхода: точно из usage, а если стрим его не отдал — оценкой
+            # по символам (~4 символа на токен): бюджету хватает точности ±20%.
+            if stream_usage is not None:
+                _track_usage(llm_req=1,
+                             llm_prompt_tokens=getattr(stream_usage, "prompt_tokens", 0) or 0,
+                             llm_completion_tokens=getattr(stream_usage, "completion_tokens", 0) or 0)
+            else:
+                approx_prompt = (len(sys_prompt) + sum(len(p["content"]) for p in past)
+                                 + len(user_text)) // 4
+                _track_usage(llm_req=1, llm_prompt_tokens=approx_prompt,
+                             llm_completion_tokens=max(1, len(reply_full) // 4))
         except TtsFailed as e:
             yield json.dumps({"error": f"TTS (edge-tts) ошибка: {e}"}) + "\n"
             return

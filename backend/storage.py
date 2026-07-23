@@ -140,6 +140,13 @@ def ensure_schema() -> None:
         " id TEXT PRIMARY KEY, exam TEXT NOT NULL, task_no INTEGER NOT NULL,"
         " kind TEXT NOT NULL, payload TEXT NOT NULL,"
         " active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)",
+        # Свой счётчик расхода Mistral: лимиты у ключа НЕ безлимитные
+        # (замерено по заголовкам 23.07.2026: LLM 50 req/мин и 50k токенов/мин),
+        # а месячные квоты видны только в консоли — значит, продукт обязан
+        # считать расход сам. По строке на (день, метрика).
+        "CREATE TABLE IF NOT EXISTS usage_daily ("
+        " day TEXT NOT NULL, metric TEXT NOT NULL, value INTEGER NOT NULL,"
+        " PRIMARY KEY (day, metric))",
     ):
         _exec(ddl)
 
@@ -198,10 +205,39 @@ def save_result(student_id: str, kind: str, variant: str, score: int,
 
 def _upsert_digest(scope: str, text: str) -> None:
     # Синтаксис ON CONFLICT одинаков в SQLite 3.24+ и Postgres.
+    # Жёсткая крышка длины: выжимка едет в промпт КАЖДОГО запроса, и токены
+    # у ключа не безлимитные (50k/мин). 700 символов ≈ 180 токенов — потолок,
+    # выше которого выжимка перестаёт быть выжимкой.
     _exec("INSERT INTO digests(scope, text, updated_at) VALUES(?,?,?)"
           " ON CONFLICT (scope) DO UPDATE SET text=excluded.text,"
           " updated_at=excluded.updated_at",
-          (scope, text, _now()))
+          (scope, text[:700], _now()))
+
+
+# ------------------------------------------------------------ Расход Mistral
+
+def bump_usage(metrics: dict) -> None:
+    """Прибавить счётчики за сегодня. Зовётся фоном после каждого вызова API."""
+    day = _now()[:10]
+    for metric, value in metrics.items():
+        v = int(value)
+        if v <= 0:
+            continue
+        _exec("INSERT INTO usage_daily(day, metric, value) VALUES(?,?,?)"
+              " ON CONFLICT (day, metric) DO UPDATE SET"
+              " value = usage_daily.value + excluded.value",
+              (day, metric, v))
+
+
+def usage_report(days: int = 14) -> dict:
+    """{день: {метрика: значение}} за последние N дней, новые сверху."""
+    rows = _exec(
+        "SELECT day, metric, value FROM usage_daily ORDER BY day DESC LIMIT ?",
+        (days * 12,)).fetchall()
+    out: dict = {}
+    for day, metric, value in rows:
+        out.setdefault(day, {})[metric] = value
+    return out
 
 
 # ------------------------------------------------------------------ Выжимки
