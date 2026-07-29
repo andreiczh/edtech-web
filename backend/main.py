@@ -20,6 +20,7 @@ import base64
 import calendar
 import hashlib
 import hmac
+import io
 import json
 import os
 import re
@@ -1170,19 +1171,59 @@ _VERBATIM_STT = (
     "unintelligible, omit it rather than guess. Output only the transcription itself."
 )
 
-_AUDIO_FORMATS = {".webm": "webm", ".mp3": "mp3", ".wav": "wav", ".ogg": "ogg",
-                  ".m4a": "m4a", ".mp4": "mp4"}
+def _to_wav16k(data: bytes) -> bytes:
+    """webm/opus из браузера → WAV 16 кГц моно.
+
+    Нужно потому, что чат-модель Voxtral принимает ТОЛЬКО mp3 и wav (проверено
+    29.07.2026: на webm приходит 400 «Failed to load audio file»), а MediaRecorder
+    в браузере отдаёт webm/opus и другого формата не умеет.
+
+    Формат именно WAV, а не mp3: кодирование mp3 из того же куска занимает втрое
+    больше процессора (2.54 с против 0.71 с на 87 секундах речи), а процессор —
+    самый дефицитный ресурс на бесплатном Render. Данных получается больше, но
+    канал Render→Mistral это переживает, в отличие от 0.1 CPU.
+    16 кГц моно — то, с чем работают все модели распознавания; больше не нужно.
+    """
+    import av  # noqa: PLC0415 — тяжёлый импорт нужен только на этом пути
+
+    src = av.open(io.BytesIO(data))
+    buf = io.BytesIO()
+    dst = av.open(buf, "w", format="wav")
+    stream = dst.add_stream("pcm_s16le", rate=16000)
+    stream.layout = "mono"
+    resampler = av.AudioResampler(format="s16", layout="mono", rate=16000)
+    try:
+        for frame in src.decode(audio=0):
+            for f in resampler.resample(frame):
+                f.pts = None
+                for packet in stream.encode(f):
+                    dst.mux(packet)
+        for packet in stream.encode(None):
+            dst.mux(packet)
+    finally:
+        dst.close()
+        src.close()
+    return buf.getvalue()
+
+
+# Что чат-модель принимает как есть. Всё остальное перекодируем в WAV.
+_CHAT_AUDIO_OK = {".mp3": "mp3", ".wav": "wav"}
 
 
 async def transcribe_chat(data: bytes, model: str, filename: str = "speech.webm") -> str:
     """Распознавание чат-моделью Voxtral: аудио уходит вложением в /chat/completions."""
-    ext = os.path.splitext(filename)[1].lower()
+    fmt = _CHAT_AUDIO_OK.get(os.path.splitext(filename)[1].lower())
+    if fmt is None:
+        t0 = time.time()
+        data = await asyncio.to_thread(_to_wav16k, data)
+        print(f"[stt] перекодировал в wav за {time.time() - t0:.2f}с "
+              f"({len(data) // 1024} КБ)")
+        fmt = "wav"
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": [
             {"type": "input_audio", "input_audio": {
-                "data": base64.b64encode(data).decode(),
-                "format": _AUDIO_FORMATS.get(ext, "webm")}},
+                "data": base64.b64encode(data).decode(), "format": fmt}},
             {"type": "text", "text": _VERBATIM_STT},
         ]}],
         "temperature": 0.0,

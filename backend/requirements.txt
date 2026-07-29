@@ -17,3 +17,7 @@ psycopg[binary]
 # рабочую версию запинить, когда узнаем её с Windows-ноута.
 edge-tts>=7,<8
 python-dotenv
+# PyAV приезжает и как зависимость faster-whisper, но main.py декодирует им
+# webm/opus из браузера напрямую (чат-модель Voxtral принимает только mp3/wav),
+# поэтому объявляем сами — по тому же правилу, что aiohttp и httpx выше.
+av
