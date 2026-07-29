@@ -1252,9 +1252,14 @@ async def transcribe_chat(data: bytes, model: str, filename: str = "speech.webm"
     return (body["choices"][0]["message"]["content"] or "").strip()
 
 
-# Последняя осечка точного пути — видна в /health. Молчаливый откат опаснее
-# отсутствия отката: система выглядит работающей, а работает на запасной модели.
+# Осечки точного пути — видны в /health. Молчаливый откат опаснее отсутствия
+# отката: система выглядит работающей, а работает на запасной модели и занижает
+# баллы. Счётчик здесь не для красоты: сначала я хранил только ПОСЛЕДНЮЮ ошибку,
+# её затирал следующий успешный запрос, и провал на webm (чат-модель принимает
+# только mp3/wav) прятался за успехом на mp3. Счётчик так не обманешь.
 _stt_task_last_error: str = ""
+_stt_task_fallbacks: int = 0
+_stt_task_ok: int = 0
 
 
 async def transcribe_for_task(data: bytes, filename: str = "speech.webm") -> str:
@@ -1264,16 +1269,17 @@ async def transcribe_for_task(data: bytes, filename: str = "speech.webm") -> str
     это ноль пользы ученику, поэтому при любой осечке точного пути идём
     обычным, но пишем об этом и в лог, и в /health.
     """
-    global _stt_task_last_error
+    global _stt_task_last_error, _stt_task_fallbacks, _stt_task_ok
     if not STT_TASK_MODEL:
         return await transcribe_auto(data)
     try:
         text = await transcribe_chat(data, STT_TASK_MODEL, filename)
-        _stt_task_last_error = ""
+        _stt_task_ok += 1
         return text
     except Exception as e:  # noqa: BLE001
         detail = f"{type(e).__name__}: {str(e)[:200]}"
         _stt_task_last_error = detail
+        _stt_task_fallbacks += 1
         print(f"[stt] точная модель {STT_TASK_MODEL} не смогла ({detail}) — откат на обычную")
         return await transcribe_auto(data)
 
@@ -1561,9 +1567,10 @@ def health():
         # Распознавание для оцениваемых заданий: какая модель и не сорвалась ли
         # она в откат. Без этого поля откат молчит, и система выглядит рабочей,
         # хотя точный путь мёртв (ровно так и было поймано 29.07.2026).
-        "stt_task": (f"{STT_TASK_MODEL}"
-                     + (f" — ПОСЛЕДНЯЯ ОСЕЧКА: {_stt_task_last_error}"
-                        if _stt_task_last_error else " (осечек не было)")
+        "stt_task": (f"{STT_TASK_MODEL}: точным путём {_stt_task_ok}, "
+                     f"откатов {_stt_task_fallbacks}"
+                     + (f"; последняя осечка — {_stt_task_last_error}"
+                        if _stt_task_last_error else "")
                      if STT_TASK_MODEL else "та же, что в разговоре"),
         "tts": f"edge-tts:{TTS_VOICE}",
         "llm_base": LLM_BASE_URL,

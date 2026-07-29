@@ -56,7 +56,7 @@ ICP: 17–25 лет, РФ. Solo-dev, bootstrap, бюджет $0.
 
 | Узел | Решение |
 |---|---|
-| STT | **faster-whisper локально**, модель `base.en` (офлайн, без ключа) |
+| STT | **Mistral Voxtral**: `mini` в разговоре (быстро), `small` в оцениваемых заданиях (точно) — `docs/DECISIONS.md` §6.3 |
 | LLM | **Mistral** — `api.mistral.ai/v1`, `mistral-small-latest` |
 | TTS | **edge-tts** — `en-US-AriaNeural` (без ключа) |
 
