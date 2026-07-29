@@ -24,6 +24,11 @@ export interface TaskVariant {
   imageCaption?: string
   /** Шаги ответа: вопросы-подсказки у 40, вопросы интервью у 41 */
   steps?: string[]
+  /** Что НА САМОМ ДЕЛЕ изображено на каждом фото задания 42.
+      Разбор фотографий не видит, а по критериям ФИПИ обязан ловить фактические
+      ошибки («на фото девочки», когда там мальчики) — без этих описаний он их
+      не поймает и будет верить ученику на слово. */
+  photoFacts?: string[]
 }
 
 export interface TaskDef {
@@ -39,22 +44,27 @@ export interface TaskDef {
 }
 
 /* Картинки — публичные заглушки из Unsplash: своих материалов в репозитории нет,
-   а без изображения задания 40 и 42 бессмысленны. Заменить на свои. */
+   а без изображения задания 40 и 42 бессмысленны. Заменить на свои.
+
+   Адреса ведут на НАШ бэкенд, а не на images.unsplash.com: из России без VPN
+   Unsplash не открывается (29.07.2026: TLS-хендшейк виснет, ни одна картинка не
+   грузится), и ученик получал бы задание «опиши две фотографии» без фотографий.
+   Сервер тянет картинку сам и отдаёт со своего домена — см. /img в main.py. */
 const IMG = {
-  dance: 'https://images.unsplash.com/photo-1518611012118-696072aa579a?w=900&q=70&auto=format&fit=crop',
-  pool: 'https://images.unsplash.com/photo-1530549387789-4c1017266635?w=900&q=70&auto=format&fit=crop',
-  books: 'https://images.unsplash.com/photo-1512820790803-83ca734da794?w=900&q=70&auto=format&fit=crop',
-  bike: 'https://images.unsplash.com/photo-1485965120184-e220f721d03e?w=900&q=70&auto=format&fit=crop',
-  camera: 'https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=900&q=70&auto=format&fit=crop',
-  knit: 'https://images.unsplash.com/photo-1584992236310-6edddc08acff?w=700&q=70&auto=format&fit=crop',
-  skate: 'https://images.unsplash.com/photo-1520045892732-304bc3ac5d8e?w=700&q=70&auto=format&fit=crop',
-  mountains: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=700&q=70&auto=format&fit=crop',
-  beach: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=700&q=70&auto=format&fit=crop',
-  homeFood: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=700&q=70&auto=format&fit=crop',
-  restaurant: 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=700&q=70&auto=format&fit=crop',
-  guitar: 'https://images.unsplash.com/photo-1510915361894-db8b60106cb1?w=700&q=70&auto=format&fit=crop',
-  concert: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=700&q=70&auto=format&fit=crop',
-  chess: 'https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=700&q=70&auto=format&fit=crop',
+  dance: '/img/photo-1518611012118-696072aa579a?w=900&q=70',
+  pool: '/img/photo-1530549387789-4c1017266635?w=900&q=70',
+  books: '/img/photo-1512820790803-83ca734da794?w=900&q=70',
+  bike: '/img/photo-1485965120184-e220f721d03e?w=900&q=70',
+  camera: '/img/photo-1502920917128-1aa500764cbd?w=900&q=70',
+  knit: '/img/photo-1584992236310-6edddc08acff?w=700&q=70',
+  skate: '/img/photo-1520045892732-304bc3ac5d8e?w=700&q=70',
+  mountains: '/img/photo-1464822759023-fed622ff2c3b?w=700&q=70',
+  beach: '/img/photo-1507525428034-b723cf961d3e?w=700&q=70',
+  homeFood: '/img/photo-1546069901-ba9599a7e63c?w=700&q=70',
+  restaurant: '/img/photo-1414235077428-338989a2e8c0?w=700&q=70',
+  guitar: '/img/photo-1510915361894-db8b60106cb1?w=700&q=70',
+  concert: '/img/photo-1470229722913-7c0e2dbbafd3?w=700&q=70',
+  chess: '/img/photo-1529699211952-734e80c4d42b?w=700&q=70',
 }
 
 /* ------------------------------------------------------------------- №39 */
@@ -334,6 +344,7 @@ export async function syncRemoteTasks(): Promise<void> {
         images: Array.isArray(p.images) ? (p.images as string[]) : undefined,
         imageCaption: typeof p.imageCaption === 'string' ? p.imageCaption : undefined,
         steps: Array.isArray(p.steps) ? (p.steps as string[]) : undefined,
+        photoFacts: Array.isArray(p.photoFacts) ? (p.photoFacts as string[]) : undefined,
       }
       ;(next[no] ??= []).push(v)
     }
@@ -465,6 +476,6 @@ export function feedbackPayload(task: TaskDef, v: TaskVariant): Record<string, u
     case 'interview':
       return { questions: v.steps ?? [] }
     case 'monologue':
-      return { brief: v.brief }
+      return { brief: v.brief, photoFacts: v.photoFacts ?? [] }
   }
 }

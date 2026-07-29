@@ -41,11 +41,13 @@ from dotenv import load_dotenv
 from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from faster_whisper import WhisperModel
 from openai import AsyncOpenAI, OpenAI
 
+import ege_prompts
+import ege_scoring
 import storage
 
 load_dotenv()
@@ -135,51 +137,20 @@ SYSTEM_PROMPT = (
 )
 
 # Промпт-ревьюер устного ЕГЭ, Задание 4 (монолог, голосовое сообщение другу).
-# Критерии ФИПИ (10 баллов): коммуникативная задача (4) + организация (3) +
-# языковое оформление (3). ВАЖНО: на вход — авто-транскрипт, поэтому произношение
-# оценить НЕЛЬЗЯ (в тексте его нет) → фонетические ошибки не выдумываем.
-#
-# ВАЖНО-2 (баг, найден замером 22.07.2026): промпт требовал сравнения двух фото,
-# а экран честно просит «говори на свободную тему — картинок пока нет». Из-за
-# этого связный монолог на 65с получал 0+0+0 и вердикт «нет сравнения двух фото»,
-# а разбор ошибок не делался вовсе. Промпт согласован с тем, что просит экран.
-# Когда появятся материалы (2 фото + план) — передавать сюда текст задания
-# и вернуть проверку по аспектам плана.
-MONOLOGUE_PROMPT = (
-    "You are an examiner for the Russian EGE oral English exam, Task 4: a ~2-minute "
-    "monologue recorded as a voice message to a friend. You receive an AUTOMATIC "
-    "TRANSCRIPT of the student's spoken answer.\n\n"
-    "THE APP HAS NO PHOTO MATERIALS YET, so the student was asked to speak on a topic "
-    "of their own choice in the Task 4 format. NEVER demand a comparison of two photos "
-    "and NEVER give zeros because the answer does not describe pictures — grade the "
-    "monologue the student was actually asked to produce.\n\n"
-    "Grade it by the 3 official criteria (10 points total):\n"
-    "1) key=\"task\" — Решение коммуникативной задачи (max 4): is the chosen topic "
-    "really developed (not a few generic phrases), volume ~12-15 phrases, does the "
-    "student stay on one topic.\n"
-    "2) key=\"organization\" — Организация высказывания (max 3): opening + conclusion, "
-    "linking words (firstly, however, in conclusion), logical structure.\n"
-    "3) key=\"language\" — Языковое оформление (max 3): lexical and grammatical accuracy "
-    "and range.\n\n"
-    "IMPORTANT: the input is a TEXT transcript — you CANNOT judge pronunciation or word "
-    "stress from it, so NEVER invent phonetic errors. Judge only what the text shows.\n\n"
-    "Return ONLY a JSON object (no prose, no markdown) with EXACTLY this shape:\n"
-    "{\n"
-    '  "summary": "<one short sentence in Russian: overall verdict>",\n'
-    '  "criteria": [\n'
-    '    {"key":"task","name":"Решение коммуникативной задачи","score":<0-4>,"max":4,"comment":"<по-русски, кратко>"},\n'
-    '    {"key":"organization","name":"Организация высказывания","score":<0-3>,"max":3,"comment":"<по-русски, кратко>"},\n'
-    '    {"key":"language","name":"Языковое оформление","score":<0-3>,"max":3,"comment":"<по-русски, кратко>"}\n'
-    "  ],\n"
-    '  "errors": [\n'
-    '    {"cat":"gram|lex|logic","quote":"<exact words from the answer, English>","correction":"<fixed, English>","explanation":"<по-русски, почему>"}\n'
-    "  ]\n"
-    "}\n\n"
-    "Rules: comments and explanations in Russian; quote and correction in English. "
-    "Be honest but encouraging (level A2-B1). List up to 6 most important errors "
-    "(cat is only gram/lex/logic — never phon). Zeros are only for an empty answer or "
-    "a few unrelated words; any real monologue must be graded on its merits, and the "
-    "errors list must be filled in even when the scores are low."
+# Разбор устной части живёт в двух соседних модулях:
+#   ege_prompts.py — правила проверки из методички ФИПИ 2026, по которым модель
+#                    выносит суждения эксперта (раскрыт аспект / принят вопрос);
+#   ege_scoring.py — официальные шкалы, по которым из этих суждений считается балл.
+# Модель баллов не ставит: пока ставила, оценка гуляла между запусками и не
+# сходилась с образцами проверки. Запасной текст задания для старого /monologue,
+# где формулировки от фронта не приходит.
+FALLBACK_MONOLOGUE_BRIEF = (
+    "Task 4. You and your friend are doing a school project. You have found two photos "
+    "to illustrate it but cannot send them, so you leave a voice message: explain the "
+    "choice of the photos by briefly describing them and noting the differences, "
+    "mention the advantages (1-2) and the disadvantages (1-2) of the two options, and "
+    "express your opinion on the subject of the project — which option you would prefer "
+    "and why. Speak for 12-15 sentences."
 )
 
 # Настройки через .env (все с разумными дефолтами).
@@ -1023,6 +994,51 @@ async def tasks_public():
     return {"tasks": rows}
 
 
+# ------------------------------------------------------------------------
+# Картинки к заданиям 40 и 42 — через наш домен.
+#
+# Заглушки лежат на images.unsplash.com, а он из РФ без VPN недоступен:
+# 29.07.2026 замерено с ноутбука владельца — DNS отвечает, TLS-хендшейк виснет
+# по таймауту, ни одна из 14 картинок не грузится. Ученик без VPN видел бы
+# задание «опиши две фотографии» без фотографий. Render до Unsplash достаёт,
+# поэтому картинку тянет сервер и отдаёт со своего адреса — заодно у фронта
+# не остаётся ни одного внешнего домена.
+_IMG_CACHE: dict[str, tuple[bytes, str]] = {}
+_IMG_CACHE_LIMIT = 48
+_IMG_ID_RE = re.compile(r"^photo-[0-9A-Za-z_-]{6,40}$")
+
+
+@app.get("/img/{photo_id}")
+async def task_image(photo_id: str, w: int = 900, q: int = 70):
+    """Прокси одной картинки задания. Пускаем только id формата Unsplash —
+    открытым проксёром для всего интернета сервис становиться не должен."""
+    if not _IMG_ID_RE.match(photo_id):
+        raise HTTPException(status_code=404, detail="Нет такой картинки")
+    w, q = max(200, min(int(w), 1600)), max(30, min(int(q), 90))
+    key = f"{photo_id}?w={w}&q={q}"
+
+    cached = _IMG_CACHE.get(key)
+    if cached is None:
+        url = f"https://images.unsplash.com/{photo_id}?w={w}&q={q}&auto=format&fit=crop"
+        try:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True) as cl:
+                r = await cl.get(url)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=502,
+                                detail=f"Картинка не загрузилась: {type(e).__name__}")
+        ctype = r.headers.get("content-type", "")
+        if r.status_code != 200 or not ctype.startswith("image/"):
+            raise HTTPException(status_code=502, detail=f"Источник ответил {r.status_code}")
+        cached = (r.content, ctype)
+        if len(_IMG_CACHE) >= _IMG_CACHE_LIMIT:
+            _IMG_CACHE.pop(next(iter(_IMG_CACHE)))
+        _IMG_CACHE[key] = cached
+
+    body, ctype = cached
+    return Response(content=body, media_type=ctype,
+                    headers={"Cache-Control": "public, max-age=604800"})
+
+
 @app.post("/admin/tasks")
 async def admin_task_add(body: dict = Body(...), x_admin_key: str | None = Header(None)):
     _require_admin(x_admin_key)
@@ -1575,19 +1591,22 @@ async def _monologue_work(data: bytes) -> dict:
             status_code=422, detail="Тишина — ничего не распознали. Запиши монолог ещё раз."
         )
 
-    # 2) LLM — один структурный проход, ответ строго JSON.
+    # 2) LLM — один структурный проход, ответ строго JSON. Правила и шкала те же,
+    #    что у /task_feedback: этот эндпоинт остался для старых клиентов и
+    #    смоук-тестов, расходиться в оценке они не должны.
     client = llm_client()
+    prompt, ctx = _feedback_prompt("monologue", {}, transcript_text)
     try:
         completion = await asyncio.to_thread(
             lambda: client.chat.completions.create(
                 model=LLM_MODEL,
                 messages=[
-                    {"role": "system", "content": MONOLOGUE_PROMPT},
+                    {"role": "system", "content": prompt},
                     {"role": "user", "content": transcript_text},
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.2,
-                max_tokens=800,
+                max_tokens=1400,
             )
         )
     except Exception as e:  # noqa: BLE001
@@ -1596,9 +1615,10 @@ async def _monologue_work(data: bytes) -> dict:
     _track_llm(completion)
     raw = (completion.choices[0].message.content or "").strip()
     try:
-        feedback = json.loads(raw)
+        observations = json.loads(raw)
     except json.JSONDecodeError:
         raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
+    feedback = _score_feedback("monologue", observations if isinstance(observations, dict) else {}, ctx)
     t2 = time.time()
 
     return {
@@ -1626,64 +1646,130 @@ async def _monologue_work(data: bytes) -> dict:
 # Для monologue используется старый промпт с критериями ФИПИ, а score/max
 # досчитываются на сервере — фронт везде видит одну и ту же форму.
 
-_FEEDBACK_JSON_SHAPE = (
-    'Return ONLY a JSON object (no prose, no markdown) with EXACTLY this shape:\n'
-    '{"summary": "<one short sentence in Russian>", "score": <int>, "max": <int>, '
-    '"errors": [{"cat": "gram|lex|order|missing|logic", '
-    '"quote": "<what the student said, English>", '
-    '"correction": "<fixed, English>", "explanation": "<по-русски, кратко>"}]}\n'
-    "cat is the error category: gram=grammar, lex=vocabulary, order=word order, "
-    "missing=required element absent, logic=meaning. It feeds the student's "
-    "long-term mistake profile, so choose it carefully.\n"
-    "Up to 6 most important errors. Be honest but encouraging (level A2-B1)."
-)
+def _feedback_prompt(kind: str, payload: dict, transcript: str) -> tuple[str, dict]:
+    """Промпт эксперта и контекст, который понадобится при подсчёте балла.
 
-
-def _feedback_prompt(kind: str, payload: dict) -> str:
+    Транскрипт нужен уже здесь: для чтения вслух эталон сверяется с ним ДО
+    обращения к модели, и модель получает готовые улики, а не сырой текст."""
     if kind == "reading":
         ref = str(payload.get("referenceText") or "")
-        return (
-            "You are an examiner for the Russian EGE oral English exam, Task 1 "
-            "(reading a short text aloud). You get the REFERENCE text and an AUTOMATIC "
-            "TRANSCRIPT of what the student actually said.\n\n"
-            "IMPORTANT: a transcript cannot show pronunciation, stress or intonation — "
-            "NEVER invent phonetic errors. Judge ONLY what the text shows: skipped, "
-            "replaced, added or misread words. In errors, quote = what the student said "
-            "(or «пропущено», if a fragment is missing), correction = the fragment as "
-            "written in the reference.\n"
-            "score: 1 if the text is read completely with at most 2 minor slips, else 0. "
-            "max: 1.\n\n" + _FEEDBACK_JSON_SHAPE + f"\n\nREFERENCE TEXT:\n{ref}"
-        )
+        diff = ege_scoring.reading_diff(ref, transcript)
+        return ege_prompts.reading_prompt(ref, diff), {"diff": diff}
     if kind == "dialogue":
-        points = payload.get("points") or []
+        points = [str(p) for p in (payload.get("points") or [])]
         ad = str(payload.get("ad") or "")
-        pts = "; ".join(str(p) for p in points)
-        return (
-            "You are an examiner for the Russian EGE oral English exam, Task 2 (four "
-            f"direct questions about an advertisement: {ad}). The student had to ask "
-            f"four DIRECT questions about: {pts}.\n\n"
-            "From the transcript, count how many of these points are covered by a "
-            "correctly formed direct question. score = that count, max = 4. In errors "
-            "list wrong word order, indirect questions instead of direct ones, and "
-            "grammar slips. If a point was not asked about at all, add an error with "
-            "quote=«вопрос не задан» and correction = an example of a correct question.\n\n"
-            + _FEEDBACK_JSON_SHAPE
-        )
+        return ege_prompts.dialogue_prompt(ad, points), {"points": points}
     if kind == "interview":
         questions = [str(q) for q in (payload.get("questions") or [])]
-        qs = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
-        return (
-            "You are an examiner for the Russian EGE oral English exam, Task 3 "
-            "(interview). The student answered these questions one after another:\n"
-            f"{qs}\n\n"
-            "The transcript is one continuous recording of all answers. An answer counts "
-            "as full if it is relevant and contains at least two sentences. "
-            f"score = number of properly answered questions, max = {max(1, len(questions))}. "
-            "In errors list grammar and vocabulary mistakes from the transcript.\n\n"
-            + _FEEDBACK_JSON_SHAPE
-        )
-    # monologue — старый проверенный промпт с критериями ФИПИ
-    return MONOLOGUE_PROMPT
+        return ege_prompts.interview_prompt(questions), {"questions": questions}
+    brief = str(payload.get("brief") or "") or FALLBACK_MONOLOGUE_BRIEF
+    facts = [str(f) for f in (payload.get("photoFacts") or [])]
+    return ege_prompts.monologue_prompt(brief, facts), {}
+
+
+def _errors_from(raw: object, limit: int = 8) -> list[dict]:
+    """Ошибки от модели — в форму, которую ждут фронт и профиль ошибок."""
+    out = []
+    for e in (raw if isinstance(raw, list) else [])[:limit]:
+        if not isinstance(e, dict):
+            continue
+        quote = str(e.get("quote") or "").strip()
+        if not quote:
+            continue
+        out.append({
+            "cat": str(e.get("cat") or "gram"),
+            "quote": quote,
+            "correction": str(e.get("correction") or "").strip(),
+            "explanation": str(e.get("explanation") or "").strip(),
+        })
+    return out
+
+
+def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
+    """Суждения модели → балл по официальной шкале и разбор для экрана.
+
+    Единая форма ответа для всех заданий: summary, score/max, errors и criteria
+    (у 39 их нет, у 40 и 41 это по строке на вопрос, у 42 — три критерия ФИПИ).
+    """
+    summary = str(obs.get("summary") or "").strip()
+
+    if kind == "reading":
+        misread = [m for m in (obs.get("misread") or [])
+                   if isinstance(m, dict) and m.get("real")]
+        score, note = ege_scoring.score_reading(ctx["diff"], len(misread))
+        errors = [{
+            "cat": "missing" if not str(m.get("heard") or "").strip() else "lex",
+            "quote": str(m.get("heard") or "").strip() or "пропущено",
+            "correction": str(m.get("expected") or "").strip(),
+            "explanation": str(m.get("explanation") or "").strip(),
+        } for m in misread[:6]]
+        return {
+            "summary": f"{summary} {note}".strip() if summary else note,
+            "score": score, "max": ege_scoring.MAX_SCORE["reading"], "errors": errors,
+            "note": "Произношение и интонацию разбор не слышит — он сверяет текст.",
+        }
+
+    if kind in ("dialogue", "interview"):
+        is_dialogue = kind == "dialogue"
+        items = obs.get("questions" if is_dialogue else "answers") or []
+        items = [it for it in items if isinstance(it, dict)]
+        expected = len(ctx.get("points" if is_dialogue else "questions") or [])
+        top = expected or ege_scoring.MAX_SCORE[kind]
+        res = ege_scoring.score_items(items, top)
+
+        label = "Вопрос" if is_dialogue else "Ответ"
+        criteria, errors = [], []
+        for i, it in enumerate(items[:top]):
+            ok = bool(it.get("accepted"))
+            criteria.append({
+                "key": f"q{i + 1}", "name": f"{label} {i + 1}",
+                "score": 1 if ok else 0, "max": 1,
+                "comment": str(it.get("reason") or "").strip(),
+            })
+            if not ok:
+                heard = str(it.get("heard") or "").strip()
+                errors.append({
+                    "cat": "missing" if not heard else "order",
+                    "quote": heard or ("вопрос не задан" if is_dialogue else "ответ не зачтён"),
+                    "correction": str(it.get("model") or "").strip(),
+                    "explanation": str(it.get("reason") or "").strip(),
+                })
+        errors += _errors_from(obs.get("errors"), limit=8 - len(errors))
+        return {"summary": summary, "score": res["score"], "max": res["max"],
+                "errors": errors, "criteria": criteria}
+
+    # monologue
+    aspects = [a for a in (obs.get("aspects") or []) if isinstance(a, dict)][:4]
+    while len(aspects) < 4:  # модель поленилась — недостающий аспект не засчитан
+        aspects.append({"n": len(aspects) + 1, "verdict": ege_scoring.MISSING,
+                        "comment": "аспект в ответе не найден"})
+    logic = [e for e in (obs.get("logic_errors") or []) if isinstance(e, dict)]
+    lang = [e for e in (obs.get("lang_errors") or []) if isinstance(e, dict)]
+    grave = sum(1 for e in lang if e.get("grave"))
+    try:
+        phrases = int(obs.get("phrases") or 0)
+    except (TypeError, ValueError):
+        phrases = 0
+
+    res = ege_scoring.score_monologue(
+        aspects, phrases,
+        bool(obs.get("opening_with_address")), bool(obs.get("closing")),
+        len(logic), len(lang), grave,
+    )
+
+    # Разбор по аспектам — самое полезное для ученика: дописываем к содержанию,
+    # начиная с того, что не зачтено полностью.
+    detail = [f"Аспект {i + 1} — {c}" for i, a in enumerate(aspects)
+              if a.get("verdict") != ege_scoring.FULL and (c := str(a.get("comment") or "").strip())]
+    if detail:
+        res["criteria"][0]["comment"] += ". " + ". ".join(detail)
+
+    errors = _errors_from(lang, limit=6)
+    errors += [{"cat": "logic", "quote": str(e.get("quote") or "").strip() or "логика",
+                "correction": "", "explanation": str(e.get("explanation") or "").strip()}
+               for e in logic[:3]]
+    return {"summary": summary, "score": res["score"], "max": res["max"],
+            "errors": errors, "criteria": res["criteria"]}
 
 
 async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
@@ -1713,19 +1799,21 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     if mem:
         print(f"[memory] выжимки в промпте разбора: {', '.join(sorted(mem))}")
 
+    prompt, ctx = _feedback_prompt(kind, payload, transcript_text)
     client = llm_client()
     try:
         completion = await asyncio.to_thread(
             lambda: client.chat.completions.create(
                 model=LLM_MODEL,
                 messages=[
-                    {"role": "system",
-                     "content": _feedback_prompt(kind, payload) + _memory_prompt_block(mem)},
+                    {"role": "system", "content": prompt + _memory_prompt_block(mem)},
                     {"role": "user", "content": transcript_text},
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.2,
-                max_tokens=800,
+                # Монологу нужно место: четыре аспекта плюс полный список ошибок,
+                # по числу которых считается балл за язык.
+                max_tokens=1400 if kind == "monologue" else 900,
             )
         )
     except Exception as e:  # noqa: BLE001
@@ -1734,18 +1822,14 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     _track_llm(completion)
     raw = (completion.choices[0].message.content or "").strip()
     try:
-        feedback = json.loads(raw)
+        observations = json.loads(raw)
     except json.JSONDecodeError:
         raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
+    if not isinstance(observations, dict):
+        raise HTTPException(status_code=502, detail="LLM вернул не тот формат разбора")
 
-    # Монолог отвечает в формате критериев ФИПИ — доводим до единой формы,
-    # чтобы фронт не различал типы заданий.
-    if kind == "monologue" and "criteria" in feedback:
-        try:
-            feedback["score"] = sum(int(c.get("score", 0)) for c in feedback["criteria"])
-            feedback["max"] = sum(int(c.get("max", 0)) for c in feedback["criteria"]) or 10
-        except (TypeError, ValueError):
-            feedback["score"], feedback["max"] = 0, 10
+    # Балл считает шкала ФИПИ, а не модель, — см. ege_scoring.py.
+    feedback = _score_feedback(kind, observations, ctx)
 
     # В память — после того как ответ готов, мимо критического пути.
     _remember(device, kind, variant, feedback, duration_sec, session_done)
