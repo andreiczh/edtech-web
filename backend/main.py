@@ -1148,6 +1148,86 @@ _stt_degraded_until = 0.0
 _STT_DEGRADE_SECONDS = 300.0
 
 
+# Точное распознавание для ОЦЕНИВАЕМЫХ заданий (39-42).
+#
+# У двух режимов приложения требования к распознаванию противоположны:
+#   разговор — ученик ждёт ответа вживую, каждая доля секунды видна;
+#   разбор задания — ученик только что говорил минуту-две и ждёт разбора,
+#   лишняя секунда незаметна, зато КАЖДОЕ слово превращается в балл ФИПИ.
+# Поэтому модель распознавания у них может быть разной: пусто = та же, что в
+# разговоре (voxtral-mini), иначе — чат-модель Voxtral (24B), которой аудио
+# отдаётся как вложение. Любой сбой откатывается на обычный путь.
+STT_TASK_MODEL = os.environ.get("STT_TASK_MODEL", "").strip()
+
+# Правило «переписывай дословно» здесь не вежливость, а требование продукта:
+# разбор считает ошибки ученика, и «услужливо» исправленная грамматика
+# превращается в похвалу за текст, которого ученик не говорил.
+_VERBATIM_STT = (
+    "Transcribe the audio into English text word for word. The speaker is a Russian "
+    "teenager practising for an English exam: expect a strong Russian accent, hesitation "
+    "and grammatical mistakes. Reproduce EXACTLY what is said and keep every grammatical "
+    "error unchanged — never correct, improve, complete or add anything. If a fragment is "
+    "unintelligible, omit it rather than guess. Output only the transcription itself."
+)
+
+_AUDIO_FORMATS = {".webm": "webm", ".mp3": "mp3", ".wav": "wav", ".ogg": "ogg",
+                  ".m4a": "m4a", ".mp4": "mp4"}
+
+
+async def transcribe_chat(data: bytes, model: str, filename: str = "speech.webm") -> str:
+    """Распознавание чат-моделью Voxtral: аудио уходит вложением в /chat/completions."""
+    ext = os.path.splitext(filename)[1].lower()
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": [
+            {"type": "input_audio", "input_audio": {
+                "data": base64.b64encode(data).decode(),
+                "format": _AUDIO_FORMATS.get(ext, "webm")}},
+            {"type": "text", "text": _VERBATIM_STT},
+        ]}],
+        "temperature": 0.0,
+        "max_tokens": 1200,
+    }
+    # Таймаут свой: общий STT_TIMEOUT (12 с) заточен под быстрый путь разговора,
+    # а тут двухминутный монолог обрабатывает модель в восемь раз крупнее.
+    r = await _stt_client().post(
+        f"{LLM_BASE_URL.rstrip('/')}/chat/completions",
+        headers={"Authorization": f"Bearer {_require('LLM_API_KEY')}"},
+        json=payload,
+        timeout=float(os.environ.get("STT_TASK_TIMEOUT", "40")),
+    )
+    if r.status_code != 200:
+        raise _RemoteSttError(r.status_code, r.text)
+    body = r.json()
+    u = body.get("usage") or {}
+    # Это обращение к чат-модели, а не к эндпоинту транскрипции: считаем его и
+    # как STT (для статистики), и как запрос LLM — иначе месячный бюджет будет
+    # видеть половину расхода.
+    _track_usage(stt_req=1,
+                 llm_req=1,
+                 llm_prompt_tokens=u.get("prompt_tokens", 0) or 0,
+                 llm_completion_tokens=u.get("completion_tokens", 0) or 0)
+    _budget_note_llm(1)
+    return (body["choices"][0]["message"]["content"] or "").strip()
+
+
+async def transcribe_for_task(data: bytes, filename: str = "speech.webm") -> str:
+    """Распознавание для оцениваемых заданий: точная модель, если она задана.
+
+    Откат обязателен и молчаливым быть не должен: разбор без распознавания —
+    это ноль пользы ученику, поэтому при любой осечке точного пути идём
+    обычным, но пишем об этом в лог.
+    """
+    if not STT_TASK_MODEL:
+        return await transcribe_auto(data)
+    try:
+        return await transcribe_chat(data, STT_TASK_MODEL, filename)
+    except Exception as e:  # noqa: BLE001
+        print(f"[stt] точная модель {STT_TASK_MODEL} не смогла "
+              f"({type(e).__name__}: {str(e)[:120]}) — откат на обычную")
+        return await transcribe_auto(data)
+
+
 async def transcribe_auto(data: bytes, local_model: str | None = None) -> str:
     """Распознавание с запасным путём.
 
@@ -1580,7 +1660,7 @@ async def _monologue_work(data: bytes) -> dict:
     # 1) STT — весь монолог разом. Запасной локальный путь берёт ТОЧНУЮ модель:
     #    здесь каждое слово транскрипта превращается в балл ФИПИ.
     try:
-        transcript_text = await transcribe_auto(data)
+        transcript_text = await transcribe_for_task(data)
     except SttFailed as e:
         print(f"[stt] монолог не распознан: {e}")
         raise HTTPException(status_code=502, detail=e.user_message)
@@ -1777,13 +1857,14 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
 
 async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                               device: str | None, variant: str,
-                              duration_sec: int, session_done: bool = False) -> dict:
+                              duration_sec: int, session_done: bool = False,
+                              filename: str = "speech.webm") -> dict:
     t0 = time.time()
     # Выжимки памяти тянем ПАРАЛЛЕЛЬНО с распознаванием: STT занимает 0.5-2 с,
     # SELECT успевает заведомо раньше — добавка к задержке ровно ноль.
     mem_task = asyncio.create_task(_load_memory(device, kind))
     try:
-        transcript_text = await transcribe_auto(data)
+        transcript_text = await transcribe_for_task(data, filename)
     except SttFailed as e:
         print(f"[stt] task_feedback не распознал: {e}")
         raise HTTPException(status_code=502, detail=e.user_message)
@@ -1874,7 +1955,7 @@ async def task_feedback(
     return StreamingResponse(
         _json_with_heartbeat(
             _task_feedback_work(kind, payload, data, x_device, variant, duration,
-                                bool(session_done))
+                                bool(session_done), audio.filename or "speech.webm")
         ),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
