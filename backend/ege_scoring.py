@@ -64,6 +64,93 @@ def content_from_aspects(missing: int, partial: int) -> int:
     return 4
 
 
+def _verdict_from_defects(defects: int, unintelligible: bool = False,
+                          missing_at: int = 3) -> str:
+    """Аспект без изъянов раскрыт, с одним-двумя — неполно/неточно, дальше — нет.
+
+    Порог у аспекта 4 ниже: методичка говорит про мнение прямо — «если
+    отсутствуют два элемента из трёх, аспект считается невыполненным».
+    """
+    if unintelligible or defects >= missing_at:
+        return MISSING
+    return FULL if defects == 0 else PARTIAL
+
+
+def verb_form_matches(plan: str, student: str) -> bool:
+    """Совпадает ли глагольная форма мнения с той, что требует план задания.
+
+    По критериям это не придирка: «I prefer» на план с «you'd prefer» означает,
+    что ученик не понял коммуникативную задачу, и аспект признаётся неточным.
+    Сравнение механическое — модель только цитирует обе формы, решение здесь.
+    Пустая цитата плана = проверять нечего, придираться не за что.
+    """
+    plan_s, student_s = (plan or "").lower(), (student or "").lower()
+    if not plan_s.strip() or not student_s.strip():
+        return True
+
+    def shape(s: str) -> str:
+        if "would" in s or "'d " in s or s.startswith("d "):
+            return "conditional"
+        if "preferred" in s or "used to" in s or "as a child" in s:
+            return "past"
+        return "present"
+
+    return shape(plan_s) == shape(student_s)
+
+
+def aspect_verdicts(checks: list[dict]) -> list[dict]:
+    """Вердикты по четырём аспектам из простых признаков «да/нет».
+
+    Модель отвечает на конкретные вопросы («описано ли первое фото», «названо
+    ли достоинство для второго типа»), а трёхуровневый вердикт выводится здесь.
+    Так сделано после замера: на прямой просьбе поставить full/partial/missing
+    модель жалась к серединке и разъезжалась между запусками, а на булевых
+    признаках держится ровно. Пороги подобраны так, чтобы воспроизводить
+    решения экспертов на образцах из методички (см. test_ege_scoring.py).
+    """
+    by_n = {}
+    for c in checks:
+        if isinstance(c, dict):
+            try:
+                by_n[int(c.get("n") or 0)] = c
+            except (TypeError, ValueError):
+                continue
+
+    out = []
+    for n in (1, 2, 3, 4):
+        c = by_n.get(n, {})
+        no = lambda key: not bool(c.get(key))  # noqa: E731 — «признака нет»
+        missing_at = 3
+
+        if n == 1:
+            # Описание обоих фото, различие, обобщение различия, связь с темой;
+            # фактическая ошибка в описании — тоже изъян.
+            defects = sum((no("described_first"), no("described_second"),
+                           no("difference_stated"), no("difference_generalised"),
+                           no("linked_to_topic"), bool(c.get("factual_error"))))
+        elif n in (2, 3):
+            # Достоинство (недостаток) названо для каждого из двух типов и не
+            # является универсальной отпиской, годной для чего угодно.
+            defects = sum((no("named_first"), no("named_second"),
+                           no("specific_first"), no("specific_second")))
+        else:
+            # Мнение: заявлено как своё, выбор назван, обоснован; плюс глагольная
+            # форма должна совпадать с той, что требует план задания.
+            same_form = verb_form_matches(str(c.get("plan_verb_form") or ""),
+                                          str(c.get("student_verb_form") or ""))
+            defects = sum((no("opinion_explicit"), no("choice_stated"),
+                           no("justified"), not same_form))
+            missing_at = 2
+
+        out.append({
+            "n": n,
+            "verdict": _verdict_from_defects(defects, bool(c.get("unintelligible")),
+                                             missing_at),
+            "comment": str(c.get("comment") or "").strip(),
+        })
+    return out
+
+
 def volume_cap(phrases: int) -> int:
     """Потолок балла по РКЗ, который даёт объём высказывания.
 

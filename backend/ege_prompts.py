@@ -16,6 +16,54 @@
 
 from __future__ import annotations
 
+import json
+
+
+def loads_forgiving(raw: str) -> dict | None:
+    """JSON от модели, даже если ответ обрезали на лимите токенов.
+
+    Разбор монолога — самый длинный ответ в системе: четыре аспекта плюс полный
+    список ошибок, по числу которых считается балл. Когда он не влезает, модель
+    обрывается на середине строки, и ученик вместо разбора получал 502.
+    Дозакрываем скобки и спасаем приехавшее: список ошибок окажется короче
+    (балл за язык — мягче), но разбор ученик увидит.
+    """
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    stack: list[str] = []
+    in_string = escaped = False
+    for ch in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]" and stack:
+            stack.pop()
+
+    head = raw + ('"' if in_string else "")
+    for attempt in (head, head.rsplit(",", 1)[0]):
+        try:
+            parsed = json.loads(attempt + "".join(reversed(stack)))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            print("[разбор] ответ модели был обрезан — спасли по частям")
+            return parsed
+    return None
+
+
 # Общая для всех заданий оговорка: на входе транскрипт, а не звук.
 _NO_PHONETICS = (
     "You receive an AUTOMATIC TRANSCRIPT of speech, not the audio. You therefore "
@@ -161,7 +209,30 @@ _INTERVIEW_RULES = (
     "Do not reject for: naming one item when the question used a plural; giving reasons "
     "for only one of two named preferences; an unfinished THIRD phrase when the first "
     "two are already a full and correct answer. Repeated errors inside ONE answer count "
-    "once, but each answer is judged on its own."
+    "once, but each answer is judged on its own.\n\n"
+    "A phrase must be a real sentence with a subject and a verb. «Quite warm», «It's "
+    "green», «In the village», «Somewhere far from big cities», «Maybe on the Maldives» "
+    "are not phrases — they are fragments, and an answer built out of them is rejected "
+    "however sensible it sounds.\n\n"
+    "CALIBRATION — how real examiners marked real answers:\n"
+    "- «In Troitsk. It's a part of Moscow. Quite warm.» — REJECTED: one real sentence "
+    "and two fragments.\n"
+    "- «It's green. There is rivers.» — REJECTED: a grave grammatical error in the "
+    "second sentence.\n"
+    "- «I live with my parents. I've got an elder sister called Masha.» — ACCEPTED: two "
+    "full, correct, relevant sentences.\n"
+    "- «I used to go abroad. I swim in the sea. I had a great time.» — REJECTED: the "
+    "question was about the past, and «I swim» is present. One error anywhere in the "
+    "answer sinks the whole answer — the mark is holistic.\n"
+    "- «Somewhere far from big cities. Maybe on the Maldives.» — REJECTED: no complete "
+    "sentence at all.\n"
+    "- «Kaluga is an industrial city. It is famous for the State Space Museum named "
+    "after Konstantin Tsiolkovsky.» — ACCEPTED.\n"
+    "- «I'm from Kaluga. It located in the central region not far from Moscow. It was "
+    "hot this summer.» — REJECTED: «It located» is a grammatical error, and the question "
+    "asked about summers in general, not this particular summer.\n"
+    "Being strict here is correct: in this task most answers of an average student are "
+    "rejected, and pretending otherwise would mislead the student about the real exam."
 )
 
 
@@ -237,7 +308,40 @@ _MONOLOGUE_RULES = (
     "lang_errors — lexical and grammatical only, never phonetic. grave=true for "
     "elementary-level errors (missing third-person -s, missing verb or link verb, an "
     "article error that changes the meaning, a string of words instead of a sentence) "
-    "and for anything that breaks communication. The same error repeated is listed once."
+    "and for anything that breaks communication. The same error repeated is listed once.\n\n"
+    "LANGUAGE AND CONTENT ARE SEPARATE. Grammar and vocabulary are already punished by "
+    "the third criterion, so do NOT lower an aspect just because the sentence is clumsy "
+    "or has mistakes. An aspect drops only when the MEANING does not get through: if the "
+    "phrase that was supposed to name the difference, an advantage or a disadvantage "
+    "cannot be understood at all, that aspect is missing.\n\n"
+    "CALIBRATION — how real examiners marked real answers:\n"
+    "- FULL aspect 1, despite several grammar errors: «The first photo show us a woman "
+    "who is sitting on the ground, and perhaps she is planting some tree. The second "
+    "photo depicts a man who is on the kitchen, he is probably cooking and filming this "
+    "process. These photos will perfectly suit our project because they show two "
+    "different hobbies: the first shows us active outdoor hobby, while the second is "
+    "more calm, a hobby that can be done indoor.» — description of both photos plus a "
+    "generalised difference tied to the topic. The errors here cost marks under the "
+    "third criterion only.\n"
+    "- PARTIAL aspect 1: «In the first picture the boy is playing football at the "
+    "stadium, whereas in the second picture the girl is knitting in her room.» — a "
+    "description with no difference drawn between the TYPES of hobby.\n"
+    "- MISSING aspect 1: «this types have some differences between photos» — what the "
+    "difference is never becomes clear.\n"
+    "- PARTIAL aspects 2-3: «it is the best way to rest», «you can get vivid emotions "
+    "and unforgettable experience», «it can be boring» — universal filler that fits any "
+    "activity and does not name an advantage of THIS type.\n"
+    "- FULL aspect 2, again despite errors: «gardening outdoors can build specific skills "
+    "like planting trees or it help to plant vegetables for yourself which is very "
+    "healthy. As for cooking at home, it also can develop cooking skills, upgrade them "
+    "or it helps to make new tasty dishes.» — each of the two types gets its own "
+    "concrete advantage. That is a full aspect, not a partial one.\n"
+    "- FULL aspect 4: «As for me, I would prefer to do cooking in front of a camera, "
+    "I think it is very funny and develops a lot of useful skills» — the opinion is "
+    "explicitly the author's, the plan's verb form is used, the reason is given.\n"
+    "- MISSING aspect 4: «Personally, I'd prefer to play video games, because I like it» "
+    "when the plan asked which the author PREFERS — wrong verb form, and «I like it» is "
+    "not a justification: two of the three required parts are absent."
 )
 
 
@@ -247,8 +351,12 @@ def monologue_prompt(brief: str, photo_facts: list[str] | None = None) -> str:
         shots = "\n".join(f"- photo {i + 1}: {f}" for i, f in enumerate(photo_facts))
         facts = (
             "\nYou cannot see the photos, so here is what is actually on them. Use this "
-            "ONLY to catch factual errors (the student describes something that is not "
-            "there) and to check that the difference is drawn correctly:\n" + shots + "\n"
+            "to catch factual errors (the student describes something that is not there) "
+            "and to check that the difference is drawn correctly:\n" + shots + "\n"
+            "Judge the description by what these photos actually allow. If a photo shows "
+            "an object, a landscape or only a pair of hands and has no people in it, do "
+            "NOT require the student to say who is doing what — a description of what is "
+            "shown, tied to the project topic, is a full answer for such a photo.\n"
         )
     return (
         "You are an examiner for the Russian EGE oral exam in English, Task 4: a voice "
@@ -258,16 +366,66 @@ def monologue_prompt(brief: str, photo_facts: list[str] | None = None) -> str:
         f"The student's task was:\n{brief}\n{facts}\n"
         f"{_MONOLOGUE_RULES}\n\n"
         f"{_RU}\n\n"
-        "Do NOT give any marks or scores — they are calculated from your observations. "
+        "Do NOT give any marks, scores or verdicts — they are calculated from your "
+        "answers. Your job is to answer plain yes/no questions about each aspect, and "
+        "before answering them, to COPY OUT the student's own words that cover that "
+        "aspect (evidence). Judging from memory of the whole answer is how aspects get "
+        "mixed up; if you find no words for an aspect, evidence is an empty string and "
+        "every flag for it is false.\n"
         "Return ONLY this JSON:\n"
-        '{"aspects": [{"n": 1, "verdict": "full|partial|missing", "comment": '
-        '"<по-русски: чего не хватило или что сделано хорошо>"}], "phrases": <int>, '
+        "{\"aspects\": [\n"
+        '  {"n": 1, "evidence": "<the student\'s words, English>", '
+        '"described_first": true, "described_second": true, "difference_stated": true, '
+        '"difference_generalised": true, "linked_to_topic": true, '
+        '"factual_error": false, "unintelligible": false, '
+        '"comment": "<по-русски, коротко>"},\n'
+        '  {"n": 2, "evidence": "...", "named_first": true, "named_second": true, '
+        '"specific_first": true, "specific_second": true, "unintelligible": false, '
+        '"comment": "<по-русски, коротко>"},\n'
+        '  {"n": 3, "evidence": "...", "named_first": true, "named_second": true, '
+        '"specific_first": true, "specific_second": true, "unintelligible": false, '
+        '"comment": "<по-русски, коротко>"},\n'
+        '  {"n": 4, "evidence": "...", "opinion_explicit": true, "choice_stated": true, '
+        '"justified": true, "plan_verb_form": "<the verb form the last bullet of the '
+        'plan uses, e.g. you would prefer>", "student_verb_form": "<the verb form the '
+        'student used, e.g. I prefer>", "unintelligible": false, '
+        '"comment": "<по-русски, коротко>"}\n'
+        "], \"phrases\": <int>, "
         '"opening_with_address": true, "closing": true, '
         '"logic_errors": [{"quote": "<English>", "explanation": "<по-русски>"}], '
         '"lang_errors": [{"cat": "gram|lex", "quote": "<English>", "correction": '
         '"<English>", "explanation": "<по-русски>", "grave": false}], '
-        '"summary": "<одно предложение по-русски: главное о работе>"}\n'
-        "aspects must contain exactly four objects, n = 1..4, in order. List every "
-        "language error you find (up to 12) — their number decides the mark, so do not "
-        "stop at the first few."
+        '"summary": "<одно предложение по-русски: главное о работе>"}\n\n'
+        "What the flags mean:\n"
+        "- described_first / described_second — the photo is actually described, not "
+        "just mentioned;\n"
+        "- difference_stated — the answer says what the difference is;\n"
+        "- difference_generalised — that difference is about the two TYPES the project "
+        "contrasts. FALSE when the difference is only about the place or the picture "
+        "(«at home» vs «in the open air», «one person» vs «three people») and never "
+        "says what KINDS of hobby, food, sport or pastime are being contrasted;\n"
+        "- linked_to_topic — the project topic is actually brought into the description. "
+        "FALSE if the topic is only named in the opening line and then dropped;\n"
+        "- factual_error — the student says something the photos do not show;\n"
+        "- named_first / named_second — an advantage (aspect 2) or a disadvantage "
+        "(aspect 3) is named for THAT type. If the student covers only one of the two "
+        "types, the flag for the other one is FALSE — do not be generous here;\n"
+        "- specific_first / specific_second — it belongs to that type in particular. "
+        "FALSE for anything that would fit almost any activity: «it's fun», «it's very "
+        "interesting», «it can be boring», «it is the best way to rest», «you get vivid "
+        "emotions and unforgettable experience», «people can be tired of this», «you're "
+        "enjoying the game». This filler is the commonest reason examiners mark aspects "
+        "2 and 3 down, so judge it strictly;\n"
+        "- opinion_explicit — the opinion is marked as the author's own;\n"
+        "- justified — a reason is given. FALSE for «I like it», «it's fun», «it's "
+        "really my cup of tea»: they repeat the choice instead of explaining it;\n"
+        "- plan_verb_form / student_verb_form — quote both literally: the form the last "
+        "bullet of the plan uses and the form the student actually used. Do not judge "
+        "whether they match, just copy them out;\n"
+        "- unintelligible — the wording makes the aspect impossible to understand.\n\n"
+        "Language mistakes alone must NOT turn a flag false: they are counted "
+        "separately in lang_errors. List every language error you find, up to 10 — their "
+        "number decides that mark, so do not stop at the first few. Keep evidence, "
+        "comments and explanations SHORT (about ten words): the answer must fit in one "
+        "JSON object without being cut off."
     )

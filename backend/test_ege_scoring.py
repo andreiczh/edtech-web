@@ -187,6 +187,91 @@ def check_reading() -> list[str]:
     return bad
 
 
+# --------------------------------------------------------------------------
+# Вердикты по аспектам из признаков «да/нет»
+# --------------------------------------------------------------------------
+def a1(**kw) -> dict:
+    """Аспект 1 со всеми признаками в норме; в kw передаём то, чего не хватило."""
+    base = {"n": 1, "described_first": True, "described_second": True,
+            "difference_stated": True, "difference_generalised": True,
+            "linked_to_topic": True, "factual_error": False}
+    return {**base, **kw}
+
+
+def a23(n: int, **kw) -> dict:
+    base = {"n": n, "named_first": True, "named_second": True,
+            "specific_first": True, "specific_second": True}
+    return {**base, **kw}
+
+
+def a4(**kw) -> dict:
+    base = {"n": 4, "opinion_explicit": True, "choice_stated": True, "justified": True,
+            "plan_verb_form": "you would prefer", "student_verb_form": "I would prefer"}
+    return {**base, **kw}
+
+
+def check_aspects() -> list[str]:
+    bad = []
+
+    def verdict(check: dict) -> str:
+        n = check["n"]
+        return sc.aspect_verdicts([check])[n - 1]["verdict"]
+
+    cases = [
+        # Аспект 1: описания обоих фото, различие, обобщение, связь с темой.
+        ("аспект 1, всё на месте", a1(), FULL),
+        ("аспект 1, различие не обобщено", a1(difference_generalised=False), PARTIAL),
+        ("аспект 1, есть фактическая ошибка", a1(factual_error=True), PARTIAL),
+        # Работа «grandparents»: нет обобщения, нет связи с темой, фактическая ошибка.
+        ("аспект 1, три изъяна сразу",
+         a1(difference_generalised=False, linked_to_topic=False, factual_error=True), MISSING),
+        ("аспект 1, смысл не дошёл", a1(unintelligible=True), MISSING),
+        # Аспекты 2-3: достоинство/недостаток названы для обоих типов и не отписка.
+        ("аспект 2, названы конкретные достоинства", a23(2), FULL),
+        ("аспект 2, отписки для обоих типов",
+         a23(2, specific_first=False, specific_second=False), PARTIAL),
+        # Работа «volunteering»: про второй тип недостаток не назван вовсе.
+        ("аспект 3, второй тип не разобран",
+         a23(3, named_second=False, specific_second=False, specific_first=False), MISSING),
+        # Аспект 4: мнение своё, выбор назван, обоснован, форма глагола из плана.
+        ("аспект 4, всё на месте", a4(), FULL),
+        ("аспект 4, нет обоснования", a4(justified=False), PARTIAL),
+        ("аспект 4, форма глагола не та", a4(student_verb_form="I prefer"), PARTIAL),
+        # Работа «games»: и обоснования нет, и форма не та — аспект не раскрыт.
+        ("аспект 4, нет обоснования и форма не та",
+         a4(justified=False, student_verb_form="I'd prefer",
+            plan_verb_form="you prefer"), MISSING),
+    ]
+    for name, check, want in cases:
+        got = verdict(check)
+        if got != want:
+            bad.append(f"{name}: {got} вместо {want}")
+
+    # Глагольная форма сравнивается механически.
+    forms = [
+        ("you would prefer", "I would prefer", True),
+        ("you'd prefer", "I'd prefer", True),
+        ("you prefer", "I prefer", True),
+        ("you would prefer", "I prefer", False),
+        ("you prefer", "I would prefer", False),
+        ("you preferred as a child", "I preferred", True),
+        ("you preferred as a child", "I prefer", False),
+        ("", "I prefer", True),  # план не процитирован — придираться не за что
+    ]
+    for plan, student, want in forms:
+        if sc.verb_form_matches(plan, student) != want:
+            bad.append(f"форма глагола «{plan}» / «{student}»: ждали {want}")
+
+    # Модель промолчала про аспект — он не засчитан, а не «раскрыт по умолчанию».
+    empty = sc.aspect_verdicts([])
+    if [a["verdict"] for a in empty] != [MISSING] * 4:
+        bad.append(f"пустой ответ модели должен давать четыре «не раскрыто»: {empty}")
+
+    print(f"{'OK  ' if not bad else 'FAIL'} вердикты по аспектам: "
+          f"{len(cases)} сочетаний признаков + {len(forms)} проверок глагольной формы")
+    return bad
+
+
 def check_items() -> list[str]:
     bad = []
     got = sc.score_items([{"accepted": True}, {"accepted": False}, {"accepted": True},
@@ -209,6 +294,7 @@ def main() -> int:
     bad += check_organization()
     bad += check_language()
     bad += check_reading()
+    bad += check_aspects()
     bad += check_items()
     print()
     bad += check_monologues()

@@ -235,12 +235,58 @@ export function monologueBrief(topic: string, aspectA: string, aspectB: string):
   )
 }
 
-const MONOLOGUE_VARIANTS: Array<{ topic: string; a: string; b: string; images: string[] }> = [
-  { topic: 'The world of hobbies', a: 'the two hobbies', b: 'the two hobbies', images: [IMG.knit, IMG.skate] },
-  { topic: 'Ways of travelling', a: 'the two ways of spending holidays', b: 'the two ways of spending holidays', images: [IMG.mountains, IMG.beach] },
-  { topic: 'Eating at home and eating out', a: 'the two ways of eating', b: 'the two ways of eating', images: [IMG.homeFood, IMG.restaurant] },
-  { topic: 'Music in our life', a: 'the two ways of enjoying music', b: 'the two ways of enjoying music', images: [IMG.guitar, IMG.concert] },
-  { topic: 'Sport and games in our life', a: 'the two activities', b: 'the two activities', images: [IMG.pool, IMG.chess] },
+/* facts — что НА САМОМ ДЕЛЕ на фото. Уезжает в разбор: он фотографий не видит,
+   а по критериям обязан ловить фактические ошибки в описании. Заодно видно, из
+   какого материала ученику предлагают строить ответ: у восьми из десяти
+   заглушек в кадре нет людей, а формат задания просит описать, кто что делает.
+   Когда появятся свои материалы, менять надо ОБА поля разом — картинку и факт. */
+const MONOLOGUE_VARIANTS: Array<{
+  topic: string
+  a: string
+  b: string
+  images: string[]
+  facts: string[]
+}> = [
+  {
+    topic: 'The world of hobbies', a: 'the two hobbies', b: 'the two hobbies',
+    images: [IMG.knit, IMG.skate],
+    facts: [
+      'a close-up of many balls of wool in different colours with two knitting needles lying on them; there are no people in the shot — the photo stands for knitting as a quiet hobby you can do alone at home',
+      'a close-up of a skateboard balanced on the edge of a concrete ramp at sunset; only the rider’s legs and trainers are visible — the photo stands for skateboarding as an active outdoor hobby',
+    ],
+  },
+  {
+    topic: 'Ways of travelling', a: 'the two ways of spending holidays', b: 'the two ways of spending holidays',
+    images: [IMG.mountains, IMG.beach],
+    facts: [
+      'a wide view of a green mountain valley with snow-capped peaks, pine forest in the foreground and clouds; there are no people in the shot',
+      'an empty tropical beach at sunset: turquoise waves washing over pale sand, palm trees far away on the left; there are no people in the shot',
+    ],
+  },
+  {
+    topic: 'Eating at home and eating out', a: 'the two ways of eating', b: 'the two ways of eating',
+    images: [IMG.homeFood, IMG.restaurant],
+    facts: [
+      'a bowl of home-made salad photographed from above: lettuce, tomatoes, cucumber, sweetcorn, red cabbage, a boiled egg and pieces of grilled meat; there are no people in the shot',
+      'a restaurant table close up: a waiter’s hands are placing a small decorated dish in front of a guest, with wine glasses, a bread basket and other diners blurred in the background',
+    ],
+  },
+  {
+    topic: 'Music in our life', a: 'the two ways of enjoying music', b: 'the two ways of enjoying music',
+    images: [IMG.guitar, IMG.concert],
+    facts: [
+      'a close-up of a person’s hands playing an acoustic guitar indoors in warm light; the face is not visible and it is impossible to tell who it is',
+      'a large open-air concert at night: a dark crowd of people seen from behind, some with raised hands, facing a brightly lit stage with spotlights',
+    ],
+  },
+  {
+    topic: 'Sport and games in our life', a: 'the two activities', b: 'the two activities',
+    images: [IMG.pool, IMG.chess],
+    facts: [
+      'a swimmer in a swimming cap doing the butterfly stroke in a blue indoor pool with lane ropes, water splashing around them',
+      'a close-up of a wooden chessboard with the pieces set up: one dark pawn stands in front of a row of light pieces; there are no players in the shot',
+    ],
+  },
 ]
 
 /* -------------------------------------------------------------- Сборка */
@@ -300,6 +346,7 @@ export const TASKS: Record<TaskId, TaskDef> = {
       brief: monologueBrief(v.topic, v.a, v.b),
       images: v.images,
       imageCaption: v.topic,
+      photoFacts: v.facts,
     })),
   },
 }

@@ -1606,7 +1606,7 @@ async def _monologue_work(data: bytes) -> dict:
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.2,
-                max_tokens=1400,
+                max_tokens=2000,
             )
         )
     except Exception as e:  # noqa: BLE001
@@ -1614,11 +1614,10 @@ async def _monologue_work(data: bytes) -> dict:
 
     _track_llm(completion)
     raw = (completion.choices[0].message.content or "").strip()
-    try:
-        observations = json.loads(raw)
-    except json.JSONDecodeError:
+    observations = _loads_forgiving(raw)
+    if observations is None:
         raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
-    feedback = _score_feedback("monologue", observations if isinstance(observations, dict) else {}, ctx)
+    feedback = _score_feedback("monologue", observations, ctx)
     t2 = time.time()
 
     return {
@@ -1665,6 +1664,9 @@ def _feedback_prompt(kind: str, payload: dict, transcript: str) -> tuple[str, di
     brief = str(payload.get("brief") or "") or FALLBACK_MONOLOGUE_BRIEF
     facts = [str(f) for f in (payload.get("photoFacts") or [])]
     return ege_prompts.monologue_prompt(brief, facts), {}
+
+
+_loads_forgiving = ege_prompts.loads_forgiving
 
 
 def _errors_from(raw: object, limit: int = 8) -> list[dict]:
@@ -1738,11 +1740,8 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
         return {"summary": summary, "score": res["score"], "max": res["max"],
                 "errors": errors, "criteria": criteria}
 
-    # monologue
-    aspects = [a for a in (obs.get("aspects") or []) if isinstance(a, dict)][:4]
-    while len(aspects) < 4:  # модель поленилась — недостающий аспект не засчитан
-        aspects.append({"n": len(aspects) + 1, "verdict": ege_scoring.MISSING,
-                        "comment": "аспект в ответе не найден"})
+    # monologue: модель отвечает признаками «да/нет», вердикты выводит шкала
+    aspects = ege_scoring.aspect_verdicts(obs.get("aspects") or [])
     logic = [e for e in (obs.get("logic_errors") or []) if isinstance(e, dict)]
     lang = [e for e in (obs.get("lang_errors") or []) if isinstance(e, dict)]
     grave = sum(1 for e in lang if e.get("grave"))
@@ -1813,7 +1812,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                 temperature=0.2,
                 # Монологу нужно место: четыре аспекта плюс полный список ошибок,
                 # по числу которых считается балл за язык.
-                max_tokens=1400 if kind == "monologue" else 900,
+                max_tokens=2000 if kind == "monologue" else 900,
             )
         )
     except Exception as e:  # noqa: BLE001
@@ -1821,12 +1820,9 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
 
     _track_llm(completion)
     raw = (completion.choices[0].message.content or "").strip()
-    try:
-        observations = json.loads(raw)
-    except json.JSONDecodeError:
+    observations = _loads_forgiving(raw)
+    if observations is None:
         raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
-    if not isinstance(observations, dict):
-        raise HTTPException(status_code=502, detail="LLM вернул не тот формат разбора")
 
     # Балл считает шкала ФИПИ, а не модель, — см. ege_scoring.py.
     feedback = _score_feedback(kind, observations, ctx)
