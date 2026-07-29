@@ -493,6 +493,19 @@ def task_add_imported(exam: str, task_no: int, kind: str, payload_json: str,
     return tid
 
 
+def task_exists(source: str, source_id: str) -> bool:
+    """Уже импортировано? Проверять ДО скачивания и распознавания.
+
+    Раньше проверка стояла после сборки payload, и повторный запуск импорта
+    заново гонял зрение по всему банку, чтобы затем выбросить результат.
+    Импорт возобновляемый, и дешёвым он должен быть именно на повторе.
+    """
+    if not source_id:
+        return False
+    return _exec("SELECT 1 FROM tasks WHERE source=? AND source_id=? LIMIT 1",
+                 (source, source_id)).fetchone() is not None
+
+
 def tasks_drafts() -> list[dict]:
     """Черновики для модерации — самые свежие сверху."""
     rows = _exec("SELECT id, exam, task_no, kind, payload, source, source_id, created_at"

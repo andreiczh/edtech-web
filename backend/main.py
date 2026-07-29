@@ -1055,6 +1055,12 @@ def _fipi_import_job(pages: int, pagesize: int, limit: int) -> None:
             for item in items:
                 if limit and job["added"] >= limit:
                     break
+                # Дешёвая проверка ПЕРЕД дорогой работой: скачивать картинки и
+                # звать зрение ради задания, которое уже в базе, — чистая трата
+                # лимитов и времени.
+                if storage.task_exists(fipi_import.SOURCE, item["fipi_id"]):
+                    job["skipped"] += 1
+                    continue
                 try:
                     payload = _fipi_payload(cl, vision, item)
                 except Exception as e:  # noqa: BLE001
