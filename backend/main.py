@@ -1705,10 +1705,14 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
             "correction": str(m.get("expected") or "").strip(),
             "explanation": str(m.get("explanation") or "").strip(),
         } for m in misread[:6]]
+        # Оговорка про фонетику здесь обязательна, а не для галочки: в реальном
+        # ЕГЭ этот балл ставят ИМЕННО за произношение и интонацию, а мы их не
+        # слышим. Ученик должен понимать, что 1/1 у нас — не «прочитано идеально».
+        parts = [summary, note if (score == 0 or errors) else "",
+                 "Произношение и интонацию разбор не слышит — он сверяет текст с эталоном."]
         return {
-            "summary": f"{summary} {note}".strip() if summary else note,
+            "summary": " ".join(p for p in parts if p).strip(),
             "score": score, "max": ege_scoring.MAX_SCORE["reading"], "errors": errors,
-            "note": "Произношение и интонацию разбор не слышит — он сверяет текст.",
         }
 
     if kind in ("dialogue", "interview"):
