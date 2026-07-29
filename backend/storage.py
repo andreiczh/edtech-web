@@ -140,6 +140,13 @@ def ensure_schema() -> None:
         " id TEXT PRIMARY KEY, exam TEXT NOT NULL, task_no INTEGER NOT NULL,"
         " kind TEXT NOT NULL, payload TEXT NOT NULL,"
         " active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)",
+        # Картинки заданий храним У СЕБЯ, а не ссылками на чужой сайт: ученик
+        # не должен зависеть от доступности стороннего сервера, а тот — получать
+        # наш трафик. base64 в TEXT, а не BLOB: у SQLite и Postgres типы разные,
+        # а текст одинаков; двести картинок по 20 КБ — это ~5 МБ, для базы пыль.
+        "CREATE TABLE IF NOT EXISTS task_images ("
+        " id TEXT PRIMARY KEY, mime TEXT NOT NULL, data TEXT NOT NULL,"
+        " source TEXT, created_at TEXT NOT NULL)",
         # Свой счётчик расхода Mistral: лимиты у ключа НЕ безлимитные
         # (замерено по заголовкам 23.07.2026: LLM 50 req/мин и 50k токенов/мин),
         # а месячные квоты видны только в консоли — значит, продукт обязан
@@ -162,6 +169,19 @@ def ensure_schema() -> None:
         " student_id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL)",
     ):
         _exec(ddl)
+
+    # Миграции существующих таблиц — отдельно от CREATE TABLE и каждая под
+    # своим try: ALTER TABLE ADD COLUMN падает, если колонка уже есть, а
+    # «уже есть» — это норма при каждом втором старте, а не авария.
+    #
+    # source='fipi' + source_id='F2934C' у задания: это и защита от дублей при
+    # повторном импорте, и видимое происхождение — заимствованное задание
+    # должно быть отличимо от своего.
+    for column in ("source TEXT", "source_id TEXT"):
+        try:
+            _exec(f"ALTER TABLE tasks ADD COLUMN {column}")
+        except Exception:  # noqa: BLE001 — колонка уже на месте
+            pass
 
 
 # ------------------------------------------------------------------ Чтение
@@ -449,6 +469,68 @@ def task_add(exam: str, task_no: int, kind: str, payload_json: str) -> str:
     _exec("INSERT INTO tasks(id, exam, task_no, kind, payload, active, created_at)"
           " VALUES(?,?,?,?,?,1,?)", (tid, exam, int(task_no), kind, payload_json, _now()))
     return tid
+
+
+def task_add_imported(exam: str, task_no: int, kind: str, payload_json: str,
+                      source: str, source_id: str) -> str | None:
+    """Задание из внешнего источника — СРАЗУ ЧЕРНОВИКОМ (active=0).
+
+    Публикует его человек руками через админку: заимствованное задание может
+    оказаться устаревшего формата, с чужой картинкой или просто кривым, и
+    выпускать такое к ученикам без просмотра нельзя. Возвращает None, если
+    задание с этим source_id уже импортировано — повторный запуск импорта
+    ничего не дублирует и ничего не затирает.
+    """
+    if source_id:
+        seen = _exec("SELECT id FROM tasks WHERE source=? AND source_id=?",
+                     (source, source_id)).fetchone()
+        if seen:
+            return None
+    tid = str(uuid.uuid4())
+    _exec("INSERT INTO tasks(id, exam, task_no, kind, payload, active, created_at,"
+          " source, source_id) VALUES(?,?,?,?,?,0,?,?,?)",
+          (tid, exam, int(task_no), kind, payload_json, _now(), source, source_id))
+    return tid
+
+
+def tasks_drafts() -> list[dict]:
+    """Черновики для модерации — самые свежие сверху."""
+    rows = _exec("SELECT id, exam, task_no, kind, payload, source, source_id, created_at"
+                 " FROM tasks WHERE active=0 ORDER BY created_at DESC").fetchall()
+    return [{"id": r[0], "exam": r[1], "task_no": r[2], "kind": r[3], "payload": r[4],
+             "source": r[5], "source_id": r[6], "created_at": r[7]} for r in rows]
+
+
+def task_delete(tid: str) -> bool:
+    row = _exec("SELECT id FROM tasks WHERE id=?", (tid,)).fetchone()
+    if row is None:
+        return False
+    _exec("DELETE FROM tasks WHERE id=?", (tid,))
+    return True
+
+
+def tasks_purge_source(source: str) -> int:
+    """Вычистить всё, что приехало из источника. Нужно ровно на тот случай,
+    если правообладатель попросит убрать материалы: одна кнопка, а не поиск
+    по базе руками."""
+    rows = _exec("SELECT id FROM tasks WHERE source=?", (source,)).fetchall()
+    _exec("DELETE FROM tasks WHERE source=?", (source,))
+    return len(rows)
+
+
+def image_put(img_id: str, mime: str, data_b64: str, source: str) -> None:
+    if _IS_PG:
+        _exec("INSERT INTO task_images(id, mime, data, source, created_at)"
+              " VALUES(?,?,?,?,?) ON CONFLICT (id) DO NOTHING",
+              (img_id, mime, data_b64, source, _now()))
+    else:
+        _exec("INSERT OR IGNORE INTO task_images(id, mime, data, source, created_at)"
+              " VALUES(?,?,?,?,?)", (img_id, mime, data_b64, source, _now()))
+
+
+def image_get(img_id: str) -> tuple[str, str] | None:
+    row = _exec("SELECT mime, data FROM task_images WHERE id=?", (img_id,)).fetchone()
+    return (row[0], row[1]) if row else None
 
 
 def task_toggle(tid: str) -> bool | None:

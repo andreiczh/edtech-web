@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html XMLNS:m="http://www.w3.org/1998/Math/MathML">
+<head>
+<meta http-equiv="X-UA-Compatible" content="IE=edge" /><LINK href="../../styles.css" rel="STYLESHEET" type="text/css">
+<LINK href="../../xmodules/os/img/_styles.css?v=1.04" rel="STYLESHEET" type="text/css">
+<script type="text/javascript" src="../../lib/mml/mathjax-4-config.js"></script><script type="text/javascript" src="../../lib/mml/mathjax-4/mml-chtml.js"></script><script type="text/javascript" src="../../lib/t3utils.js?v=2.04"></script><script type="text/javascript">var home_directory="../../";</script><meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+<META NAME="Document-state" CONTENT="Dynamic"><META HTTP-EQUIV="pragma" CONTENT="no-cache"><META HTTP-EQUIV="expires" CONTENT="0"><meta http-equiv="X-UA-Compatible" content="IE=10"/><link rel='shortcut icon' href='img/icon.png'><style>@media print {.noprint {display:none !important;}}</style><title>Открытый банк тестовых заданий</title>
+</head>
+<body class='questions-container' style='font-size:11pt'>
+		<script language="javascript">
+        var abort_answer_senging;
+		function onButtonClick(formid = '')
+		{
+			var aform=document.getElementById('checkform'+formid);
+            abort_answer_senging = false;
+            if (formid)
+                eval('setAnswer'+formid+'(aform);');
+            else
+			    setAnswer(aform);
+            if (abort_answer_senging) return;
+			;
+			//aform.submit();
+            if (aform.setBtn)
+                aform.setBtn.disabled=true;
+		}
+		function onResetClick(formid = '')
+		{
+			var aform=document.getElementById('checkform'+formid);
+			var aEl = document.createElement('input');
+			aEl.type = 'hidden';
+			aEl.name = 'reset';
+			aEl.value = 1;
+			aform.appendChild(aEl);
+			
+;
+			aform.submit();
+		}
+
+		function noAction()
+		{
+		}
+
+		</script>
+        <style type="text/css">
+			.img_scroll_container { height: 400px; overflow-y: scroll; text-align: center; width:100%;}
+			.img_scroll_container img { width: 700px }
+            .printbody .img_scroll_container { height: auto; overflow-y: hidden; }
+            .printbody .img_scroll_container img { width: 650px }
+            .active-distractor:hover{cursor:pointer; background-color: #f2f2f2;}
+            .active-distractor.checked-distractor{background-color: #e8e8e8;}
+		</style>
+		<script language="javascript">
+		var qguid='';
+		var qfiles_location='../../';
+
+		function ShowPictureQ(s,hint)
+		{
+			while ((p=s.indexOf(". "))>0)
+			s=s.substring(0,p+1)+s.substring(p+2);
+			document.write('<IMG SRC="'+qfiles_location+s+'" ALIGN=ABSMIDDLE alt="'+hint+'" border="0"> ');
+		}
+
+		function ShowPictureQBL(s,hint,h,bl)
+		{
+			while ((p=s.indexOf(". "))>0)
+			s=s.substring(0,p+1)+s.substring(p+2);
+			var vspace=h/2-bl;
+			if (vspace<0) vspace=-vspace;
+			document.write('<IMG SRC="'+qfiles_location+s+'" ALIGN=MIDDLE border="0" alt="'+hint+'" VSPACE='+(vspace)+' STYLE="position:relative; top:'+(h/2-bl)+'px;">');
+		}
+
+
+		
+		function ShowPictureQ2WH(s,s2,hint,w,h)
+		{
+            if (s.indexOf('.flv')>0 ||s.indexOf('.mp4')>0 ||s.indexOf('.swf')>0)
+                s='../../show_media.php?m='+encodeURIComponent(s)+'&w='+w+'&h='+h;
+
+			w=w+40;
+			h=h+30;
+
+						document.write('<a href="javascript:var wnd=window.open(\''+qfiles_location+s+'\',\'\',\',status=1,resizable=1,menubar=0,scrollbars=1,width='+w+', height='+h+',left='+((screen.width-w)/2)+',top='+((screen.height-h)/2)+'\');wnd.focus();"><IMG BORDER=0 SRC="'+qfiles_location+s2+'" ALIGN=ABSMIDDLE style="cursor:pointer" alt="'+hint+'"></a> ');
+			//alert('вставил картинку!');
+		}
+
+		function ShowPictureQ3WH(s,s2,s3,hint,w,h)
+		{
+			ShowPictureQ2WH(s,s2,hint,w,h);
+		}
+
+		function ShowPictureQ2(s,s2,hint)
+		{
+			ShowPictureQ2WH(s,s2,hint,600,400);
+		};
+
+		function invertImage(img, s, s2)
+		{
+			if (img.src.indexOf(s)>0) img.src=qfiles_location+s2; else img.src=qfiles_location+s;
+		}
+
+		function ShowPictureQ3(s,s2,hint)
+		{
+			while ((p=s.indexOf(". "))>0)
+			s=s.substring(0,p+1)+s.substring(p+2);
+            var onclick=(s.indexOf('.jpg')>0||s.indexOf('.png')>0||s.indexOf('.gif')>0 ?'onclick="invertImage(this, \''+s+'\', \''+s2+'\')"':'');
+			document.write('<IMG SRC="'+qfiles_location+s2+'" '+onclick+' ALIGN=ABSMIDDLE style="cursor:pointer" alt="'+hint+'" border="0"> ');
+		};
+
+		function showXGraphic(xml)
+		{
+			document.write("<object classid=\"CLSID:A40BD42C-2DF9-4DB6-AE58-6411A05C7827\" ID=GraphX, width=258, height=410 ><param name=DEsignMode value=1><param name=\"Buffer\" value='<?xml version=\"1.0\"?>"+xml+"'></object>");
+		}
+		/*
+function ShowPictureQGX2(img,xml)
+{
+w=500;
+h=400;
+document.write('<IMG BORDER=0 SRC="'+qfiles_location+img+'" ALIGN=ABSMIDDLE>');
+}
+*/
+		function ShowPictureQGX2(img,xml)
+		{
+			w=500;
+			h=400;
+			document.write('<a href="javascript:var wnd=window.open(\'../../showxgprahic.php?qguid='+qguid+'&xml='+xml+'\',\'\',\',status=1,resizable=1,menubar=0,scrollbars=1,width='+w+', height='+h+',left='+((screen.width-w)/2)+',top='+((screen.height-h)/2)+'\');wnd.focus();"><IMG BORDER=0 SRC="'+qfiles_location+img+'" ALIGN=ABSMIDDLE style="cursor:pointer"></a> ');
+		}
+
+		</script>
+		<script language='JavaScript'>
+var files_location='';
+var files_abs_location='';
+var space_after_img=true;
+function ShowPicture(s)
+{document.write('<IMG SRC="'+files_location+s+'" ALIGN=absmiddle border=0>'+(space_after_img?' ':''));}
+function ShowPicture2(s,s2,w,h)
+{if (w>800) w=800;
+ if (h>600) h=600;
+ align='ABSMIDDLE'; 
+document.write('<a href="javascript:var wnd=window.open(\''+files_location+s+'\',\'_blank\',\'resizable=1,menubar=0,scrollbars=1,width='+(w+40)+',height='+(h+20)+',left='+((screen.width-w-40)/2)+',top='+((screen.height-h-20)/2)+'\');wnd.focus();"><IMG BORDER=0 SRC="'+files_location+s2+'" ALIGN='+align+'></a>'+(space_after_img?' ':''));}
+function ShowPicture2S(objsrc,imgsrc,datasrc,w,h)
+{ShowPicture2(objsrc,imgsrc,w,h);}
+function ShowPictureBL(s,bl)
+{document.write('<IMG SRC="'+files_location+s+'" ALIGN=MIDDLE VSPACE='+bl+' STYLE="position:relative; top:-'+(bl)+'px;" border=0>');}
+function ShowPictureBL2(s,bl,h)
+{ var vspace=h/2-bl;
+  		if (vspace<0) vspace=-vspace;
+document.write('<IMG SRC="'+files_location+s+'" ALIGN=MIDDLE VSPACE='+((vspace))+' STYLE="position:relative; top:'+(h/2-bl-1)+'px;" border=0>');}
+function ShowPictureGX(img,xml)
+		{
+		w=500;
+		h=400;
+		document.write('<a href="javascript:var wnd=window.open(\'../../showxgprahic.php?xml='+files_abs_location+xml+'\',\'\',\',status=1,resizable=1,menubar=1,scrollbars=1,width='+w+', height='+h+',left='+((screen.width-w)/2)+',top='+((screen.height-h)/2)+'\');wnd.focus();"><IMG BORDER=0 SRC="'+files_location+img+'" ALIGN=ABSMIDDLE style="cursor:pointer"></a> ');
+		}function TraceLink(indx,n)
+{ if (n.charAt(0)=='{')
+  		{
+			var guid=n.substring(1,9)+n.substring(10,14)+n.substring(15,19)+n.substring(20,24)+n.substring(25,37);
+			showdocbyguid(guid);
+  		}
+  		else
+  		{var wnd=window.open('../../tracelink.php?project_guid=4B53A6CB75B0B5E1427E596EB4931A2A&cdf='+n,'link_wnd','toolbar=1,resizable=1,menubar=0, location=0,scrollbars=1,width=416,height=350,left=0,top=0');
+wnd.focus();
+ }
+}
+function showdocbyguid(guid)
+{var wnd=window.open('../../tracelink.php?project_guid=4B53A6CB75B0B5E1427E596EB4931A2A&doc_guid='+guid.toUpperCase(),'link_wnd','toolbar=1,resizable=1,menubar=0, location=0,scrollbars=1,width=416,height=350,left=0,top=0');
+wnd.focus();
+}
+function delFile(fguid)
+{
+if (confirm('Удалить файл?'))
+  location.href='delete.php?proj=4B53A6CB75B0B5E1427E596EB4931A2A&md=qprint&fguid='+fguid}
+function ShowFlash(url)
+{
+			w='100%'; h='100%';
+			url='../../'+files_location+url;
+			document.write('<object tabindex=0 ID=ilFlash classid=CLSID:D27CDB6E-AE6D-11cf-96B8-444553540000 width='+w+' height='+h+' codebase="http://download.macromedia.com/pub/shockwave/cabs/flash/swflash.cab#version=6,0,0,0">'+
+		'<param name=movie value="'+url+'"><PARAM play=true><PARAM SWLIVECONNECT=true><PARAM MENU=true><PARAM LOOP=false>'+
+		'<PARAM NAME=scale VALUE=noScale><embed src="'+url+'" quality=high bgcolor=#FFFFFF  width='+w+' height='+h+' scale=noScale type="application/x-shockwave-flash" pluginspage="http://www.macromedia.com/shockwave/download/index.cgi?P1_Prod_Version=ShockWaveFlash"></embed></object>');}
+	function showXGraphic(xml)
+		{
+		//alert("<object classid=\"CLSID:A40BD42C-2DF9-4DB6-AE58-6411A05C7827\" ID=GraphX, width=258, height=410 ><param name=DEsignMode value=0><param name=\"Buffer\" value='<?xml version=\"1.0\"?>"+xml+"'></object>");
+		document.write("<object classid=\"CLSID:A40BD42C-2DF9-4DB6-AE58-6411A05C7827\" ID=GraphX, width=258, height=410 ><param name=DEsignMode value=0><param name=\"Buffer\" value='<?xml version=\"1.0\"?>"+xml+"'></object>");
+		}
+	</script><script type='text/javascript'>
+	var solvedQst = localStorage.getItem("OS:4B53A6CB75B0B5E1427E596EB4931A2A:SOLVED");
+	solvedQst = solvedQst ? new Set(solvedQst.split(",")): new Set();
+	var favQst = localStorage.getItem("OS:4B53A6CB75B0B5E1427E596EB4931A2A:FAV");
+	favQst = favQst ? new Set(favQst.split(",")): new Set();
+
+
+
+var request = createAJAXRequest();
+
+function toggleQFavour(qblock) {    var fvbtn = document.getElementById(qblock).getElementsByClassName('favorite-button');
+    toggleFavour(fvbtn[0]);
+}
+
+function toggleFavour(btn) {	btn.classList.toggle('is-favorite');
+    btn.title = btn.classList.contains('is-favorite')?'В Избранном':'Добавить в Избранное';}
+
+function setToStr(set) {	if (browser.isIE) {		let str = '';
+		set.forEach(function(elem){
+		    str += elem + (str?",":"")
+ 	 	});
+ 	 	return str;	} else {		return Array.from(set).join(",")	}}
+
+
+function changeFavour(btn, qst) {	if (btn.classList.contains('is-favorite'))
+	    favQst.delete(qst);
+    else
+        favQst.add(qst);
+    localStorage.setItem("OS:4B53A6CB75B0B5E1427E596EB4931A2A:FAV", setToStr(favQst));
+	toggleFavour(btn);}
+
+function changeStatus(qst, panel){
+    let answer = solvedQst.has(qst)? '0': '1';
+	if (answer == '0')		solvedQst.delete(qst);
+    else
+        solvedQst.add(qst);
+    localStorage.setItem("OS:4B53A6CB75B0B5E1427E596EB4931A2A:SOLVED", setToStr(solvedQst));
+    setQSolved(panel, answer)
+}
+
+
+
+function checkButtonClick(form, setanswer, panel) {
+	form = document.getElementById(form);
+	setanswer(form);
+    if (!request.inProcess) {
+        request.open('POST', 'solve.php', true);
+        request.onreadystatechange = checkSolutionDone;
+        request.inProcess = true;
+        request.panel = panel;
+
+        var formData = new FormData(form);
+        formData.append("ajax", "1");
+        formData.append("proj", "4B53A6CB75B0B5E1427E596EB4931A2A")
+
+		if (browser.isIE)
+			request.qst = form.guid.value;
+		else
+	        request.qst = formData.get("guid");
+
+        request.send(formData);
+
+        panel.getElementsByClassName('task-status')[0].innerHTML = "<img class='loader' src='img/loading_spinner.gif'>";    }
+}
+
+function checkSolutionDone() {    if (request.readyState==4)  {
+        request.inProcess = false;
+        answer = "0";
+        if (request.status==200) {
+            answer = request.responseText;
+        }
+        if (answer!='1' && answer!='2' && answer!='3') {
+        	answer = "0";
+        }
+        qst = request.qst;
+
+        if (answer == '0' || answer == '2')
+    		solvedQst.delete(qst);
+        else
+            solvedQst.add(qst);
+        localStorage.setItem("OS:4B53A6CB75B0B5E1427E596EB4931A2A:SOLVED", setToStr(solvedQst));
+        setQSolved(request.panel, answer);
+    }
+}
+
+function setQSolved(block, answer) {	if (typeof(block) === 'string')
+	    block = document.getElementById(block);
+	var statusNode = block.getElementsByClassName('task-status')[0];
+    statusNode.className= "task-status task-status-" + answer ;
+    if (answer=='1')
+        statusNode.innerHTML = "РЕШЕНО";
+    else if (answer=='2')
+        statusNode.innerHTML = "НЕВЕРНО";
+    else if (answer=='3')
+        statusNode.innerHTML = "ВЕРНО";
+    else
+        statusNode.innerHTML = "НЕ РЕШЕНО";}
+
+</script>
+
+ <div class="qblock" id='q4E7210'> 	    <div id="hint" class="hint" name="hint">Установите соответствие и впишите ответ.</div>
+	    		<form action='javascript:noAction()' name='checkform4E7210' id='checkform4E7210' method="get"		>
+		<input type="Hidden" name="guid" value="5023C68AFBB684294CFE72D37BBB7E9F">
+		<script language='JavaScript'> 
+ function setAnswer4E7210(aform)
+ {
+ var ans=''; ans+=aform.ans0.options[aform.ans0.selectedIndex].value;
+ans+=aform.ans1.options[aform.ans1.selectedIndex].value;
+ans+=aform.ans2.options[aform.ans2.selectedIndex].value;
+ans+=aform.ans3.options[aform.ans3.selectedIndex].value;
+ans+=aform.ans4.options[aform.ans4.selectedIndex].value;
+ans+=aform.ans5.options[aform.ans5.selectedIndex].value;
+ans+=aform.ans6.options[aform.ans6.selectedIndex].value;
+ aform.answer.value=ans;
+}
+</script><TABLE WIDTH="100%" border='0' bgcolor='gray' cellspacing='1' cellpadding=2>
+  <TR><TD valign=top width=100% bgcolor="#FAFBCA" class='cell_0'><table><tr><td>   <p class="MsoNormal"><i>Установите соответствие между текстами </i><b><i><span >A</span><m:math><m:mstyle displaystyle="true"> <m:semantics> <m:mo>&#x2013;</m:mo>  </m:semantics> </m:mstyle></m:math></i></b><b><i><span >G</span></i></b><i> и заголовками <b>1<m:math><m:mstyle displaystyle="true"> <m:semantics> <m:mo>&#x2013;</m:mo>  </m:semantics> </m:mstyle></m:math>8. </b>Занесите свои ответы в таблицу. Используйте каждую цифру <b>только один раз. В задании один заголовок лишний</b>.</i><span></span></p>   </td></tr></table><table  width=100% align=center><tr><td width=100%><table width=100%><tr valign=top><td><table width=100% cellpadding=3><tr valign=top>
+            <td width=50%><table width=100% cellpadding=3><tr valign=top><td width=0><b>1.</b>&nbsp;</td><td width=100%> <P class=Distractor><B><SPAN lang=EN-US>Fun in theory, boring in reality</SPAN></B></P> </td></tr><tr valign=top><td width=0><b>2.</b>&nbsp;</td><td width=100%> <P class=Distractor><B><SPAN lang=EN-US>Deficit of activity problems</SPAN></B></P> </td></tr><tr valign=top><td width=0><b>3.</b>&nbsp;</td><td width=100%> <P class=Distractor><B><SPAN lang=EN-US>Saving rare animals</SPAN></B></P> </td></tr><tr valign=top><td width=0><b>4.</b>&nbsp;</td><td width=100%> <P class=Distractor><B><SPAN lang=EN-US>Contrary to popular belief</SPAN></B></P> </td></tr></table></td>
+            <td width=0>&nbsp;&nbsp;&nbsp;</td>
+            <td width=50%><table width=100% cellpadding=3><tr valign=top><td width=0><b>5.</b>&nbsp;</td><td width=100%> <P class=Distractor><B><SPAN lang=EN-US>Benefits of being outdoors</SPAN></B></P> </td></tr><tr valign=top><td width=0><b>6.</b>&nbsp;</td><td width=100%> <P class=Distractor><B><SPAN lang=EN-US>Ready to help</SPAN></B></P> </td></tr><tr valign=top><td width=0><b>7.</b>&nbsp;</td><td width=100%> <P class=Distractor><B><SPAN lang=EN-US>Original style</SPAN></B></P> </td></tr><tr valign=top><td width=0><b>8.</b>&nbsp;</td><td width=100%> <P class=Distractor><B><SPAN lang=EN-US>Similar sounds – different emotions</SPAN></B></P> </td></tr></table></td>
+            </tr></table></td></tr><tr><td><table  cellpadding=3><tr valign=top><td width=0><b>A.</b>&nbsp;</td><td width=100%> <P class=Distractor><SPAN lang=EN-US>In addition to being highly intelligent, elephants are capable of a remarkable amount of empathy. During a natural disaster, elephants are able to understand that something dangerous is happening. They can understand that a person is in trouble and that the situation is unsafe. Elephants have good sense of smell and there have been cases when they alerted rescuers to people trapped in a building. Elephants have been observed saving their young from drowning and also been filmed trying to save people they see at risk of drowning.</SPAN></P>
+<P class=Distractor></P> </td></tr><tr valign=top><td width=0><b>B.</b>&nbsp;</td><td width=100%>  <p class="MsoNormal"><span >A lot of studies suggest that green spaces enhance mental health and learning capacity, both immediately and over time, by lowering stress levels and restoring attention. Greenery restores attention by drawing the eye and at the same time calms the nervous system, creating an ideal state for learning. Similarly, studies show that spending time in the sunlight can reduce attention deficit symptoms, while bright light first thing in the morning can improve mood and the quality of sleep.</span></p> <p class="MsoNormal"><span >&nbsp;</span><span></span></p>  </td></tr><tr valign=top><td width=0><b>C.</b>&nbsp;</td><td width=100%>  <p class="MsoNormal"><span >Why are hyenas known for laughing? There is even a phrase we use: &ldquo;to laugh like a hyena&rdquo;. Zoologists will tell you that the unique sounds they make are actually no laughing matter. Hyenas indeed make loud barking noises that sound like laughter, but it&rsquo;s not because they&rsquo;re <span>amused</span> by anything. Instead, a hyena&rsquo;s &ldquo;laughter&rdquo; is actually a form of communication used to convey frustration, excitement, or fear. Most often, you&rsquo;ll hear this unique vocalization during a hunt or when the animals are feeding on <span>prey</span> as a group.</span></p> <p class="MsoNormal"><span >&nbsp;</span><span></span></p>  </td></tr><tr valign=top><td width=0><b>D.</b>&nbsp;</td><td width=100%> <P class=Distractor><SPAN lang=EN-US>Zoologists believe that boredom isn’t a uniquely human emotion – animals can be bored, too. Animals which live in captivity (in zoos, for example) and don’t have to take care of their survival may experience boredom and try to find ways to overcome it. They may come up with some “creative” activities which they wouldn’t normally do in their natural environment. As for the pets at home, they may also suffer from the lack of stimulation. That’s why we need to make sure we give them enough time, attention and toys regularly.</SPAN></P>
+<P class=Distractor></P> </td></tr><tr valign=top><td width=0><b>E.</b>&nbsp;</td><td width=100%>  <p class="MsoNormal"><span >While most dogs jump eagerly into the water to swim, cats don&rsquo;t usually do that, and many believe that cats have a phobia of water. But some pet groomers insist that it&rsquo;s not true and getting a cat to trust you enough to bathe is quite possible, with some patience and skill. Most cats are not afraid of water like so many people may think. They are actually afraid of loud noises and of drowning, rather than water itself. Cats drink water every day, lots of cats even play with water or follow people into the shower.</span></p> <p class="MsoNormal"><span >&nbsp;</span><span></span></p>  </td></tr><tr valign=top><td width=0><b>F.</b>&nbsp;</td><td width=100%>  <p class="MsoNormal"><span >Videogame testers spend most of their time testing the game long before it&rsquo;s finished and long before it starts to become a fun experience. Even after the game is developed enough to start being fun, the testing tasks often aren&rsquo;t entertaining at all. Testers may have to walk their character around a forest, for example, to look for trees that aren&rsquo;t drawn well. They then record the coordinates so an artist can fix them later. It&rsquo;s monotonous work and can take days to finish. So if testing video games seems like a fun, easy job to you, think again.</span></p> <p class="MsoNormal"><span >&nbsp;</span><span></span></p>  </td></tr><tr valign=top><td width=0><b>G.</b>&nbsp;</td><td width=100%> <P class=Distractor><SPAN lang=EN-US>Claude Monet’s impressionist paintings were all about nature. In his works he tried to capture nature as it appeared to him at the moment. He also experimented with light and shadow and how they changed during different times of the day. Some artists of the time criticized Monet because his works lacked detail and didn’t resemble finished paintings. Monet used strong colours, which he did not mix. He painted them onto the canvas in short brush strokes. He was also criticized for not using classical painting techniques.</SPAN></P> </td></tr></table></td></tr></table></td></tr></table></TD></TR>
+  <TR bgcolor="#FFFFFF"><TD>
+	  <TABLE WIDTH="100%" class='submit-outblock'>
+	  	<TR><TD class='varinats-block'><a name="variants"></a><br><div><table width='100%' cellspacing=0 cellpadding=1><tr><td width=100%><table  class='answer-table'><tr align=center><td><b>A</b></td><td><b>B</b></td><td><b>C</b></td><td><b>D</b></td><td><b>E</b></td><td><b>F</b></td><td><b>G</b></td></tr><tr><td><select style='width:40px' name='ans0'><option value=0><option value='1'>1<option value='2'>2<option value='3'>3<option value='4'>4<option value='5'>5<option value='6'>6<option value='7'>7<option value='8'>8</select></td><td><select style='width:40px' name='ans1'><option value=0><option value='1'>1<option value='2'>2<option value='3'>3<option value='4'>4<option value='5'>5<option value='6'>6<option value='7'>7<option value='8'>8</select></td><td><select style='width:40px' name='ans2'><option value=0><option value='1'>1<option value='2'>2<option value='3'>3<option value='4'>4<option value='5'>5<option value='6'>6<option value='7'>7<option value='8'>8</select></td><td><select style='width:40px' name='ans3'><option value=0><option value='1'>1<option value='2'>2<option value='3'>3<option value='4'>4<option value='5'>5<option value='6'>6<option value='7'>7<option value='8'>8</select></td><td><select style='width:40px' name='ans4'><option value=0><option value='1'>1<option value='2'>2<option value='3'>3<option value='4'>4<option value='5'>5<option value='6'>6<option value='7'>7<option value='8'>8</select></td><td><select style='width:40px' name='ans5'><option value=0><option value='1'>1<option value='2'>2<option value='3'>3<option value='4'>4<option value='5'>5<option value='6'>6<option value='7'>7<option value='8'>8</select></td><td><select style='width:40px' name='ans6'><option value=0><option value='1'>1<option value='2'>2<option value='3'>3<option value='4'>4<option value='5'>5<option value='6'>6<option value='7'>7<option value='8'>8</select></td></tr></table><input type=hidden name=answer></td></tr></table></div><br></TD></TR>
+	  	<TR><TD class='submit-block'></TD></TR>
+	  </TABLE>
+  </TD></TR></TABLE>	</form>
+	<form name='chkcodeform'>
+			<input type='hidden' name='guid' value='5023C68AFBB684294CFE72D37BBB7E9F'>
+			<input type='hidden' name='answer' value="">
+			<input type='hidden' name='chkcode' value=''>
+		</form> </div> <div id='i4E7210'>
+    <div class="separator"></div>
+    <div class="task-header-panel">
+        <div class="info-button" onclick='this.parentNode.classList.toggle("show-info")'>i</div>
+        <div class="task-info-panel">
+            <div class="task-info-title">
+                <span>СВОЙСТВА ЗАДАНИЯ</span>
+                <span class="task-info-title-close-button" onclick='this.parentNode.parentNode.parentNode.classList.toggle("show-info")'></span>
+            </div>
+            <div class="task-info-content">
+                <table><tbody>
+                    <tr><td class="param-name">КЭС:</td><td class="param-row"><div>1.3.1 Чтение с пониманием основного содержания текста – умения читать про себя и понимать с использованием языковой и контекстуальной догадки аутентичные тексты разных жанров и стилей, содержащие отдельные неизученные языковые явления; определять тему/основную мысль, выделять главные факты/события (опуская второстепенные); прогнозировать содержание текста по заголовку/началу текста, определять логическую последовательность главных фактов, событий; игнорировать незнакомые слова, несущественные для понимания основного содержания (объём текста/текстов для чтения – до 900 слов)</div></td></tr>                                                                                <tr><td class="param-name">Тип ответа:</td><td>Установление соответствия</td></tr>                                      </tbody></table>
+            </div>
+        </div>
+        <div class="id-text">Номер: <span class="canselect">4E7210</span></div>
+        <div class="favorite-button" title="Добавить в Избранное" onclick="changeFavour(this,'5023C68AFBB684294CFE72D37BBB7E9F')"></div>
+                         <div class="answer-panel">
+             <span class="status-title-text hidden-xs">Статус задания:</span>
+             <span class="task-status task-status-0">НЕ РЕШЕНО</span>
+             <span class="answer-button" onclick="checkButtonClick('checkform4E7210', setAnswer4E7210, this.parentNode)">Ответить</span>
+        </div>
+
+    </div>
+</div>	    <script type='text/javascript'>
+	        if (favQst.has("5023C68AFBB684294CFE72D37BBB7E9F"))
+	            toggleQFavour('i4E7210');
+	        if (solvedQst.has("5023C68AFBB684294CFE72D37BBB7E9F"))
+	            setQSolved('i4E7210', '1');
+	    </script>
+	     <div class="qblock hide-form" id='qFF111A'> 	    <div id="hint" class="hint" name="hint">Дайте развернутый ответ.</div>
+	    		<form action='javascript:noAction()' name='checkformFF111A' id='checkformFF111A' method="post" enctype="multipart/form-data"		>
+		<input type="Hidden" name="guid" value="51951590B0F8858E4E8AB43BE844C4CF">
+		<TABLE WIDTH="100%" border='0' bgcolor='gray' cellspacing='1' cellpadding=2>
+  <TR><TD valign=top width=100% bgcolor="#FAFBCA" class='cell_0'>  <p class="MsoNormal"><b ><span>Task 3.</span></b><span> <b >These are photos from your photo album. Choose one photo to describe to your friend. </b></span></p> <p class="MsoNormal"><b ><span>You will have to start speaking in 1.5 minutes and will speak for not more than 2 minutes</span></b><b ><span> (12<m:math><m:mstyle displaystyle="true"> <m:semantics> <m:mo>&#x2013;</m:mo>  </m:semantics> </m:mstyle></m:math>15 sentences)</span></b><b ><span>. In your talk remember to speak about:</span></b><b ><span></span></b></p> <p class="ListParagraph"><span>&middot;<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span>where and when the photo was taken</span><span>;</span><span> </span></p> <p class="MsoNormal" align="left"><span>&middot;<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span>what/who is in the photo</span><span>;</span><span> </span></p> <p class="MsoNormal" align="left"><span>&middot;<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span>what is happening</span><span>;</span><span> </span></p> <p class="MsoNormal" align="left"><span>&middot;<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span>why you keep the photo in your album</span><span>;</span><span>&nbsp; </span></p> <p class="MsoNormal" align="left"><span>&middot;<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span>why you decided to show the picture to your friend</span><span>.</span><span> </span></p> <p class="MsoNormal"><b ><span>You have to talk continuously, starting with:</span></b></p> <p class="MsoNormal"><b ><span>&ldquo;</span></b><b ><span>I</span></b><b ><span>&rsquo;</span></b><b ><span>ve</span></b><b ><span> </span></b><b ><span>chosen</span></b><b ><span> </span></b><b ><span>photo</span></b><b ><span> </span></b><b ><span>number</span></b><b ><span> &hellip;&rdquo;. </span></b></p> <table class="MsoNormalTable" border="0" cellspacing="0" cellpadding="0" align="left"> <tr> <td width="306" valign="top"> <p class="MsoNormal" align="center"><span>Photo </span><span>1</span></p> <p class="MsoNormal" align="center"><span><script language='javascript'> ShowPictureQ('docs/4B53A6CB75B0B5E1427E596EB4931A2A/questions/27811EE816C89A76437A2A4AED7573BF(copy2)/xs3qstsrc27811EE816C89A76437A2A4AED7573BF_2_1574157503.jpg');</script></span></p> </td> <td width="280" valign="top"> <p class="MsoNormal" align="center"><span>Photo </span><span>2</span></p> <p class="MsoNormal" align="center"><span><script language='javascript'> ShowPictureQ('docs/4B53A6CB75B0B5E1427E596EB4931A2A/questions/27811EE816C89A76437A2A4AED7573BF(copy2)/xs3qstsrc27811EE816C89A76437A2A4AED7573BF_4_1574157503.jpg');</script></span></p> </td> <td width="327" valign="top"> <p class="MsoNormal" align="center"><span>Photo </span><span>3</span></p> <p class="MsoNormal" align="center"><span><script language='javascript'> ShowPictureQ('docs/4B53A6CB75B0B5E1427E596EB4931A2A/questions/27811EE816C89A76437A2A4AED7573BF(copy2)/xs3qstsrc27811EE816C89A76437A2A4AED7573BF_6_1574157503.jpg');</script></span></p> </td> </tr> </table> <p class="MsoNormal"><span>&nbsp;</span></p>  </TD></TR>
+  <TR bgcolor="#FFFFFF"><TD>
+	  <TABLE WIDTH="100%" class='submit-outblock'>
+	  	<TR><TD class='varinats-block'><a name="variants"></a><br><div>&nbsp;</div><br></TD></TR>
+	  	<TR><TD class='submit-block'></TD></TR>
+	  </TABLE>
+  </TD></TR></TABLE>	</form>
+	 </div> <div id='iFF111A'>
+    <div class="separator"></div>
+    <div class="task-header-panel">
+        <div class="info-button" onclick='this.parentNode.classList.toggle("show-info")'>i</div>
+        <div class="task-info-panel">
+            <div class="task-info-title">
+                <span>СВОЙСТВА ЗАДАНИЯ</span>
+                <span class="task-info-title-close-button" onclick='this.parentNode.parentNode.parentNode.classList.toggle("show-info")'></span>
+            </div>
+            <div class="task-info-content">
+                <table><tbody>
+                    <tr><td class="param-name">КЭС:</td><td class="param-row"><div>1.1.1.5 Комбинированный диалог, включающий разные виды диалогов в стандартных ситуациях неофициального и официального общения в рамках тематического содержания речи с опорой на речевые ситуации, иллюстрации, фотографии, таблицы, диаграммы, схемы и без опоры, с соблюдением норм речевого этикета, принятых в стране/странах изучаемого языка (объём диалога – до 10 реплик со стороны каждого собеседника)</div></td></tr>                                                                                <tr><td class="param-name">Тип ответа:</td><td>Развернутый ответ</td></tr>                                      </tbody></table>
+            </div>
+        </div>
+        <div class="id-text">Номер: <span class="canselect">FF111A</span></div>
+        <div class="favorite-button" title="Добавить в Избранное" onclick="changeFavour(this,'51951590B0F8858E4E8AB43BE844C4CF')"></div>
+                         <div class="answer-panel">
+             <span class="status-title-text hidden-xs">Статус задания:</span>
+             <span class="task-status task-status-0">НЕ РЕШЕНО</span>
+             <span class="answer-button" onclick="changeStatus('51951590B0F8858E4E8AB43BE844C4CF',this.parentNode)">Изменить статус</span>
+        </div>
+
+    </div>
+</div>	    <script type='text/javascript'>
+	        if (favQst.has("51951590B0F8858E4E8AB43BE844C4CF"))
+	            toggleQFavour('iFF111A');
+	        if (solvedQst.has("51951590B0F8858E4E8AB43BE844C4CF"))
+	            setQSolved('iFF111A', '1');
+	    </script>
+	     <div class="qblock hide-form" id='qB38317'> 	    <div id="hint" class="hint" name="hint">Дайте развернутый ответ.</div>
+	    		<form action='javascript:noAction()' name='checkformB38317' id='checkformB38317' method="post" enctype="multipart/form-data"		>
+		<input type="Hidden" name="guid" value="543FEE1665BEACE14F7DC64438B4A1BC">
+		<TABLE WIDTH="100%" border='0' bgcolor='gray' cellspacing='1' cellpadding=2>
+  <TR><TD valign=top width=100% bgcolor="#FAFBCA" class='cell_0'>  <p class=MsoNormal><b><span lang=EN-US>Task 1.</span></b><span lang=EN-US> </span><b><span lang=EN-GB>Imagine that you are preparing a project with your friend. You have found some interesting material for the presentation and you want to read this text to your friend. You have 1.5 minutes </span></b><b><span lang=EN-US><br> </span></b><b><span lang=EN-GB>to read the text silently, then be ready to read it out aloud. You will not have more than 1.5 minutes </span></b><b><span lang=EN-US><br> </span></b><b><span lang=EN-GB>to read it.</span></b></p> <p class=MsoNormal><span lang=EN-US>&nbsp;</span></p> <p class=MsoNormal align=center><span><script language='javascript'> ShowPictureQ('docs/4B53A6CB75B0B5E1427E596EB4931A2A/questions/371D97F69CAC8F164374923C91DA588C(copy1)/xs3qstsrc371D97F69CAC8F164374923C91DA588C_4_1639386653.png');</script></span></p>  </TD></TR>
+  <TR bgcolor="#FFFFFF"><TD>
+	  <TABLE WIDTH="100%" class='submit-outblock'>
+	  	<TR><TD class='varinats-block'><a name="variants"></a><br><div>&nbsp;</div><br></TD></TR>
+	  	<TR><TD class='submit-block'></TD></TR>
+	  </TABLE>
+  </TD></TR></TABLE>	</form>
+	 </div> <div id='iB38317'>
+    <div class="separator"></div>
+    <div class="task-header-panel">
+        <div class="info-button" onclick='this.parentNode.classList.toggle("show-info")'>i</div>
+        <div class="task-info-panel">
+            <div class="task-info-title">
+                <span>СВОЙСТВА ЗАДАНИЯ</span>
+                <span class="task-info-title-close-button" onclick='this.parentNode.parentNode.parentNode.classList.toggle("show-info")'></span>
+            </div>
+            <div class="task-info-content">
+                <table><tbody>
+                    <tr><td class="param-name">КЭС:</td><td class="param-row"><div>1.1 Говорение</div></td></tr>                                                                                <tr><td class="param-name">Тип ответа:</td><td>Развернутый ответ</td></tr>                                      </tbody></table>
+            </div>
+        </div>
+        <div class="id-text">Номер: <span class="canselect">B38317</span></div>
+        <div class="favorite-button" title="Добавить в Избранное" onclick="changeFavour(this,'543FEE1665BEACE14F7DC64438B4A1BC')"></div>
+                         <div class="answer-panel">
+             <span class="status-title-text hidden-xs">Статус задания:</span>
+             <span class="task-status task-status-0">НЕ РЕШЕНО</span>
+             <span class="answer-button" onclick="changeStatus('543FEE1665BEACE14F7DC64438B4A1BC',this.parentNode)">Изменить статус</span>
+        </div>
+
+    </div>
+</div>	    <script type='text/javascript'>
+	        if (favQst.has("543FEE1665BEACE14F7DC64438B4A1BC"))
+	            toggleQFavour('iB38317');
+	        if (solvedQst.has("543FEE1665BEACE14F7DC64438B4A1BC"))
+	            setQSolved('iB38317', '1');
+	    </script>
+	     <div class="qblock hide-form" id='q530816'> 	    <div id="hint" class="hint" name="hint">Дайте развернутый ответ.</div>
+	    		<form action='javascript:noAction()' name='checkform530816' id='checkform530816' method="post" enctype="multipart/form-data"		>
+		<input type="Hidden" name="guid" value="58D2EF173AE3B6A342E653A7890CE64F">
+		<TABLE WIDTH="100%" border='0' bgcolor='gray' cellspacing='1' cellpadding=2>
+  <TR><TD valign=top width=100% bgcolor="#FAFBCA" class='cell_0'>  <p class="MsoNormal"><script language='javascript'> ShowPictureQ('docs/4B53A6CB75B0B5E1427E596EB4931A2A/questions/03823395D8E5B8C64C689CDEFB77326D(copy1)/xs3qstsrc03823395D8E5B8C64C689CDEFB77326D_3_1541605795.png');</script><b ><span>Task 2.</span></b><span> Study the advertisement.</span></p> <p class="MsoNormal"><b ><span>You are considering </span></b><b ><span>going to the new fast food restaurant </span></b><b ><span>and now you</span></b><b ><span>&rsquo;d like to get</span></b><b ><span> more information. In 1.5 minutes you are to ask five direct questions to find out </span></b><b ><span>about </span></b><b ><span>the following: </span></b><b ><span></span></b></p> <table class="MsoTableGrid" border="0" cellspacing="0" cellpadding="0" align="right"> <tr > <td valign="top"> <p class="MsoNormal" ><b ><span>A new fast food restaurant <m:math><m:mstyle displaystyle="true"> <m:semantics> <m:mo>&#x2013;</m:mo>  </m:semantics> </m:mstyle></m:math>&nbsp;now in your area!</span></b></p> </td> </tr> <tr > <td valign="top"> <p class="MsoNormal"><span><script language='javascript'> ShowPictureQ('docs/4B53A6CB75B0B5E1427E596EB4931A2A/questions/03823395D8E5B8C64C689CDEFB77326D(copy1)/xs3qstsrc03823395D8E5B8C64C689CDEFB77326D_2_1541605795.jpg');</script></span><span></span></p> </td> </tr> </table> <p class="MsoNormal"><span>&nbsp;</span></p> <p class="MsoNormal"><span>1) location</span></p> <p class="MsoNormal"><span>2) opening hours</span></p> <p class="MsoNormal"><span>3) price of a standard lunch</span></p> <p class="MsoNormal"><span>4) vegetarian dishes</span></p> <p class="MsoNormal"><span>5) free Wi-Fi </span></p> <p class="MsoNormal"><span>&nbsp;</span></p> <p class="MsoNormal" align="left"><b ><span>You have 20 seconds to ask each question.</span></b></p>  </TD></TR>
+  <TR bgcolor="#FFFFFF"><TD>
+	  <TABLE WIDTH="100%" class='submit-outblock'>
+	  	<TR><TD class='varinats-block'><a name="variants"></a><br><div>&nbsp;</div><br></TD></TR>
+	  	<TR><TD class='submit-block'></TD></TR>
+	  </TABLE>
+  </TD></TR></TABLE>	</form>
+	 </div> <div id='i530816'>
+    <div class="separator"></div>
+    <div class="task-header-panel">
+        <div class="info-button" onclick='this.parentNode.classList.toggle("show-info")'>i</div>
+        <div class="task-info-panel">
+            <div class="task-info-title">
+                <span>СВОЙСТВА ЗАДАНИЯ</span>
+                <span class="task-info-title-close-button" onclick='this.parentNode.parentNode.parentNode.classList.toggle("show-info")'></span>
+            </div>
+            <div class="task-info-content">
+                <table><tbody>
+                    <tr><td class="param-name">КЭС:</td><td class="param-row"><div>1.1.1.3 Диалог-расспрос: сообщать фактическую информацию, отвечая на вопросы разных видов; выражать своё отношение к обсуждаемым фактам и событиям; запрашивать интересующую информацию; переходить с позиции спрашивающего на позицию отвечающего и наоборот; брать/давать интервью в стандартных ситуациях неофициального и официального общения в рамках тематического содержания речи с опорой на речевые ситуации, иллюстрации, фотографии, таблицы, диаграммы, схемы и без опоры, с соблюдением норм речевого этикета, принятых в стране/странах изучаемого языка (объём диалога – до 10 реплик со стороны каждого собеседника)</div></td></tr>                                                                                <tr><td class="param-name">Тип ответа:</td><td>Развернутый ответ</td></tr>                                      </tbody></table>
+            </div>
+        </div>
+        <div class="id-text">Номер: <span class="canselect">530816</span></div>
+        <div class="favorite-button" title="Добавить в Избранное" onclick="changeFavour(this,'58D2EF173AE3B6A342E653A7890CE64F')"></div>
+                         <div class="answer-panel">
+             <span class="status-title-text hidden-xs">Статус задания:</span>
+             <span class="task-status task-status-0">НЕ РЕШЕНО</span>
+             <span class="answer-button" onclick="changeStatus('58D2EF173AE3B6A342E653A7890CE64F',this.parentNode)">Изменить статус</span>
+        </div>
+
+    </div>
+</div>	    <script type='text/javascript'>
+	        if (favQst.has("58D2EF173AE3B6A342E653A7890CE64F"))
+	            toggleQFavour('i530816');
+	        if (solvedQst.has("58D2EF173AE3B6A342E653A7890CE64F"))
+	            setQSolved('i530816', '1');
+	    </script>
+	     <div class="qblock hide-form" id='qA4FF10'> 	    <div id="hint" class="hint" name="hint">Дайте развернутый ответ.</div>
+	    		<form action='javascript:noAction()' name='checkformA4FF10' id='checkformA4FF10' method="post" enctype="multipart/form-data"		>
+		<input type="Hidden" name="guid" value="5921010ed8954f81a0f0851c1e58ff39">
+		<TABLE WIDTH="100%" border='0' bgcolor='gray' cellspacing='1' cellpadding=2>
+  <TR><TD valign=top width=100% bgcolor="#FAFBCA" class='cell_0'>  <p class="MsoNormal"><b ><span>Task</span></b><b ><span> 1.</span></b><span> </span><b><span>Imagine that you are preparing a project with your friend. You have found some interesting material for the presentation and you want to read this text to your friend. You have 1.5 minutes to read the text silently, then be ready to read it out aloud. You will not have more than 1.5 minutes to read it.</span></b><b><span></span></b></p> <p class="MsoNormal"><span>&nbsp;</span></p> <p class="MsoNormal" align="center"><span><script language='javascript'> ShowPictureQ('docs/4B53A6CB75B0B5E1427E596EB4931A2A/questions/BC0327C441B3B3214310DDB3FBF01273(copy1)/xs3qstsrcBC0327C441B3B3214310DDB3FBF01273_1_1762771222.png');</script></span><span></span></p> <p class="MsoNormal" align="left"><span>&nbsp;</span></p>  </TD></TR>
+  <TR bgcolor="#FFFFFF"><TD>
+	  <TABLE WIDTH="100%" class='submit-outblock'>
+	  	<TR><TD class='varinats-block'><a name="variants"></a><br><div>&nbsp;</div><br></TD></TR>
+	  	<TR><TD class='submit-block'></TD></TR>
+	  </TABLE>
+  </TD></TR></TABLE>	</form>
+	 </div> <div id='iA4FF10'>
+    <div class="separator"></div>
+    <div class="task-header-panel">
+        <div class="info-button" onclick='this.parentNode.classList.toggle("show-info")'>i</div>
+        <div class="task-info-panel">
+            <div class="task-info-title">
+                <span>СВОЙСТВА ЗАДАНИЯ</span>
+                <span class="task-info-title-close-button" onclick='this.parentNode.parentNode.parentNode.classList.toggle("show-info")'></span>
+            </div>
+            <div class="task-info-content">
+                <table><tbody>
+                    <tr><td class="param-name">КЭС:</td><td class="param-row"><div>2.1.2 Чтение вслух аутентичных текстов, построенных в основном на изученном языковом материале, с соблюдением правил чтения и соответствующей интонацией, демонстрирующее понимание текста (объём текста для чтения вслух – до 170 слов)</div></td></tr>                                                                                <tr><td class="param-name">Тип ответа:</td><td>Развернутый ответ</td></tr>                                      </tbody></table>
+            </div>
+        </div>
+        <div class="id-text">Номер: <span class="canselect">A4FF10</span></div>
+        <div class="favorite-button" title="Добавить в Избранное" onclick="changeFavour(this,'5921010ed8954f81a0f0851c1e58ff39')"></div>
+                         <div class="answer-panel">
+             <span class="status-title-text hidden-xs">Статус задания:</span>
+             <span class="task-status task-status-0">НЕ РЕШЕНО</span>
+             <span class="answer-button" onclick="changeStatus('5921010ed8954f81a0f0851c1e58ff39',this.parentNode)">Изменить статус</span>
+        </div>
+
+    </div>
+</div>	    <script type='text/javascript'>
+	        if (favQst.has("5921010ed8954f81a0f0851c1e58ff39"))
+	            toggleQFavour('iA4FF10');
+	        if (solvedQst.has("5921010ed8954f81a0f0851c1e58ff39"))
+	            setQSolved('iA4FF10', '1');
+	    </script>
+	     <div class="qblock hide-form" id='q9ee114'> 	    <div id="hint" class="hint" name="hint">Дайте развернутый ответ.</div>
+	    		<form action='javascript:noAction()' name='checkform9ee114' id='checkform9ee114' method="post" enctype="multipart/form-data"		>
+		<input type="Hidden" name="guid" value="5b0cc543b75c488da92e6a3333a9d380">
+		<TABLE WIDTH="100%" border='0' bgcolor='gray' cellspacing='1' cellpadding=2>
+  <TR><TD valign=top width=100% bgcolor="#FAFBCA" class='cell_0'>  <p class=MsoNormal><a name="_GoBack"></a><b><span lang=EN-US>Task 4.</span></b><span lang=EN-US> </span><b><span lang=EN-GB>Imagine that you and your friend are doing a school project “Using the Internet”. You have found some photos to illustrate it but for technical reasons you cannot send them now. Leave a voice message to your friend explaining your choice of the photos and sharing some ideas about the project. In 2.5 minutes be ready to:</span></b></p> <p class=MsoNormal><b><span>&nbsp;</span></b></p> <p class=MsoNormalCxSpMiddle><span lang=EN-GB>·<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span lang=EN-US>explain </span><span lang=EN-GB>the choice of the illustrations for the project by briefly describing them and noting the differences; </span></p> <p class=MsoNormal><span lang=EN-GB>·<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span lang=EN-US>mention the advantages (1–2) of the two <a name="_Hlk176704441">gadgets</a> used to connect to the Internet;</span></p> <p class=MsoNormal><span lang=EN-GB>·<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span lang=EN-GB>mention the </span><span lang=EN-US>disadvantages (1–2) of the two gadgets used to connect to the Internet;</span></p> <p class=MsoNormal><span lang=EN-US>·<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span lang=EN-GB>express your opinion on the subject of the project – </span><span lang=EN-US>which of these gadgets to use the Internet you prefer and why.</span></p> <p class=MsoNormal><b><span lang=EN-US>&nbsp;</span></b></p> <p class=MsoNormal><b><span lang=EN-GB>You will speak for not more than </span></b><b><span lang=EN-US>3 </span></b><b><span lang=EN-GB>minutes</span></b><b><span lang=EN-US> (12–15 sentences)</span></b><b><span lang=EN-GB>. You have to talk continuously.</span></b></p> <p class=MsoNormal><span lang=EN-US>&nbsp;</span></p>  <table class=MsoNormalTable border=0 cellspacing=0 cellpadding=0 width=0> <tr> <td width=461 valign=top> <p class=MsoNormal align=center><span><script language='javascript'> ShowPictureQ('docs/4B53A6CB75B0B5E1427E596EB4931A2A/questions/23E52510520CBF7F432C2A68777D332B(copy1)/xs3qstsrc5b0cc543b75c488da92e6a3333a9d380_2_1760356846.jpg');</script></span></p> </td> <td width=461 valign=top> <p class=MsoNormal align=center><span><script language='javascript'> ShowPictureQ('docs/4B53A6CB75B0B5E1427E596EB4931A2A/questions/23E52510520CBF7F432C2A68777D332B(copy1)/xs3qstsrc5b0cc543b75c488da92e6a3333a9d380_3_1760356846.jpg');</script></span></p> <p class=MsoNormal align=center><span>&nbsp;</span></p> </td> </tr> </table>  <p class=MsoNormal>&nbsp;</p>  </TD></TR>
+  <TR bgcolor="#FFFFFF"><TD>
+	  <TABLE WIDTH="100%" class='submit-outblock'>
+	  	<TR><TD class='varinats-block'><a name="variants"></a><br><div>&nbsp;</div><br></TD></TR>
+	  	<TR><TD class='submit-block'></TD></TR>
+	  </TABLE>
+  </TD></TR></TABLE>	</form>
+	 </div> <div id='i9ee114'>
+    <div class="separator"></div>
+    <div class="task-header-panel">
+        <div class="info-button" onclick='this.parentNode.classList.toggle("show-info")'>i</div>
+        <div class="task-info-panel">
+            <div class="task-info-title">
+                <span>СВОЙСТВА ЗАДАНИЯ</span>
+                <span class="task-info-title-close-button" onclick='this.parentNode.parentNode.parentNode.classList.toggle("show-info")'></span>
+            </div>
+            <div class="task-info-content">
+                <table><tbody>
+                    <tr><td class="param-name">КЭС:</td><td class="param-row"><div>1.1.2.3 Создание устного связного монологического высказывания с использованием одного из основных коммуникативных типов речи – рассуждения (с изложением своего мнения и краткой аргументацией) в рамках тематического содержания речи с опорой на ключевые слова, план и/или иллюстрации, фотографии, таблицы, диаграммы, схемы, инфографику и без опоры (объём монологического высказывания – до 18 фраз) </div></td></tr>                                                                                <tr><td class="param-name">Тип ответа:</td><td>Развернутый ответ</td></tr>                                      </tbody></table>
+            </div>
+        </div>
+        <div class="id-text">Номер: <span class="canselect">9ee114</span></div>
+        <div class="favorite-button" title="Добавить в Избранное" onclick="changeFavour(this,'5b0cc543b75c488da92e6a3333a9d380')"></div>
+                         <div class="answer-panel">
+             <span class="status-title-text hidden-xs">Статус задания:</span>
+             <span class="task-status task-status-0">НЕ РЕШЕНО</span>
+             <span class="answer-button" onclick="changeStatus('5b0cc543b75c488da92e6a3333a9d380',this.parentNode)">Изменить статус</span>
+        </div>
+
+    </div>
+</div>	    <script type='text/javascript'>
+	        if (favQst.has("5b0cc543b75c488da92e6a3333a9d380"))
+	            toggleQFavour('i9ee114');
+	        if (solvedQst.has("5b0cc543b75c488da92e6a3333a9d380"))
+	            setQSolved('i9ee114', '1');
+	    </script>
+	     <div class="qblock hide-form" id='q066823'> 	    <div id="hint" class="hint" name="hint">Дайте развернутый ответ.</div>
+	    		<form action='javascript:noAction()' name='checkform066823' id='checkform066823' method="post" enctype="multipart/form-data"		>
+		<input type="Hidden" name="guid" value="62EDDF5E72AC892D4B555CD1E95A278E">
+		<TABLE WIDTH="100%" border='0' bgcolor='gray' cellspacing='1' cellpadding=2>
+  <TR><TD valign=top width=100% bgcolor="#FAFBCA" class='cell_0'>  <p class=MsoNormal><a name="_GoBack"></a><b><span lang=EN-US>Task 2.</span></b><span lang=EN-US> <b>Study the advertisement.</b> </span></p> <p class=MsoNormal><b><span lang=EN-GB>You are </span></b><b><span lang=EN-US>considering going to the mountains and now you’d like to get more information. In 1.5 minutes you are to ask four</span></b><b><span lang=EN-GB> direct </span></b><b><span lang=EN-GB>questions to find out </span></b><b><span lang=EN-US>about </span></b><b><span lang=EN-GB>the following: </span></b></p> <p class=MsoNormal><b><span lang=EN-US>&nbsp;</span></b></p>  <table class=MsoNormalTable border=0 cellspacing=0 cellpadding=0 align=right> <tr> <td valign=top> <p class=MsoNormal align=center><b><span lang=EN-US>Join our journey to the mountains!</span></b></p> </td> </tr> <tr> <td valign=top> <p class=MsoNormal align=center><span><script language='javascript'> ShowPictureQ('docs/4B53A6CB75B0B5E1427E596EB4931A2A/questions/B64B022B89FE99B4432BADC673F840DE(copy1)/xs3qstsrcB64B022B89FE99B4432BADC673F840DE_3_1673620529.jpg');</script></span></p> </td> </tr> </table>  <p class=MsoNormal align=left><span lang=EN-US>1) duration of the tour;</span></p> <p class=MsoNormal align=left><span lang=EN-US>2) price for one; </span></p> <p class=MsoNormal align=left><span lang=EN-US>3) student discounts;</span></p> <p class=MsoNormal align=left><span lang=EN-US>4) special equipment needed. </span></p> <p class=MsoNormal align=left><span lang=EN-US>&nbsp;</span></p> <p class=MsoNormal><b><span lang=EN-US>You have 20 seconds to ask each question.</span></b></p>  </TD></TR>
+  <TR bgcolor="#FFFFFF"><TD>
+	  <TABLE WIDTH="100%" class='submit-outblock'>
+	  	<TR><TD class='varinats-block'><a name="variants"></a><br><div>&nbsp;</div><br></TD></TR>
+	  	<TR><TD class='submit-block'></TD></TR>
+	  </TABLE>
+  </TD></TR></TABLE>	</form>
+	 </div> <div id='i066823'>
+    <div class="separator"></div>
+    <div class="task-header-panel">
+        <div class="info-button" onclick='this.parentNode.classList.toggle("show-info")'>i</div>
+        <div class="task-info-panel">
+            <div class="task-info-title">
+                <span>СВОЙСТВА ЗАДАНИЯ</span>
+                <span class="task-info-title-close-button" onclick='this.parentNode.parentNode.parentNode.classList.toggle("show-info")'></span>
+            </div>
+            <div class="task-info-content">
+                <table><tbody>
+                    <tr><td class="param-name">КЭС:</td><td class="param-row"><div>1.1.1.3 Диалог-расспрос: сообщать фактическую информацию, отвечая на вопросы разных видов; выражать своё отношение к обсуждаемым фактам и событиям; запрашивать интересующую информацию; переходить с позиции спрашивающего на позицию отвечающего и наоборот; брать/давать интервью в стандартных ситуациях неофициального и официального общения в рамках тематического содержания речи с опорой на речевые ситуации, иллюстрации, фотографии, таблицы, диаграммы, схемы и без опоры, с соблюдением норм речевого этикета, принятых в стране/странах изучаемого языка (объём диалога – до 10 реплик со стороны каждого собеседника)</div></td></tr>                                                                                <tr><td class="param-name">Тип ответа:</td><td>Развернутый ответ</td></tr>                                      </tbody></table>
+            </div>
+        </div>
+        <div class="id-text">Номер: <span class="canselect">066823</span></div>
+        <div class="favorite-button" title="Добавить в Избранное" onclick="changeFavour(this,'62EDDF5E72AC892D4B555CD1E95A278E')"></div>
+                         <div class="answer-panel">
+             <span class="status-title-text hidden-xs">Статус задания:</span>
+             <span class="task-status task-status-0">НЕ РЕШЕНО</span>
+             <span class="answer-button" onclick="changeStatus('62EDDF5E72AC892D4B555CD1E95A278E',this.parentNode)">Изменить статус</span>
+        </div>
+
+    </div>
+</div>	    <script type='text/javascript'>
+	        if (favQst.has("62EDDF5E72AC892D4B555CD1E95A278E"))
+	            toggleQFavour('i066823');
+	        if (solvedQst.has("62EDDF5E72AC892D4B555CD1E95A278E"))
+	            setQSolved('i066823', '1');
+	    </script>
+	     <div class="qblock hide-form" id='q1949AF'> 	    <div id="hint" class="hint" name="hint">Дайте развернутый ответ.</div>
+	    		<form action='javascript:noAction()' name='checkform1949AF' id='checkform1949AF' method="post" enctype="multipart/form-data"		>
+		<input type="Hidden" name="guid" value="9510bb14da0142378bae13dca0def8e0">
+		<TABLE WIDTH="100%" border='0' bgcolor='gray' cellspacing='1' cellpadding=2>
+  <TR><TD valign=top width=100% bgcolor="#FAFBCA" class='cell_0'>  <p class="MsoNormal"><b ><span>Task 4.</span></b><span> </span><b><span>Imagine that you and your friend are doing a school project &ldquo;Seasons&rdquo;. You have found some photos to illustrate it but for technical reasons you cannot send them now. Leave a voice message to your friend explaining your choice of the photos and sharing some ideas about the project. In 2.5 minutes be ready to:</span></b><span></span></p> <p class="MsoNormal"><span>&nbsp;</span></p> <p class="MsoNormalCxSpMiddle"><span>&middot;<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span>explain </span><span>the choice of the illustrations for the project by briefly describing them and noting the differences; </span></p> <p class="MsoNormal"><span>&middot;<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span>mention the advantages (1<m:math> <m:semantics> <m:mo>&#x2013;</m:mo> </m:semantics> </m:math>2) of the two seasons;</span><i><span></span></i></p> <p class="MsoNormal"><span>&middot;<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span>mention the </span><span>disadvantages (1<m:math> <m:semantics> <m:mo>&#x2013;</m:mo> </m:semantics> </m:math>2) of the two seasons;</span><i><span></span></i></p> <p class="MsoNormal"><span>&middot;<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span>express your opinion on the subject of the project <m:math> <m:semantics> <m:mo>&#x2013;</m:mo> </m:semantics> </m:math>&nbsp;say which of the seasons presented in the pictures you preferred as a child and why</span><span>.<b ></b></span></p> <p class="MsoNormal" align="left"><span>&nbsp;</span></p> <p class="MsoNormal"><b ><span>You will speak for not more than </span></b><b ><span>3 </span></b><b ><span>minutes</span></b><b ><span> (12<m:math> <m:semantics> <m:mo>&#x2013;</m:mo> </m:semantics> </m:math>15 sentences)</span></b><b ><span>. You have to talk continuously.</span></b><b ><span></span></b></p> <p class="MsoNormal"><span>&nbsp;</span></p>  <table class="MsoNormalTable" border="0" cellspacing="0" cellpadding="0"> <tr> <td width="461" valign="top"> <p class="MsoNormal" align="center"><span><script language='javascript'> ShowPictureQ('docs/4B53A6CB75B0B5E1427E596EB4931A2A/questions/B0883CD2D5F68A7B4E3F5060DC45A02C(copy1)/xs3qstsrcB0883CD2D5F68A7B4E3F5060DC45A02C_2_1762771066.jpg');</script></span><span></span></p> </td> <td width="461" valign="top"> <p class="MsoNormal" align="center"><span><script language='javascript'> ShowPictureQ('docs/4B53A6CB75B0B5E1427E596EB4931A2A/questions/B0883CD2D5F68A7B4E3F5060DC45A02C(copy1)/xs3qstsrcB0883CD2D5F68A7B4E3F5060DC45A02C_4_1762771066.jpg');</script><span></span></span></p> </td> </tr> </table>  <p class="MsoNormal"><span>&nbsp;</span></p>  </TD></TR>
+  <TR bgcolor="#FFFFFF"><TD>
+	  <TABLE WIDTH="100%" class='submit-outblock'>
+	  	<TR><TD class='varinats-block'><a name="variants"></a><br><div>&nbsp;</div><br></TD></TR>
+	  	<TR><TD class='submit-block'></TD></TR>
+	  </TABLE>
+  </TD></TR></TABLE>	</form>
+	 </div> <div id='i1949AF'>
+    <div class="separator"></div>
+    <div class="task-header-panel">
+        <div class="info-button" onclick='this.parentNode.classList.toggle("show-info")'>i</div>
+        <div class="task-info-panel">
+            <div class="task-info-title">
+                <span>СВОЙСТВА ЗАДАНИЯ</span>
+                <span class="task-info-title-close-button" onclick='this.parentNode.parentNode.parentNode.classList.toggle("show-info")'></span>
+            </div>
+            <div class="task-info-content">
+                <table><tbody>
+                    <tr><td class="param-name">КЭС:</td><td class="param-row"><div>1.1.2.3 Создание устного связного монологического высказывания с использованием одного из основных коммуникативных типов речи – рассуждения (с изложением своего мнения и краткой аргументацией) в рамках тематического содержания речи с опорой на ключевые слова, план и/или иллюстрации, фотографии, таблицы, диаграммы, схемы, инфографику и без опоры (объём монологического высказывания – до 18 фраз) </div></td></tr>                                                                                <tr><td class="param-name">Тип ответа:</td><td>Развернутый ответ</td></tr>                                      </tbody></table>
+            </div>
+        </div>
+        <div class="id-text">Номер: <span class="canselect">1949AF</span></div>
+        <div class="favorite-button" title="Добавить в Избранное" onclick="changeFavour(this,'9510bb14da0142378bae13dca0def8e0')"></div>
+                         <div class="answer-panel">
+             <span class="status-title-text hidden-xs">Статус задания:</span>
+             <span class="task-status task-status-0">НЕ РЕШЕНО</span>
+             <span class="answer-button" onclick="changeStatus('9510bb14da0142378bae13dca0def8e0',this.parentNode)">Изменить статус</span>
+        </div>
+
+    </div>
+</div>	    <script type='text/javascript'>
+	        if (favQst.has("9510bb14da0142378bae13dca0def8e0"))
+	            toggleQFavour('i1949AF');
+	        if (solvedQst.has("9510bb14da0142378bae13dca0def8e0"))
+	            setQSolved('i1949AF', '1');
+	    </script>
+	     
