@@ -1063,6 +1063,9 @@ def _fipi_import_job(pages: int, pagesize: int, limit: int) -> None:
                 if payload is None:
                     job["skipped"] += 1
                     continue
+                # Пауза между заданиями: импорт упирается не в наш процессор, а
+                # в лимиты модели, и торопиться тут некуда — это разовая работа.
+                time.sleep(0.5)
                 tid = storage.task_add_imported(
                     "ege", item["task_no"], item["kind"],
                     json.dumps(payload, ensure_ascii=False),

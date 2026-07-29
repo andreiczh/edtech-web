@@ -295,19 +295,33 @@ PHOTO_FACT_PROMPT = (
 
 
 def _vision(chat_client, model: str, prompt: str, data: bytes, mime: str,
-            max_tokens: int) -> str:
-    """Один вопрос модели про одну картинку."""
+            max_tokens: int, attempts: int = 4) -> str:
+    """Один вопрос модели про одну картинку, с повторами.
+
+    Повторы здесь не перестраховка: первый прогон импорта потерял 35 заданий
+    на чтение из 48 именно потому, что полсотни запросов подряд упёрлись в
+    лимит модели, а один 429 молча выбрасывал задание целиком. Пауза растёт,
+    чтобы не долбить лимит в ту же секунду.
+    """
     url = f"data:{mime};base64,{base64.b64encode(data).decode()}"
-    completion = chat_client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": [
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": url},
-        ]}],
-        temperature=0.0,
-        max_tokens=max_tokens,
-    )
-    return (completion.choices[0].message.content or "").strip()
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            completion = chat_client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": url},
+                ]}],
+                temperature=0.0,
+                max_tokens=max_tokens,
+            )
+            return (completion.choices[0].message.content or "").strip()
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if attempt + 1 < attempts:
+                time.sleep(3 * (attempt + 1))
+    raise last if last else RuntimeError("зрение не ответило")
 
 
 def read_text_from_image(chat_client, model: str, data: bytes, mime: str) -> str:
