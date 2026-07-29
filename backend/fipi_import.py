@@ -28,8 +28,11 @@
 
 from __future__ import annotations
 
+import base64
 import html
+import os
 import re
+import tempfile
 import time
 
 PROJ = "4B53A6CB75B0B5E1427E596EB4931A2A"  # английский язык в банке ФИПИ
@@ -186,6 +189,52 @@ def parse_page(page_html: str) -> list[dict]:
 # Сеть
 # --------------------------------------------------------------------------
 
+def ca_bundle() -> str:
+    """Путь к набору корневых сертификатов, которым проверяем ФИПИ.
+
+    Обычная проверка на ege.fipi.ru падает с «unable to get local issuer»,
+    и это НЕ российский УЦ и не наша беда: сертификат выдан GlobalSign, но
+    сервер ФИПИ не досылает промежуточный сертификат цепочки. Браузеры и curl
+    достают его сами, python — нет. Поэтому недостающее звено лежит рядом
+    (certs/) и подклеивается к обычному набору. Отключать проверку из-за чужой
+    недоконфигурации не станем: это ровно тот случай, когда «и так работает»
+    превращается в тихую дыру.
+    """
+    import certifi  # noqa: PLC0415 — нужен только здесь
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    extra = os.path.join(here, "certs", "globalsign-gcc-r3-dv-tls-2020.pem")
+    if not os.path.exists(extra):
+        return certifi.where()
+    merged = os.path.join(tempfile.gettempdir(), "pingo_fipi_ca.pem")
+    if not os.path.exists(merged):
+        with open(merged, "w", encoding="utf-8") as out:
+            for src in (certifi.where(), extra):
+                with open(src, encoding="utf-8") as f:
+                    out.write(f.read() + "\n")
+    return merged
+
+
+def client(timeout: float = 60.0):
+    """httpx-клиент для похода в ФИПИ: со своей цепочкой и честным User-Agent."""
+    import httpx  # noqa: PLC0415
+
+    return httpx.Client(
+        timeout=timeout, verify=ca_bundle(), trust_env=False, follow_redirects=True,
+        headers={"User-Agent": "PingoAI/1.0 (edu task import; contact via pingo-ai.onrender.com)"},
+    )
+
+
+def download_image(cl, url: str) -> tuple[bytes, str]:
+    """Картинка задания. Возвращает байты и mime."""
+    r = cl.get(url)
+    r.raise_for_status()
+    mime = r.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+    if not mime.startswith("image/"):
+        raise ValueError(f"не картинка: {mime}")
+    return r.content, mime
+
+
 def fetch_page(client, page: int, pagesize: int = 20) -> str:
     """Одна страница банка. Кодировка windows-1251 — декодируем явно.
 
@@ -214,10 +263,63 @@ def crawl(client, pages: int, pagesize: int = 20, pause: float = 1.0) -> list[di
     return items
 
 
+# --------------------------------------------------------------------------
+# Зрение: то, что в банке нарисовано картинкой, а нам нужно текстом
+# --------------------------------------------------------------------------
+#
+# Здесь работает та же модель, что делает разборы (mistral-small), просто ей
+# дают не только текст, но и картинку. Нужно это в двух местах:
+#   1. Задание 39: текст для чтения в банке — КАРТИНКА. Наш разбор сверяет
+#      слова ученика с эталоном пословно, значит без расшифровки задание мёртвое.
+#   2. Задание 42: разбор фотографий не видит, а по критериям ФИПИ обязан ловить
+#      фактические ошибки («на фото девочки», когда там мальчики). Значит для
+#      каждой фотографии нужно текстовое описание того, что на ней на самом деле.
+
 READ_TEXT_PROMPT = (
     "This image contains the text of an English exam task: a short passage the "
     "student must read aloud. Transcribe the passage EXACTLY as printed, word for "
     "word, keeping the original punctuation. Do not translate, do not summarise, "
-    "do not add or fix anything, do not add any commentary. If the image contains "
-    "no readable passage, answer with the single word NONE."
+    "do not add or fix anything, do not add any commentary. Ignore the task "
+    "instruction if it is present and transcribe only the passage itself. If the "
+    "image contains no readable passage, answer with the single word NONE."
 )
+
+PHOTO_FACT_PROMPT = (
+    "Describe what is actually shown in this photograph in one or two English "
+    "sentences: who is in it, what they are doing, where it happens, and the "
+    "details that matter. Be literal and precise — this description will be used "
+    "to catch factual mistakes in a student's spoken description of the same "
+    "photo, so do not guess or embellish. If there are no people in the shot, "
+    "say so explicitly."
+)
+
+
+def _vision(chat_client, model: str, prompt: str, data: bytes, mime: str,
+            max_tokens: int) -> str:
+    """Один вопрос модели про одну картинку."""
+    url = f"data:{mime};base64,{base64.b64encode(data).decode()}"
+    completion = chat_client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": url},
+        ]}],
+        temperature=0.0,
+        max_tokens=max_tokens,
+    )
+    return (completion.choices[0].message.content or "").strip()
+
+
+def read_text_from_image(chat_client, model: str, data: bytes, mime: str) -> str:
+    """Текст для чтения вслух с картинки задания 39. Пусто, если не вышло."""
+    text = _vision(chat_client, model, READ_TEXT_PROMPT, data, mime, 900)
+    if not text or text.strip().upper().startswith("NONE"):
+        return ""
+    # Модель иногда оборачивает ответ в кавычки или markdown — снимаем.
+    text = re.sub(r"^```[a-z]*\s*|\s*```$", "", text).strip()
+    return text.strip('"“”').strip()
+
+
+def photo_fact(chat_client, model: str, data: bytes, mime: str) -> str:
+    """Что на фотографии на самом деле — для ловли фактических ошибок."""
+    return _vision(chat_client, model, PHOTO_FACT_PROMPT, data, mime, 220)

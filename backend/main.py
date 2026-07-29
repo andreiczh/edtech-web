@@ -49,6 +49,7 @@ from openai import AsyncOpenAI, OpenAI
 
 import ege_prompts
 import ege_scoring
+import fipi_import
 import storage
 
 load_dotenv()
@@ -1007,6 +1008,166 @@ async def tasks_public():
 _IMG_CACHE: dict[str, tuple[bytes, str]] = {}
 _IMG_CACHE_LIMIT = 48
 _IMG_ID_RE = re.compile(r"^photo-[0-9A-Za-z_-]{6,40}$")
+
+
+# ------------------------------------------------------------------------
+# Импорт заданий из открытого банка ФИПИ.
+#
+# Почему ФИПИ, а не «РЕШУ ЕГЭ», и на каких условиях — см. шапку fipi_import.py
+# и docs/DECISIONS.md §6.4. Здесь только механика: долгая работа (обход банка,
+# скачивание картинок, распознавание) не влезает в один HTTP-запрос, поэтому
+# импорт запускается фоновой задачей, а прогресс виден отдельной ручкой.
+
+# Картинки и тексты в банке лежат КАРТИНКАМИ, их читает модель со зрением.
+# Отдельная от разговорной: mistral-small на фотографиях врёт (проверено —
+# женщину на тренажёре описала как «женщину со смартфоном у лестницы»), а
+# неверное описание хуже отсутствующего: разбор начнёт ловить фактические
+# ошибки там, где ученик прав.
+FIPI_VISION_MODEL = os.environ.get("FIPI_VISION_MODEL", "mistral-medium-latest")
+
+_FIPI_JOB: dict = {"state": "idle", "found": 0, "added": 0, "skipped": 0,
+                   "images": 0, "errors": [], "started": "", "finished": ""}
+
+
+def _fipi_store_image(cl, url: str) -> str | None:
+    """Скачать картинку задания и положить к себе. Возвращает id или None."""
+    try:
+        data, mime = fipi_import.download_image(cl, url)
+    except Exception as e:  # noqa: BLE001
+        _FIPI_JOB["errors"].append(f"картинка {url[-40:]}: {type(e).__name__}")
+        return None
+    img_id = hashlib.sha1(url.encode()).hexdigest()[:20]
+    storage.image_put(img_id, mime, base64.b64encode(data).decode(), fipi_import.SOURCE)
+    _FIPI_JOB["images"] += 1
+    return img_id
+
+
+def _fipi_import_job(pages: int, pagesize: int, limit: int) -> None:
+    """Сам импорт. Крутится в отдельном потоке: сеть и распознавание блокируют."""
+    job = _FIPI_JOB
+    job.update(state="running", found=0, added=0, skipped=0, images=0, errors=[],
+               started=datetime.now(timezone.utc).isoformat(), finished="")
+    vision = llm_client()
+    try:
+        with fipi_import.client() as cl:
+            items = fipi_import.crawl(cl, pages=pages, pagesize=pagesize, pause=1.5)
+            job["found"] = len(items)
+            for item in items:
+                if limit and job["added"] >= limit:
+                    break
+                try:
+                    payload = _fipi_payload(cl, vision, item)
+                except Exception as e:  # noqa: BLE001
+                    job["errors"].append(f"{item['fipi_id']}: {type(e).__name__}: {str(e)[:80]}")
+                    continue
+                if payload is None:
+                    job["skipped"] += 1
+                    continue
+                tid = storage.task_add_imported(
+                    "ege", item["task_no"], item["kind"],
+                    json.dumps(payload, ensure_ascii=False),
+                    fipi_import.SOURCE, item["fipi_id"])
+                if tid:
+                    job["added"] += 1
+                else:
+                    job["skipped"] += 1  # уже импортировали раньше
+    except Exception as e:  # noqa: BLE001
+        job["errors"].append(f"импорт оборвался: {type(e).__name__}: {str(e)[:120]}")
+    job.update(state="done", finished=datetime.now(timezone.utc).isoformat())
+    print(f"[fipi] импорт завершён: найдено {job['found']}, добавлено {job['added']}, "
+          f"пропущено {job['skipped']}, картинок {job['images']}, ошибок {len(job['errors'])}")
+
+
+def _fipi_payload(cl, vision, item: dict) -> dict | None:
+    """Задание из банка → payload варианта в том виде, в каком его ждёт фронт.
+
+    None означает «брать нечего»: например, у чтения не распозналась картинка
+    с текстом, а без эталона задание 39 бесполезно.
+    """
+    kind = item["kind"]
+    brief = item["brief"]
+    if kind == "reading":
+        if not item["images"]:
+            return None
+        data, mime = fipi_import.download_image(cl, item["images"][0])
+        text = fipi_import.read_text_from_image(vision, FIPI_VISION_MODEL, data, mime)
+        # Осмысленный текст для чтения — это несколько предложений, а не обрывок.
+        if len(text) < 120:
+            return None
+        return {"brief": brief, "readText": text}
+
+    if kind == "dialogue":
+        img_id = _fipi_store_image(cl, item["images"][0]) if item["images"] else None
+        return {
+            "brief": brief,
+            "imageCaption": item.get("ad") or "",
+            "steps": [f"Question {i + 1}: {p}" for i, p in enumerate(item.get("points", []))],
+            "images": [f"/img/task/{img_id}"] if img_id else [],
+        }
+
+    # monologue: две фотографии, и к каждой — описание того, что на ней реально
+    # изображено. Без описаний разбор не поймает фактические ошибки: фотографий
+    # он не видит.
+    ids, facts = [], []
+    for url in item["images"][:2]:
+        try:
+            data, mime = fipi_import.download_image(cl, url)
+        except Exception:  # noqa: BLE001
+            continue
+        img_id = hashlib.sha1(url.encode()).hexdigest()[:20]
+        storage.image_put(img_id, mime, base64.b64encode(data).decode(), fipi_import.SOURCE)
+        _FIPI_JOB["images"] += 1
+        ids.append(f"/img/task/{img_id}")
+        facts.append(fipi_import.photo_fact(vision, FIPI_VISION_MODEL, data, mime))
+    if len(ids) != 2:
+        return None
+    return {"brief": brief, "imageCaption": item.get("topic") or "",
+            "images": ids, "photoFacts": facts}
+
+
+@app.post("/admin/fipi/import")
+async def admin_fipi_import(body: dict = Body(default={}),
+                            x_admin_key: str | None = Header(None)):
+    """Запустить импорт. Возвращается сразу — следить за ходом через /admin/fipi/status."""
+    _require_admin(x_admin_key)
+    if _FIPI_JOB["state"] == "running":
+        raise HTTPException(status_code=409, detail="Импорт уже идёт.")
+    pages = max(1, min(int(body.get("pages") or 25), 40))
+    pagesize = max(10, min(int(body.get("pagesize") or 100), 100))
+    limit = max(0, int(body.get("limit") or 0))
+    asyncio.create_task(asyncio.to_thread(_fipi_import_job, pages, pagesize, limit))
+    return {"started": True, "pages": pages, "pagesize": pagesize, "limit": limit}
+
+
+@app.get("/admin/fipi/status")
+async def admin_fipi_status(x_admin_key: str | None = Header(None)):
+    _require_admin(x_admin_key)
+    job = dict(_FIPI_JOB)
+    job["errors"] = job["errors"][:10]
+    return job
+
+
+@app.post("/admin/fipi/purge")
+async def admin_fipi_purge(x_admin_key: str | None = Header(None)):
+    """Убрать всё импортированное. Существует ровно на случай, если
+    правообладатель попросит удалить материалы: одна кнопка, а не чистка базы руками."""
+    _require_admin(x_admin_key)
+    removed = await asyncio.to_thread(storage.tasks_purge_source, fipi_import.SOURCE)
+    return {"removed": removed}
+
+
+@app.get("/img/task/{img_id}")
+async def stored_task_image(img_id: str):
+    """Картинка задания из нашей базы. Ученик не должен зависеть от доступности
+    чужого сервера, а чужой сервер — получать наш трафик."""
+    if not re.fullmatch(r"[0-9a-f]{8,40}", img_id):
+        raise HTTPException(status_code=404, detail="Нет такой картинки")
+    row = await asyncio.to_thread(storage.image_get, img_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Нет такой картинки")
+    mime, data_b64 = row
+    return Response(content=base64.b64decode(data_b64), media_type=mime,
+                    headers={"Cache-Control": "public, max-age=604800"})
 
 
 @app.get("/img/{photo_id}")
