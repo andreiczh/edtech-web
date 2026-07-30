@@ -2041,19 +2041,27 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
         criteria, errors = [], []
         for i, it in enumerate(items[:top]):
             ok = bool(it.get("accepted"))
-            criteria.append({
+            heard = str(it.get("heard") or "").strip()
+            correction = str(it.get("model") or "").strip()
+            criterion = {
                 "key": f"q{i + 1}", "name": f"{label} {i + 1}",
                 "score": 1 if ok else 0, "max": 1,
                 "comment": str(it.get("reason") or "").strip(),
-            })
+            }
             if not ok:
-                heard = str(it.get("heard") or "").strip()
+                # Кладём heard/correction прямо на критерий — раньше экран
+                # сопоставлял вопрос с ошибкой по порядковому номеру среди
+                # незачтённых, и один лишний элемент в errors (например, из
+                # _errors_from ниже) тихо сдвигал пару "вопрос-ошибка".
+                criterion["quote"] = heard or ("вопрос не задан" if is_dialogue else "ответ не зачтён")
+                criterion["correction"] = correction
                 errors.append({
                     "cat": "missing" if not heard else "order",
-                    "quote": heard or ("вопрос не задан" if is_dialogue else "ответ не зачтён"),
-                    "correction": str(it.get("model") or "").strip(),
+                    "quote": criterion["quote"],
+                    "correction": correction,
                     "explanation": str(it.get("reason") or "").strip(),
                 })
+            criteria.append(criterion)
         errors += _errors_from(obs.get("errors"), limit=8 - len(errors))
         return {"summary": summary, "score": res["score"], "max": res["max"],
                 "errors": errors, "criteria": criteria}

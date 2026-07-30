@@ -27,14 +27,6 @@ export interface VariantResult {
   failure?: string
 }
 
-/* Бэкенд может прислать категорию, которой мы не знаем, — покажем как есть. */
-const CAT_LABEL: Record<string, string> = {
-  lex: 'Лексика',
-  gram: 'Грамматика',
-  phon: 'Произношение',
-  logic: 'Логика',
-}
-
 /** prep — подготовка по таймингу экзамена: видно задание и материал, идёт
     отсчёт, микрофон ещё НЕ пишет. Запись стартует сама по концу подготовки. */
 type Phase = 'intro' | 'prep' | 'run' | 'analyzing' | 'result'
@@ -524,81 +516,5 @@ function RecBadge({ recording }: { recording: boolean }) {
       />
       {recording ? 'Идёт запись' : 'Микрофон молчит'}
     </span>
-  )
-}
-
-export function Report({
-  feedback,
-  transcript,
-}: {
-  feedback: TaskFeedback
-  transcript?: string
-}) {
-  const criteria = feedback.criteria ?? []
-  const errors = feedback.errors ?? []
-  const withComment = criteria.filter((c) => c.comment)
-
-  return (
-    <>
-      <div className="statrow" style={{ width: '100%' }}>
-        <div>
-          <div className="statrow__value">
-            {feedback.score}
-            <span className="statrow__unit">/{feedback.max}</span>
-          </div>
-          <div className="statrow__label">Баллы</div>
-        </div>
-        {criteria.map((c, i) => (
-          <div key={c.key || i}>
-            <div className="statrow__value">
-              {c.score}
-              <span className="statrow__unit">/{c.max}</span>
-            </div>
-            <div className="statrow__label">{c.name}</div>
-          </div>
-        ))}
-      </div>
-
-      {feedback.summary && (
-        <div className="card2" style={{ width: '100%' }}>
-          <p style={{ margin: 0 }}>{feedback.summary}</p>
-        </div>
-      )}
-
-      {withComment.length > 0 && (
-        <div className="card2" style={{ width: '100%' }}>
-          {withComment.map((c, i) => (
-            <p key={c.key || i} style={{ margin: i ? '10px 0 0' : 0 }}>
-              <b>{c.name}.</b> {c.comment}
-            </p>
-          ))}
-        </div>
-      )}
-
-      {errors.length > 0 && (
-        <div className="card2" style={{ width: '100%' }}>
-          {errors.map((e, i) => (
-            <div className="mistake" key={i}>
-              <div>
-                <span className="mistake__wrong">{e.quote}</span>
-                {' → '}
-                <span className="mistake__right">{e.correction}</span>
-              </div>
-              <div className="mistake__why">
-                {e.cat ? `${CAT_LABEL[e.cat] ?? e.cat}: ` : ''}
-                {e.explanation}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {transcript && (
-        <details className="card2" style={{ width: '100%' }}>
-          <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Что услышал сервер</summary>
-          <p style={{ margin: '8px 0 0' }}>{transcript}</p>
-        </details>
-      )}
-    </>
   )
 }

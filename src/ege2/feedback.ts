@@ -20,6 +20,9 @@ export interface FeedbackCriterion {
   score: number
   max: number
   comment: string
+  /** Только у вопросов/ответов (№40, №41), только когда не засчитан. */
+  quote?: string
+  correction?: string
 }
 
 export interface FeedbackError {

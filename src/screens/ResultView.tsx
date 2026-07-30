@@ -156,16 +156,10 @@ function ItemsResult({
   label: 'ВОПРОС' | 'ОТВЕТ'
 }) {
   const items = feedback.criteria ?? []
-  const errors = feedback.errors ?? []
 
   return (
     <>
       {items.map((c, i) => {
-        // Ошибку к вопросу подбираем по порядку: сервер кладёт их в том же
-        // порядке, в каком не зачёл вопросы.
-        const err = errors.filter((e) => e.quote)[
-          items.slice(0, i).filter((x) => !x.score).length
-        ]
         const failed = !c.score
         return (
           <section className="qsection" key={c.key || i}>
@@ -177,13 +171,13 @@ function ItemsResult({
                 <div className="pair__side">
                   <span className="pair__label">ваш ответ</span>
                   <span className={failed ? 'pair__wrong' : ''}>
-                    {failed && err?.quote ? err.quote : c.comment || '—'}
+                    {failed && c.quote ? c.quote : c.comment || '—'}
                   </span>
                 </div>
                 <div className="pair__side">
                   <span className="pair__label">{failed ? 'правильно' : 'итог'}</span>
                   {failed ? (
-                    <span className="pair__right">{err?.correction || 'не засчитан'}</span>
+                    <span className="pair__right">{c.correction || 'не засчитан'}</span>
                   ) : (
                     <span className="pair__ok">Засчитан. Так держать!</span>
                   )}
