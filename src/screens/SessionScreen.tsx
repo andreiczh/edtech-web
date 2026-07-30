@@ -9,16 +9,17 @@
  * экран варианта остаётся чистым исполнителем, а всё, что касается прогресса,
  * живёт в одном месте.
  */
-import { useCallback, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 
+import { fetchMeStats, type MeStats } from '../account/me'
 import { Pill } from '../design/ui'
 import {
-  TASKS,
   markVariantSolved,
   saveTaskFeedback,
   variantById,
   type TaskId,
 } from '../ege2/tasks'
+import { ResultView } from './ResultView'
 import { TaskScreen, type VariantResult } from './TaskScreen'
 
 export interface SessionItem {
@@ -110,12 +111,26 @@ function SessionSummary({
     (r.feedback?.errors ?? []).map((e) => ({ ...e, taskId: r.taskId })),
   )
 
+  // Стрик берём с сервера, а не считаем на глазок: он один на все устройства.
+  const [me, setMe] = useState<MeStats | null>(null)
+  useEffect(() => {
+    let alive = true
+    void fetchMeStats().then((s) => alive && setMe(s))
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const [tab, setTab] = useState<'stats' | 'mistakes'>('stats')
+  // Открыт всегда ровно один блок: повторный клик по нему же закрывает.
+  const [open, setOpen] = useState<number>(0)
+
   return (
     <div className="screen">
       <header className="topbar2">
         <span className="topbar2__brand">SPEAKO</span>
         <span className="statrow__label" style={{ marginTop: 0 }}>
-          итоги сессии
+          итоги варианта
         </span>
       </header>
 
@@ -123,83 +138,107 @@ function SessionSummary({
         className="screen__body scroll-soft scroll-soft--onDark"
         style={{ overflowY: 'auto', justifyContent: 'safe center', padding: '6px 10px' }}
       >
-        <div className="statrow" style={BLOCK}>
-          <div>
-            <div className="statrow__value">{results.length}</div>
-            <div className="statrow__label">Заданий пройдено</div>
-          </div>
-          <div>
-            <div className="statrow__value">{fmt(speech)}</div>
-            <div className="statrow__label">Речи записано</div>
-          </div>
-          {max > 0 && (
-            <div>
-              <div className="statrow__value">
-                {score}
-                <span className="statrow__unit">/{max}</span>
-              </div>
-              <div className="statrow__label">Баллы разбора</div>
-            </div>
-          )}
+        <div className="segmented" style={{ alignSelf: 'center' }}>
+          <button
+            type="button"
+            className={`segmented__btn${tab === 'stats' ? ' segmented__btn--on' : ''}`}
+            onClick={() => setTab('stats')}
+          >
+            ИТОГИ
+          </button>
+          <button
+            type="button"
+            className={`segmented__btn${tab === 'mistakes' ? ' segmented__btn--on' : ''}`}
+            onClick={() => setTab('mistakes')}
+          >
+            ОШИБКИ
+          </button>
         </div>
 
-        {/* По варианту: что пройдено и с каким счётом */}
-        <div
-          style={{
-            ...BLOCK,
-            display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'center',
-            gap: 'clamp(8px, 1.4vw, 14px)',
-          }}
-        >
-          {results.map((r) => (
-            <div
-              key={r.variantId}
-              className="card2"
-              style={{ flex: '1 1 150px', maxWidth: 220, padding: '10px 14px', textAlign: 'center' }}
-            >
-              <div style={{ fontWeight: 800 }}>
-                №{r.taskId} · {TASKS[r.taskId].label}
+        {tab === 'stats' && (
+          <>
+            <div className="statrow" style={BLOCK}>
+              <div>
+                <div className="statrow__value">{me ? me.streak.days : '—'}</div>
+                <div className="statrow__label">DAY STREAK</div>
               </div>
-              <div className="card2__sub">вариант {r.variantId.split('-')[1]}</div>
-              <div className="card2__sub">
-                {r.feedback
-                  ? `${r.feedback.score}/${r.feedback.max} · ошибок: ${r.feedback.errors?.length ?? 0}`
-                  : (r.failure ?? 'разбор не выполнен')}
+              <div>
+                <div className="statrow__value">
+                  {score}
+                  <span className="statrow__unit">/{max || '—'}</span>
+                </div>
+                <div className="statrow__label">БАЛЛЫ ЗА ВАРИАНТ</div>
+              </div>
+              <div>
+                <div className="statrow__value">{fmt(speech)}</div>
+                <div className="statrow__label">РЕЧИ ЗАПИСАНО</div>
               </div>
             </div>
-          ))}
-        </div>
 
-        {mistakes.length > 0 && (
-          <div className="card2" style={BLOCK}>
-            <p style={{ margin: '0 0 10px', fontWeight: 800 }}>Над чем поработать</p>
-            {mistakes.slice(0, 12).map((m, i) => (
-              <div className="mistake" key={i}>
-                <div>
-                  <span className="mistake__wrong">{m.quote}</span>
-                  {' → '}
-                  <span className="mistake__right">{m.correction}</span>
-                </div>
-                <div className="mistake__why">
-                  №{m.taskId}: {m.explanation}
-                </div>
-              </div>
-            ))}
-            {mistakes.length > 12 && (
-              <p className="card2__sub" style={{ marginTop: 8 }}>
-                Показаны первые 12 из {mistakes.length} — остальные смотри в разборах заданий.
-              </p>
-            )}
-          </div>
+            {/* Аккордеон: развёрнут ровно один разбор. */}
+            <div className="acc" style={BLOCK}>
+              {results.map((r, i) => {
+                const isOpen = open === i
+                const variant = variantById(r.taskId, r.variantId)
+                return (
+                  <div className={`acc__item${isOpen ? ' acc__item--open' : ''}`} key={r.variantId}>
+                    <button
+                      type="button"
+                      className="acc__head"
+                      aria-expanded={isOpen}
+                      onClick={() => setOpen(isOpen ? -1 : i)}
+                    >
+                      <span className="acc__no">№{r.taskId}</span>
+                      <span className="acc__sum">
+                        {r.feedback
+                          ? `${r.feedback.score} из ${r.feedback.max}`
+                          : (r.failure ?? 'разбор не выполнен')}
+                      </span>
+                      <span className="acc__chev" aria-hidden="true">
+                        {isOpen ? '▲' : '▼'}
+                      </span>
+                    </button>
+                    {isOpen && (
+                      <div className="acc__body">
+                        {r.feedback ? (
+                          <ResultView
+                            taskId={r.taskId}
+                            feedback={r.feedback}
+                            transcript={r.transcript}
+                            reference={variant?.readText}
+                          />
+                        ) : (
+                          <p style={{ margin: 0 }}>{r.failure ?? 'Разбор не выполнен.'}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </>
         )}
 
-        {mistakes.length === 0 && graded.length > 0 && (
+        {tab === 'mistakes' && (
           <div className="card2" style={BLOCK}>
-            <p style={{ margin: 0 }}>
-              Разбор не нашёл ошибок, которые стоило бы вынести отдельно. Отличная сессия!
-            </p>
+            {mistakes.length === 0 ? (
+              <p style={{ margin: 0 }}>
+                Разбор не нашёл ошибок, которые стоило бы вынести отдельно. Отличный вариант!
+              </p>
+            ) : (
+              mistakes.map((m, i) => (
+                <div className="mistake" key={i}>
+                  <div>
+                    <span className="mistake__wrong">{m.quote}</span>
+                    {' → '}
+                    <span className="mistake__right">{m.correction}</span>
+                  </div>
+                  <div className="mistake__why">
+                    №{m.taskId}: {m.explanation}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         )}
       </div>

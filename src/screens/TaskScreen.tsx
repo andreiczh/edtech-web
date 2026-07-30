@@ -14,6 +14,7 @@ import { CountdownBar, Mascot, Pill } from '../design/ui'
 import { requestTaskFeedback, type TaskFeedback } from '../ege2/feedback'
 import { TASKS, feedbackPayload, type TaskId, type TaskVariant } from '../ege2/tasks'
 import { useCountdown } from '../ege2/useCountdown'
+import { ResultView } from './ResultView'
 import { useRecorder } from '../ege2/useRecorder'
 
 export interface VariantResult {
@@ -38,7 +39,6 @@ const CAT_LABEL: Record<string, string> = {
     отсчёт, микрофон ещё НЕ пишет. Запись стартует сама по концу подготовки. */
 type Phase = 'intro' | 'prep' | 'run' | 'analyzing' | 'result'
 
-const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
 /* Центральная область прокручивается сама: на телефоне текст задания и разбор
    заведомо не влезают, а нижняя строка с QUIT/таймером обязана остаться на экране.
@@ -390,17 +390,6 @@ export function TaskScreen({
 
         {phase === 'result' && (
           <div className="scroll-soft scroll-soft--onDark" style={scrollArea}>
-            <div className="card2" style={{ width: '100%' }}>
-              <b>Запись сделана — {fmt(duration)}</b>
-              {audioUrl && (
-                <audio
-                  controls
-                  src={audioUrl}
-                  style={{ width: '100%', marginTop: 10 }}
-                  aria-label="Твоя запись"
-                />
-              )}
-            </div>
 
             {failure ? (
               <div className="card2" style={{ width: '100%' }}>
@@ -419,7 +408,15 @@ export function TaskScreen({
                 )}
               </div>
             ) : (
-              feedback && <Report feedback={feedback} transcript={transcript} />
+              feedback && (
+                <ResultView
+                  taskId={task.id}
+                  feedback={feedback}
+                  transcript={transcript}
+                  reference={variant.readText}
+                  audioUrl={audioUrl}
+                />
+              )
             )}
           </div>
         )}

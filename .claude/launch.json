@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pingo-backend",
+      "runtimeExecutable": "C:\\Users\\Lenovo\\edtech-copilot-web\\backend\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000"
+      ],
+      "cwd": "C:\\Users\\Lenovo\\edtech-copilot-web\\backend",
+      "port": 8000
+    }
+  ]
+}
