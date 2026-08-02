@@ -10,10 +10,12 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import {
   changeNickname,
   fetchMeStats,
+  fetchPersonas,
   resetSettings,
   updateSettings,
   useSettings,
   type MeStats,
+  type Persona,
 } from '../account/me'
 import { applyNickname, currentUser, logout, randomNickname } from '../auth/auth'
 import { Pill, SegmentedTabs } from '../design/ui'
@@ -37,6 +39,61 @@ function Flame({ lit }: { lit: boolean }) {
         fill="currentColor"
       />
     </svg>
+  )
+}
+
+/**
+ * Выбор собеседника. Список приходит с сервера (GET /personas) и здесь НЕ
+ * дублируется: голос и характер — серверная сущность, фронт рисует что дали.
+ * Сервер молчит или список пуст — блок просто не показывается, а разговор идёт
+ * на персоне по умолчанию.
+ */
+function PersonaPicker() {
+  const settings = useSettings()
+  const [personas, setPersonas] = useState<Persona[]>([])
+
+  useEffect(() => {
+    let alive = true
+    void fetchPersonas().then((p) => alive && setPersonas(p))
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (personas.length === 0) return null
+
+  return (
+    <div className="card2 card2--ghost glass settings" style={BLOCK}>
+      <div className="settings__text" style={{ marginBottom: 12 }}>
+        <span className="settings__name">Собеседник</span>
+        <span className="settings__hint">
+          С кем говоришь в режиме Conversation. Меняется на лету — следующая
+          реплика уже прозвучит новым голосом.
+        </span>
+      </div>
+
+      <div className="personas" role="radiogroup" aria-label="Выбор собеседника">
+        {personas.map((p) => {
+          const active = settings.persona === p.id
+          return (
+            <button
+              key={p.id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              className={`persona${active ? ' persona--on' : ''}`}
+              onClick={() => updateSettings({ persona: p.id })}
+            >
+              <span className="persona__top">
+                <span className="persona__name">{p.label}</span>
+                {active && <span className="persona__mark">выбран</span>}
+              </span>
+              <span className="persona__desc">{p.description}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -207,6 +264,9 @@ export function ProfileScreen({
             </span>
           </div>
         </div>
+
+        {/* ------------------------------------------------- Собеседник */}
+        <PersonaPicker />
 
         {/* ---------------------------------------------------- Настройки */}
         <div className="card2 card2--ghost glass settings" style={BLOCK}>

@@ -138,6 +138,48 @@ SYSTEM_PROMPT = (
     "- Reply in English only."
 )
 
+# --------------------------------------------------------------------------
+# Собеседники («персоны»): голос + характер.
+#
+# Реестр живёт ЗДЕСЬ, а не на фронте, намеренно: голос и будущий промпт — это
+# одна сущность, и разъезжаться им нельзя. Фронт забирает список через
+# GET /personas и рисует то, что дали, поэтому добавление новой персоны не
+# требует пересборки фронта.
+#
+# ХАРАКТЕРОВ ПОКА НЕТ — `prompt` у всех пустой, и все говорят базовым
+# SYSTEM_PROMPT. Сделана только развилка: выбор, хранение, передача и голос.
+# Как наполнять `prompt` правильно — см. ревью и docs/DECISIONS.md.
+PERSONAS: dict[str, dict] = {
+    "tutor": {
+        "voice": "en-US-AvaMultilingualNeural",
+        "label": "Наставник",
+        "description": "Спокойный и доброжелательный. Поправляет мягко и по делу, "
+                       "держит темп разговора.",
+        "prompt": "",
+    },
+    "critic": {
+        "voice": "en-US-AndrewMultilingualNeural",
+        "label": "Критик",
+        "description": "Жёсткий и саркастичный. Придирается к каждой ошибке и "
+                       "самолюбие не щадит.",
+        "prompt": "",
+    },
+    "mentor": {
+        "voice": "en-US-BrianMultilingualNeural",
+        "label": "Терпеливый",
+        "description": "Самый мягкий. Объясняет подробно и не спеша, много "
+                       "расспрашивает о тебе.",
+        "prompt": "",
+    },
+}
+DEFAULT_PERSONA = "tutor"
+
+
+def persona_of(pid: str | None) -> dict:
+    """Персона по id. Неизвестный id — не ошибка: молча берём базовую.
+    Ученик не должен остаться без голоса из-за рассинхрона версий фронта."""
+    return PERSONAS.get((pid or "").strip(), PERSONAS[DEFAULT_PERSONA])
+
 # Промпт-ревьюер устного ЕГЭ, Задание 4 (монолог, голосовое сообщение другу).
 # Разбор устной части живёт в двух соседних модулях:
 #   ege_prompts.py — правила проверки из методички ФИПИ 2026, по которым модель
@@ -907,7 +949,29 @@ def _sanitize_settings(raw: dict) -> dict:
         out["volume"] = round(float(vol), 2)
     if isinstance(raw.get("show_text"), bool):
         out["show_text"] = raw["show_text"]
+    # Персона проверяется по реестру, а не принимается на веру: в базе должен
+    # лежать только тот id, который сервер умеет озвучить.
+    if raw.get("persona") in PERSONAS:
+        out["persona"] = raw["persona"]
     return out
+
+
+@app.get("/personas")
+async def personas_list():
+    """Каталог собеседников для экрана настроек.
+
+    Открыт без аккаунта намеренно: это витрина, а не действие — ни расхода
+    квоты, ни персональных данных здесь нет. Промпты характеров наружу НЕ
+    отдаём, клиенту нужны только id, имя и описание.
+    """
+    return {
+        "default": DEFAULT_PERSONA,
+        "personas": [
+            {"id": pid, "label": p["label"], "description": p["description"],
+             "voice": p["voice"]}
+            for pid, p in PERSONAS.items()
+        ],
+    }
 
 
 @app.get("/me/settings")
@@ -1506,7 +1570,7 @@ async def transcribe_auto(data: bytes, local_model: str | None = None) -> str:
         raise SttFailed(f"{type(e).__name__}: {str(e)[:160]}") from e
 
 
-async def synthesize_edge(text: str) -> bytes:
+async def synthesize_edge(text: str, voice: str | None = None) -> bytes:
     """TTS через edge-tts (нейро-голоса Microsoft). Возвращает mp3-байты.
 
     Пишем во ВРЕМЕННЫЙ файл (не в cwd), чтобы не мусорить в рабочей папке.
@@ -1518,7 +1582,7 @@ async def synthesize_edge(text: str) -> bytes:
         path = f.name
     try:
         connector = aiohttp.TCPConnector(local_addr=(_LOCAL_IP, 0)) if _LOCAL_IP else None
-        communicate = edge_tts.Communicate(text, TTS_VOICE, connector=connector)
+        communicate = edge_tts.Communicate(text, voice or TTS_VOICE, connector=connector)
         await communicate.save(path)
         # edge-tts бесплатный, но метрика нужна: если однажды придётся уйти на
         # платный TTS целиком, объём уже будет известен.
@@ -1546,18 +1610,22 @@ async def synthesize_mistral(text: str) -> bytes:
 _tts_degraded = False
 
 
-async def synthesize(text: str) -> bytes:
+async def synthesize(text: str, voice: str | None = None) -> bytes:
     """Синтез с запасным путём: edge-tts, при отказе — Mistral.
 
     Один отказ переключает на запасной путь до конца жизни процесса: если
     edge-tts недоступен с этого IP (а такое подозревают на хостингах), он не
     станет доступен через фразу, и платить таймаутом на каждой реплике незачем.
+
+    `voice` — голос выбранной персоны. У запасного пути (Mistral) своего набора
+    голосов нет, там персона звучит одинаково: об этом честно сказано в
+    комментарии к TTS_REMOTE_VOICE.
     """
     global _tts_degraded
     if TTS_PROVIDER == "mistral" or _tts_degraded:
         return await synthesize_mistral(text)
     try:
-        return await synthesize_edge(text)
+        return await synthesize_edge(text, voice)
     except Exception as e:  # noqa: BLE001
         print(f"[tts] edge-tts отказал ({type(e).__name__}: {str(e)[:100]}), "
               f"перехожу на Mistral {TTS_REMOTE_VOICE} до перезапуска")
@@ -2240,6 +2308,7 @@ def _sanitize_history(raw: str) -> list[dict]:
 @app.post("/talk_stream")
 async def talk_stream(audio: UploadFile = File(...),
                       history: str = Form("[]"),
+                      persona: str = Form(""),
                       x_device: str | None = Header(None),
                       x_admin_key: str | None = Header(None)):
     await _require_account(x_device, x_admin_key)
@@ -2253,6 +2322,7 @@ async def talk_stream(audio: UploadFile = File(...),
     где latency.first_audio = время до первого озвученного предложения.
     """
     data = await audio.read()
+    who = persona_of(persona)
 
     async def gen():
         t0 = time.time()
@@ -2295,7 +2365,7 @@ async def talk_stream(audio: UploadFile = File(...),
         async def emit(sentence: str):
             nonlocal first_audio_at
             try:
-                wav = await synthesize(sentence)
+                wav = await synthesize(sentence, who["voice"])
             except Exception as e:  # noqa: BLE001
                 raise TtsFailed(str(e)) from e
             if first_audio_at is None:
@@ -2306,7 +2376,10 @@ async def talk_stream(audio: UploadFile = File(...),
         # именно этого ученика. Правило «одна короткая поправка за реплику»
         # сохраняется — оно уже в SYSTEM_PROMPT.
         mem = await mem_task
-        sys_prompt = SYSTEM_PROMPT
+        # Характер персоны дописывается ПОСЛЕ базовых правил: правила формата
+        # (короткий ответ, без markdown, вопрос в конце) должны пережить любой
+        # характер, иначе озвучка сломается. Сейчас prompt у всех пустой.
+        sys_prompt = SYSTEM_PROMPT + (f"\n\n{who['prompt']}" if who.get("prompt") else "")
         if mem.get("user"):
             sys_prompt += (
                 "\n\nBackground context, secondary to everything above — memory about "

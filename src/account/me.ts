@@ -22,9 +22,18 @@ export interface Settings {
   theme: 'dark' | 'light'
   volume: number // 0..1 — громкость голоса ИИ
   showText: boolean // показывать ли текст ответа в Conversation
+  /** id собеседника из каталога сервера (GET /personas). Здесь это просто
+      строка: список персон принадлежит серверу, и фронт его не дублирует —
+      иначе новая персона требовала бы пересборки фронта. */
+  persona: string
 }
 
-export const DEFAULT_SETTINGS: Settings = { theme: 'dark', volume: 1, showText: true }
+export const DEFAULT_SETTINGS: Settings = {
+  theme: 'dark',
+  volume: 1,
+  showText: true,
+  persona: 'tutor',
+}
 
 function normalize(raw: unknown): Settings {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
@@ -35,6 +44,35 @@ function normalize(raw: unknown): Settings {
         ? Math.round(r.volume * 100) / 100
         : DEFAULT_SETTINGS.volume,
     showText: typeof r.showText === 'boolean' ? r.showText : DEFAULT_SETTINGS.showText,
+    persona:
+      typeof r.persona === 'string' && r.persona ? r.persona : DEFAULT_SETTINGS.persona,
+  }
+}
+
+/* ------------------------------------------------------ Каталог собеседников */
+
+export interface Persona {
+  id: string
+  label: string
+  description: string
+  voice: string
+}
+
+let personasCache: Persona[] | null = null
+
+/** Список собеседников с сервера. Кэшируется на сессию: каталог меняется
+    только вместе с деплоем. Пустой массив = сервер молчит, экран настроек
+    тогда просто не покажет выбор, а разговор пойдёт на персоне по умолчанию. */
+export async function fetchPersonas(): Promise<Persona[]> {
+  if (personasCache) return personasCache
+  try {
+    const res = await fetch(`${BACKEND}/personas`)
+    if (!res.ok) return []
+    const data = (await res.json()) as { personas?: Persona[] }
+    personasCache = (data.personas ?? []).filter((p) => p && p.id && p.label)
+    return personasCache
+  } catch {
+    return []
   }
 }
 
@@ -90,6 +128,7 @@ function pushRemoteDebounced() {
         theme: current.theme,
         volume: current.volume,
         show_text: current.showText,
+        persona: current.persona,
       }),
     }).catch(() => {
       /* без сети настройки остаются локальными — не ошибка */
@@ -131,6 +170,7 @@ export async function syncSettingsFromServer(): Promise<void> {
       ...('theme' in s ? { theme: s.theme } : {}),
       ...('volume' in s ? { volume: s.volume } : {}),
       ...('show_text' in s ? { showText: s.show_text } : {}),
+      ...('persona' in s ? { persona: s.persona } : {}),
     })
     persistLocal()
     listeners.forEach((cb) => cb())

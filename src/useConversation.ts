@@ -276,6 +276,10 @@ export function useConversation(): ConversationApi {
         // (historyRef): сервер намеренно ничего не запоминает, закрыл вкладку —
         // диалог забыт. Дёшево по построению: ~10 коротких строк.
         fd.append('history', JSON.stringify(historyRef.current))
+        // Собеседник: голос и (в будущем) характер. Читаем на каждый запрос,
+        // а не при монтировании — сменил персону в настройках, и уже следующая
+        // реплика звучит новым голосом, без перезахода в разговор.
+        fd.append('persona', getSettings().persona)
         const res = await fetch(`${BACKEND}/talk_stream`, {
           method: 'POST',
           body: fd,
