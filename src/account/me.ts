@@ -51,29 +51,71 @@ function normalize(raw: unknown): Settings {
 
 /* ------------------------------------------------------ Каталог собеседников */
 
+export interface PersonaQuit {
+  title: string
+  body: string
+  stay: string
+  leave: string
+}
+
 export interface Persona {
   id: string
   label: string
   description: string
   voice: string
+  /** Цветовая семья фона: blue | green | red (контракт с CSS в index.css) */
+  theme: string
+  /** Текст подтверждения выхода — своими словами для каждого характера */
+  quit: PersonaQuit
 }
 
 let personasCache: Persona[] | null = null
+let personasInFlight: Promise<Persona[]> | null = null
+const personaListeners = new Set<() => void>()
 
 /** Список собеседников с сервера. Кэшируется на сессию: каталог меняется
     только вместе с деплоем. Пустой массив = сервер молчит, экран настроек
     тогда просто не покажет выбор, а разговор пойдёт на персоне по умолчанию. */
 export async function fetchPersonas(): Promise<Persona[]> {
   if (personasCache) return personasCache
-  try {
-    const res = await fetch(`${BACKEND}/personas`)
-    if (!res.ok) return []
-    const data = (await res.json()) as { personas?: Persona[] }
-    personasCache = (data.personas ?? []).filter((p) => p && p.id && p.label)
-    return personasCache
-  } catch {
-    return []
-  }
+  // Запрос в полёте переиспользуем: хук вызывается из нескольких компонентов
+  // сразу (фон приложения и диалог выхода), дёргать сервер трижды незачем.
+  if (personasInFlight) return personasInFlight
+  personasInFlight = (async () => {
+    try {
+      const res = await fetch(`${BACKEND}/personas`)
+      if (!res.ok) return []
+      const data = (await res.json()) as { personas?: Persona[] }
+      personasCache = (data.personas ?? []).filter((p) => p && p.id && p.label)
+      personaListeners.forEach((cb) => cb())
+      return personasCache
+    } catch {
+      return []
+    } finally {
+      personasInFlight = null
+    }
+  })()
+  return personasInFlight
+}
+
+/**
+ * Выбранный собеседник целиком — из него берут и цвет фона, и текст выхода.
+ * До ответа сервера возвращает null: вызывающий подставляет свои умолчания,
+ * поэтому первый кадр не мигает пустотой.
+ */
+export function useCurrentPersona(): Persona | null {
+  const settings = useSettings()
+  const list = useSyncExternalStore(
+    (cb) => {
+      personaListeners.add(cb)
+      // Первый же подписчик заводит загрузку каталога.
+      void fetchPersonas()
+      return () => personaListeners.delete(cb)
+    },
+    () => personasCache,
+  )
+  if (!list) return null
+  return list.find((p) => p.id === settings.persona) ?? list[0] ?? null
 }
 
 function load(): Settings {

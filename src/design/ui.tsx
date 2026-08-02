@@ -3,7 +3,75 @@
  * прожатие кнопки выглядели одинаково везде, их описывают здесь, а не в каждом
  * экране заново.
  */
-import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+
+/* --------------------------------------------------------- Подтверждение */
+
+/**
+ * Модалка «точно выйти?». Слова приходят снаружи: их диктует выбранный
+ * собеседник, и Гондон прощается не так, как Терпеливый.
+ *
+ * Рендерится порталом в body — то же правило, что у модалки личного кабинета:
+ * `backdrop-filter` на панелях делает их контейнером для position:fixed, и
+ * вложенная модалка проваливается под них (см. src/CLAUDE.md).
+ *
+ * Уход — действие необратимое (ответ не разберут), поэтому по умолчанию
+ * подсвечена кнопка «остаться», Esc отменяет, а клик по фону НЕ выходит:
+ * промахнуться мимо модалки и потерять запись было бы обидно.
+ */
+export function ConfirmDialog({
+  title,
+  body,
+  stay,
+  leave,
+  onStay,
+  onLeave,
+}: {
+  title: string
+  body: string
+  stay: string
+  leave: string
+  onStay: () => void
+  onLeave: () => void
+}) {
+  const stayRef = useRef<HTMLButtonElement | null>(null)
+
+  useEffect(() => {
+    stayRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onStay()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onStay])
+
+  return createPortal(
+    <div className="modal-backdrop" onClick={onStay}>
+      <div
+        className="modal card2 glass confirm"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="modal__title" id="confirm-title">
+          {title}
+        </h2>
+        <p className="modal__body">{body}</p>
+        <div className="confirm__foot">
+          <button type="button" className="pill pressable confirm__leave" onClick={onLeave}>
+            {leave}
+          </button>
+          <button ref={stayRef} type="button" className="pill pressable" onClick={onStay}>
+            {stay}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
 
 /* ------------------------------------------------------------------ Кнопки */
 

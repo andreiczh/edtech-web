@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 
-import { syncSettingsFromServer, useSettings } from './account/me'
+import { syncSettingsFromServer, useCurrentPersona, useSettings } from './account/me'
 import { currentUser, identityId, type AuthUser } from './auth/auth'
 import { TopBar, type TopTab } from './design/ui'
 import {
@@ -62,6 +62,10 @@ export default function App() {
   /* Тема (тёмная/светлая) — настройка кабинета, применяется атрибутом на
      корневом .app: CSS-переменные переопределяются одним селектором. */
   const { theme } = useSettings()
+  // Цвет всего приложения задаёт выбранный собеседник: Наставник — прежний
+  // фиолетовый, Гондон — красный, Терпеливый — зелёный. Пока каталог не
+  // приехал, держим фиолетовый: он же и умолчание, мигания не будет.
+  const paint = useCurrentPersona()?.theme ?? 'blue'
 
   // Банк заданий, серверный прогресс и настройки аккаунта подтягиваются при
   // старте и после входа: сессии вычёркивают решённое на любом устройстве,
@@ -152,7 +156,7 @@ export default function App() {
   }
   if (route.name === 'admin') {
     return (
-      <div className="app" data-theme="blue" data-mode={theme}>
+      <div className="app" data-theme={paint} data-mode={theme}>
         <AdminScreen
           onExit={() => {
             window.history.replaceState(null, '', window.location.pathname)
@@ -169,7 +173,7 @@ export default function App() {
   // отдельный полноэкранный поток со своей шапкой и полной анимацией входа.
   if (route.name === 'session') {
     return (
-      <div className="app" data-theme="blue" data-mode={theme}>
+      <div className="app" data-theme={paint} data-mode={theme}>
         <div className="screenwrap" key={`session-${route.nonce}`}>
           <SessionScreen items={route.items} onExit={backToEge} onRestart={restartSession} />
         </div>
@@ -178,7 +182,7 @@ export default function App() {
   }
 
   return (
-    <div className="app" data-theme="blue" data-mode={theme}>
+    <div className="app" data-theme={paint} data-mode={theme}>
       <div className="screen">
         <TopBar tabs={TABS} active={activeTab} onTab={onTab} onProfile={onProfile} />
 

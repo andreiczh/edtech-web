@@ -10,7 +10,8 @@
  */
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
-import { CountdownBar, Mascot, Pill } from '../design/ui'
+import { useCurrentPersona } from '../account/me'
+import { ConfirmDialog, CountdownBar, Mascot, Pill } from '../design/ui'
 import { requestTaskFeedback, type TaskFeedback } from '../ege2/feedback'
 import { TASKS, feedbackPayload, type TaskId, type TaskVariant } from '../ege2/tasks'
 import { useCountdown } from '../ege2/useCountdown'
@@ -253,10 +254,20 @@ export function TaskScreen({
     setPhase('intro')
   }, [])
 
-  const quit = useCallback(() => {
+  /* Выход спрашиваем ТОЛЬКО когда есть что терять: на вводном экране и на
+     разборе терять нечего, и лишнее окно там просто раздражает. */
+  const [askQuit, setAskQuit] = useState(false)
+  const persona = useCurrentPersona()
+
+  const quitNow = useCallback(() => {
     void stop() // уходим — микрофон обязан погаснуть сразу, а не по размонтированию
     onExit()
   }, [onExit, stop])
+
+  const quit = useCallback(() => {
+    if (phaseRef.current === 'prep' || phaseRef.current === 'run') setAskQuit(true)
+    else quitNow()
+  }, [quitNow])
 
   const proceed = useCallback(() => {
     onDone({
@@ -274,6 +285,23 @@ export function TaskScreen({
 
   return (
     <div className="screen">
+      {askQuit && (
+        <ConfirmDialog
+          title={persona?.quit.title ?? 'Выйти из задания?'}
+          body={
+            persona?.quit.body ??
+            'Ответ не будет разобран, а прогресс по этому варианту не засчитается.'
+          }
+          stay={persona?.quit.stay ?? 'Продолжить'}
+          leave={persona?.quit.leave ?? 'Выйти'}
+          onStay={() => setAskQuit(false)}
+          onLeave={() => {
+            setAskQuit(false)
+            quitNow()
+          }}
+        />
+      )}
+
       <header className="topbar2">
         <span className="topbar2__brand">SPEAKO</span>
         <span className="statrow__label" style={{ marginTop: 0 }}>
