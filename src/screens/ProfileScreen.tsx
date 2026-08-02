@@ -100,9 +100,12 @@ function PersonaPicker() {
 export function ProfileScreen({
   onOpenStats,
   onLogout,
+  onClose,
 }: {
   onOpenStats: () => void
   onLogout: () => void
+  /** Закрыть экран профиля (НЕ выход из аккаунта — тот отдельной кнопкой). */
+  onClose: () => void
 }) {
   const settings = useSettings()
   const user = currentUser()
@@ -273,12 +276,16 @@ export function ProfileScreen({
           <div className="settings__row">
             <div className="settings__text">
               <span className="settings__name">Тема</span>
-              <span className="settings__hint">Оформление всего приложения</span>
+              <span className="settings__hint">
+                {settings.theme === 'dark'
+                  ? 'Фон в цвет собеседника'
+                  : 'Светлый нейтральный фон'}
+              </span>
             </div>
             <SegmentedTabs
               tabs={[
-                { id: 'dark', label: 'Тёмная' },
-                { id: 'light', label: 'Светлая' },
+                { id: 'dark', label: 'Цветная' },
+                { id: 'light', label: 'Стандарт' },
               ]}
               active={settings.theme}
               onTab={(id) => updateSettings({ theme: id as 'dark' | 'light' })}
@@ -325,11 +332,13 @@ export function ProfileScreen({
         </div>
       </div>
 
+      {/* «Назад» слева, как во всех экранах второго уровня. Не путать с «Выйти»
+          наверху: та кнопка выходит из АККАУНТА, эта — просто закрывает профиль. */}
       <div className="rowbetween">
-        <Pill onClick={onOpenStats}>Статистика ЕГЭ →</Pill>
-        <span style={{ fontSize: 'clamp(10px, 1.1vw, 12px)', color: 'var(--text-dim)' }}>
-          Стрик и XP считает сервер — они одни на все твои устройства
-        </span>
+        <Pill onClick={onClose}>← Назад</Pill>
+        <Pill accent onClick={onOpenStats}>
+          Статистика ЕГЭ →
+        </Pill>
       </div>
     </div>
   )

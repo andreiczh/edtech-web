@@ -66,6 +66,11 @@ export default function App() {
   // фиолетовый, Гондон — красный, Терпеливый — зелёный. Пока каталог не
   // приехал, держим фиолетовый: он же и умолчание, мигания не будет.
   const paint = useCurrentPersona()?.theme ?? 'blue'
+  // Дублируем тему на <html>: модалки уходят порталом в body, вне .app, и без
+  // этого подтверждение выхода осталось бы фиолетовым посреди зелёного экрана.
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', paint)
+  }, [paint])
 
   // Банк заданий, серверный прогресс и настройки аккаунта подтягиваются при
   // старте и после входа: сессии вычёркивают решённое на любом устройстве,
@@ -203,6 +208,7 @@ export default function App() {
             <ProfileScreen
               onOpenStats={() => setRoute({ name: 'stats' })}
               onLogout={() => setRoute({ name: 'welcome' })}
+              onClose={() => setRoute({ name: 'conversation' })}
             />
           )}
         </div>

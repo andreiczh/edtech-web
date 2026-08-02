@@ -82,6 +82,7 @@ export function Pill({
   disabled,
   title,
   active,
+  accent,
 }: {
   children: ReactNode
   onClick?: () => void
@@ -89,11 +90,15 @@ export function Pill({
   disabled?: boolean
   title?: string
   active?: boolean
+  /** Главное действие экрана. Остаётся фиолетовой во всех темах — на красном и
+      зелёном фоне это единственное цветовое пятно, и глаз идёт к нему.
+      Ставить не больше одной-двух на экран, иначе акцент перестаёт работать. */
+  accent?: boolean
 }) {
   return (
     <button
       type="button"
-      className={`pill pressable${quiet ? ' pill--quiet' : ''}`}
+      className={`pill pressable${quiet ? ' pill--quiet' : ''}${accent ? ' pill--accent' : ''}`}
       onClick={onClick}
       disabled={disabled}
       title={title}

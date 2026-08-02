@@ -14,9 +14,17 @@
   --card-ink: #4a4480; /* текст на светлой карточке */
   --card-ink-dim: #7b76a6;
 
-  /* Пилюли и панели: фиолетовое стекло */
+  /* Пилюли и панели: стекло в тон выбранной темы (переопределяется ниже) */
   --pill: rgba(69, 63, 115, 0.72);
   --pill-strong: rgba(58, 53, 98, 0.9);
+  --seg-bg: rgba(40, 36, 74, 0.42);
+
+  /* АКЦЕНТ. Единственное, что остаётся фиолетовым во всех трёх темах: бегунок
+     слайдера, полоса опыта, выбранная персона и одна-две главные кнопки на
+     экран. На красном и зелёном фоне это работает как указатель — глаз идёт
+     туда, где фиолетовое. Если покрасить в акцент всё, указателя не станет. */
+  --accent-1: rgba(126, 118, 205, 0.95);
+  --accent-2: rgba(96, 88, 172, 0.95);
 
   --glass-line: rgba(255, 255, 255, 0.34);
   /* Стекло усилено по просьбе: было 18px/150%, стало заметно плотнее.
@@ -104,21 +112,38 @@ body {
    Первая попытка была «на глаз», и её пришлось переделать: зелёный вышел
    светлее, голубой кружок давал на нём контраст 1.01 — то есть пропадал
    целиком. Насыщенность держим низкой (S≈30%) намеренно: на кричащем фоне
-   пастель сливается по тону, даже когда проходит по яркости. */
+   пастель сливается по тону, даже когда проходит по яркости.
+
+   Селектор :root, а НЕ только .app — намеренно. Модалки (подтверждение
+   выхода, личный кабинет) рендерятся порталом в document.body, то есть вне
+   .app. Повесь токены только на .app — и диалог остался бы фиолетовым посреди
+   зелёного приложения. Атрибут ставится и на <html>, и на .app. */
+:root[data-theme='blue'],
 .app[data-theme='blue'] {
   --sky-1: #786fb8;
   --sky-2: #5b5497;
   --sky-3: #4b4580;
+  --pill: rgba(69, 63, 115, 0.72);
+  --pill-strong: rgba(58, 53, 98, 0.9);
+  --seg-bg: rgba(40, 36, 74, 0.42);
 }
+:root[data-theme='green'],
 .app[data-theme='green'] {
   --sky-1: #47846c;
   --sky-2: #366553;
   --sky-3: #2d5445;
+  --pill: rgba(42, 92, 74, 0.72);
+  --pill-strong: rgba(34, 76, 61, 0.9);
+  --seg-bg: rgba(22, 58, 46, 0.42);
 }
+:root[data-theme='red'],
 .app[data-theme='red'] {
   --sky-1: #ab6372;
   --sky-2: #894a56;
   --sky-3: #723d48;
+  --pill: rgba(104, 52, 62, 0.72);
+  --pill-strong: rgba(86, 42, 52, 0.9);
+  --seg-bg: rgba(66, 30, 38, 0.42);
 }
 
 /* ------------------------------------------------- Кружки вокруг микрофона
@@ -326,7 +351,7 @@ body {
   align-items: center;
   padding: 4px;
   border-radius: var(--r-pill);
-  background: rgba(40, 36, 74, 0.42);
+  background: var(--seg-bg);
   border: 1px solid var(--glass-line);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
@@ -357,7 +382,7 @@ body {
   width: calc((100% - 8px) / var(--n));
   transform: translateX(calc(var(--i) * 100%));
   border-radius: var(--r-pill);
-  background: linear-gradient(180deg, rgba(126, 118, 205, 0.95), rgba(96, 88, 172, 0.95));
+  background: linear-gradient(180deg, var(--accent-1), var(--accent-2));
   box-shadow:
     0 4px 12px rgba(20, 16, 44, 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.35);
@@ -1370,6 +1395,13 @@ body {
   font-weight: 600;
 }
 
+/* Главное действие экрана: остаётся фиолетовым на красной и зелёной теме.
+   Не больше одной-двух на экран — иначе акцент перестаёт указывать. */
+.pill--accent {
+  background: linear-gradient(180deg, var(--accent-1), var(--accent-2));
+  border-color: rgba(255, 255, 255, 0.42);
+}
+
 /* Подтверждение выхода. Карточка светлая (card2), поэтому текст на ней —
    тёмные «чернила», а не общий светлый --text, иначе не прочитать. */
 .confirm .modal__title {
@@ -1465,7 +1497,7 @@ body {
 }
 .switch--on,
 .app[data-mode='light'] .switch--on {
-  background: linear-gradient(180deg, rgba(126, 118, 205, 0.95), rgba(96, 88, 172, 0.95));
+  background: linear-gradient(180deg, var(--accent-1), var(--accent-2));
 }
 .switch__thumb {
   position: absolute;
