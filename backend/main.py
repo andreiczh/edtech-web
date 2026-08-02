@@ -1119,6 +1119,58 @@ async def me_nickname(request: Request, body: dict = Body(...),
     return {"id": x_device, "nickname": nickname}
 
 
+# --------------------------------------------- Копилка несогласий с оценкой
+
+@app.post("/task_dispute")
+async def task_dispute(request: Request, body: dict = Body(...),
+                       x_device: str | None = Header(None),
+                       x_admin_key: str | None = Header(None)):
+    """«Не согласен с оценкой» с экрана разбора.
+
+    Единственный путь, которым транскрипт речи попадает в базу, — по явному
+    нажатию: ученик сам отдаёт свой ответ на пересмотр (см. DDL disputes).
+    Спорные разборы + вердикты человека = растущий калибровочный набор.
+    """
+    await _require_account(x_device, x_admin_key)
+    # Щедрый лимит: жалоба — редкое действие, а вот заскриптованный спам мог бы
+    # налить в базу гигабайты транскриптов.
+    if not _rate_ok(f"d:{_client_ip(request)}", 6, 60.0):
+        raise HTTPException(status_code=429, detail="Слишком часто — подожди минутку.")
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна — попробуй позже.")
+    kind = str(body.get("kind") or "")
+    if kind not in ("reading", "dialogue", "interview", "monologue"):
+        raise HTTPException(status_code=422, detail="Неизвестный тип задания.")
+    transcript = str(body.get("transcript") or "").strip()[:4000]
+    if not transcript:
+        raise HTTPException(status_code=422, detail="Пустая жалоба: нет расшифровки.")
+    try:
+        feedback_json = json.dumps(body.get("feedback") or {}, ensure_ascii=False)[:8000]
+        score = int(body.get("score") or 0)
+        max_score = int(body.get("max") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Кривые поля жалобы.")
+    did = await asyncio.to_thread(
+        storage.dispute_add, x_device or "admin", kind,
+        str(body.get("variant") or "")[:64], str(body.get("persona") or "")[:32],
+        score, max_score, transcript, feedback_json,
+        str(body.get("comment") or "").strip()[:500],
+    )
+    return {"ok": True, "id": did}
+
+
+@app.get("/admin/disputes")
+async def admin_disputes(status: str | None = None,
+                         x_admin_key: str | None = Header(None)):
+    """Копилка для владельца: спорные разборы и сводка по типам/персонам."""
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    items = await asyncio.to_thread(storage.disputes_list, status, 100)
+    stats = await asyncio.to_thread(storage.disputes_stats)
+    return {"stats": stats, "disputes": items}
+
+
 # ------------------------------------------------------------ Банк заданий
 
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "").strip()
@@ -1854,7 +1906,10 @@ async def _warmup():
         _storage_ok = True
         print(f"[startup] память включена: {storage.describe()}")
         if not storage.DATABASE_URL:
-            print("[startup] ⚠ память в SQLite: на Render диск эфемерный, база "
+            # Без эмодзи намеренно: Windows-консоль в cp1251 роняла print с «⚠»
+            # UnicodeEncodeError-ом, а print стоит в try — и «неудачный вывод
+            # предупреждения» превращался в «память выключена целиком».
+            print("[startup] (!) память в SQLite: на Render диск эфемерный, база "
                   "живёт до ближайшего деплоя. Для постоянной — DATABASE_URL (Neon).")
     except Exception as e:  # noqa: BLE001
         _storage_ok = False
@@ -2260,6 +2315,73 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
             "errors": errors, "criteria": res["criteria"]}
 
 
+async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
+                            transcript: str, persona: str, client) -> dict:
+    """Спорные вердикты диалога/интервью — на повторную, точечную проверку.
+
+    Спорным считается пункт, который первый проход сам пометил borderline,
+    и незачёт без внятной причины (обоснованность — требование формата: пустое
+    обоснование не аргумент, а подозрение на произвол).
+
+    Ограничения по скорости — сознательные (требование владельца: не замедлять):
+    один дополнительный вызов на работу, максимум 3 пункта, только 40/41.
+    Любой сбой второго прохода оставляет вердикты первого — хуже не становится.
+    """
+    if kind not in ("dialogue", "interview"):
+        return observations
+    key = "questions" if kind == "dialogue" else "answers"
+    items = [it for it in (observations.get(key) or []) if isinstance(it, dict)]
+    points = [str(p) for p in (ctx.get("points" if kind == "dialogue" else "questions") or [])]
+
+    disputed = []
+    for i, it in enumerate(items):
+        reason = str(it.get("reason") or "").strip()
+        fishy = bool(it.get("borderline")) or (not it.get("accepted") and len(reason) < 8)
+        if fishy and i < len(points):
+            disputed.append({"n": i + 1, "point": points[i],
+                             "accepted": bool(it.get("accepted")), "reason": reason})
+    if not disputed or len(disputed) > 3:
+        return observations
+
+    task_text = "\n".join(f"{i + 1}. {p}" for i, p in enumerate(points))
+    prompt = ege_prompts.recheck_prompt(kind, disputed, task_text, transcript, persona)
+    try:
+        completion = await asyncio.to_thread(
+            lambda: client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[{"role": "system", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.1,
+                max_tokens=400,
+            )
+        )
+        _track_llm(completion)
+        verdicts = (_loads_forgiving((completion.choices[0].message.content or "").strip())
+                    or {}).get("items") or []
+    except Exception as e:  # noqa: BLE001
+        print(f"[recheck] второй проход не удался ({type(e).__name__}) — оставляю первый")
+        return observations
+
+    flips = 0
+    for v in verdicts:
+        if not isinstance(v, dict):
+            continue
+        try:
+            idx = int(v.get("n") or 0) - 1
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < len(items):
+            new_ok = bool(v.get("accepted"))
+            if new_ok != bool(items[idx].get("accepted")):
+                flips += 1
+            items[idx]["accepted"] = new_ok
+            reason = str(v.get("reason") or "").strip()
+            if reason:
+                items[idx]["reason"] = reason
+    print(f"[recheck] спорных пунктов: {len(disputed)}, вердикт изменён у {flips}")
+    return observations
+
+
 async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                               device: str | None, variant: str,
                               duration_sec: int, session_done: bool = False,
@@ -2284,6 +2406,24 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
         payload = json.loads(payload_raw) if payload_raw else {}
     except json.JSONDecodeError:
         payload = {}
+
+    # Санитарный шлюз: мусор («пара абстрактных слов», фраза по кругу) получает
+    # честный ноль сразу, без траты вызова LLM и 3-5 секунд ожидания.
+    gate_reason = ege_scoring.sanity_gate(kind, transcript_text)
+    if gate_reason is not None:
+        mem_task.cancel()  # выжимки памяти не понадобятся — не бросаем задачу
+        print(f"[gate] разбор не запускался: {gate_reason[:80]}")
+        feedback = {
+            "summary": f"Оценка 0. {gate_reason.capitalize()}.",
+            "score": 0, "max": ege_scoring.MAX_SCORE.get(kind, 1), "errors": [],
+        }
+        _remember(device, kind, variant, feedback, duration_sec, session_done)
+        return {
+            "transcript": transcript_text,
+            "feedback": feedback,
+            "latency": {"stt": round(t1 - t0, 2), "llm": 0.0,
+                        "total": round(time.time() - t0, 2)},
+        }
 
     mem = await mem_task
     if mem:
@@ -2314,6 +2454,12 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     observations = _loads_forgiving(raw)
     if observations is None:
         raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
+
+    # Второй взгляд на спорные пункты — аналог третьей проверки из методички.
+    # Запускается ТОЛЬКО когда первый проход сам сомневается, поэтому у
+    # обычной работы задержка не растёт вовсе.
+    observations = await _recheck_disputed(kind, observations, ctx,
+                                           transcript_text, persona, client)
 
     # Балл считает шкала ФИПИ, а не модель, — см. ege_scoring.py.
     feedback = _score_feedback(kind, observations, ctx)

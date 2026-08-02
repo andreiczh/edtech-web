@@ -167,6 +167,17 @@ def ensure_schema() -> None:
         # на ученика: следуют за человеком между устройствами, как и память.
         "CREATE TABLE IF NOT EXISTS settings ("
         " student_id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL)",
+        # Копилка несогласий с оценкой. ЕДИНСТВЕННОЕ место, где хранится
+        # транскрипт речи, — и попадает он сюда только по ЯВНОМУ нажатию
+        # «не согласен с оценкой»: ученик сам отдаёт свой ответ на разбор.
+        # Общее решение «транскрипты не храним» остаётся в силе для всего
+        # остального. Зачем копилка: спорные разборы + вердикт человека = свой
+        # калибровочный набор, как шесть работ ФИПИ, только растущий.
+        "CREATE TABLE IF NOT EXISTS disputes ("
+        " id TEXT PRIMARY KEY, student_id TEXT NOT NULL, kind TEXT NOT NULL,"
+        " variant TEXT, persona TEXT, score INTEGER, max_score INTEGER,"
+        " transcript TEXT NOT NULL, feedback TEXT NOT NULL, comment TEXT,"
+        " status TEXT NOT NULL DEFAULT 'new', created_at TEXT NOT NULL)",
     ):
         _exec(ddl)
 
@@ -579,3 +590,40 @@ def _maybe_rebuild_global_digest(kind: str) -> None:
     _upsert_digest(f"global:{kind}",
                    "Mistakes students often make in this task: " +
                    "; ".join(chunks) + ".")
+
+
+# ------------------------------------------------ Копилка несогласий с оценкой
+
+def dispute_add(student_id: str, kind: str, variant: str, persona: str,
+                score: int, max_score: int, transcript: str,
+                feedback_json: str, comment: str) -> str:
+    """Несогласие с разбором — по явному нажатию ученика (см. DDL disputes)."""
+    did = str(uuid.uuid4())
+    _exec("INSERT INTO disputes(id, student_id, kind, variant, persona, score,"
+          " max_score, transcript, feedback, comment, status, created_at)"
+          " VALUES(?,?,?,?,?,?,?,?,?,?,'new',?)",
+          (did, student_id, kind, variant, persona, int(score), int(max_score),
+           transcript, feedback_json, comment, _now()))
+    return did
+
+
+def disputes_list(status: str | None = None, limit: int = 100) -> list[dict]:
+    """Для админки: свежие несогласия, при желании только неразобранные."""
+    where = " WHERE status=?" if status else ""
+    params: tuple = (status, int(limit)) if status else (int(limit),)
+    rows = _exec("SELECT id, student_id, kind, variant, persona, score, max_score,"
+                 " transcript, feedback, comment, status, created_at FROM disputes"
+                 f"{where} ORDER BY created_at DESC LIMIT ?", params).fetchall()
+    return [{"id": r[0], "student_id": r[1], "kind": r[2], "variant": r[3],
+             "persona": r[4], "score": r[5], "max_score": r[6], "transcript": r[7],
+             "feedback": r[8], "comment": r[9], "status": r[10], "created_at": r[11]}
+            for r in rows]
+
+
+def disputes_stats() -> dict:
+    """Сводка для аналитики: сколько несогласий по типам заданий и персонам.
+    Много несогласий на одном типе = слабое место проверки, а не учеников."""
+    by_kind = _exec("SELECT kind, COUNT(*) FROM disputes GROUP BY kind").fetchall()
+    by_persona = _exec("SELECT persona, COUNT(*) FROM disputes GROUP BY persona").fetchall()
+    return {"by_kind": {r[0]: r[1] for r in by_kind},
+            "by_persona": {r[0] or "?": r[1] for r in by_persona}}

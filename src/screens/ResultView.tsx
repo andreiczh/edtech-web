@@ -17,10 +17,10 @@
  *     фонетические ошибки промпты прямо запрещают;
  *   - «мини тренировки» — такой фичи в продукте пока нет.
  */
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 
-import type { TaskFeedback } from '../ege2/feedback'
-import type { TaskId } from '../ege2/tasks'
+import { reportDispute, type TaskFeedback } from '../ege2/feedback'
+import { TASKS, type TaskId } from '../ege2/tasks'
 
 /* Кольцо с баллом. Заполняется долей набранного — это первое, что ищет глаз. */
 function ScoreRing({ score, max }: { score: number; max: number }) {
@@ -250,18 +250,65 @@ function MonologueResult({
 
 /* ------------------------------------------------------------- сборка */
 
+/** «Не согласен с оценкой» — одна тихая строка под разбором, не мешает
+    чтению. Вместе с жалобой уходит расшифровка ответа (по явному нажатию —
+    единственный случай, когда транскрипт сохраняется). */
+function DisputeRow({
+  taskId,
+  feedback,
+  transcript,
+  variantId,
+}: {
+  taskId: TaskId
+  feedback: TaskFeedback
+  transcript?: string
+  variantId?: string
+}) {
+  const [state, setState] = useState<'idle' | 'sending' | 'done' | 'fail'>('idle')
+  if (!transcript) return null // без расшифровки жалоба бесполезна для разбора
+
+  if (state === 'done')
+    return <p className="dispute dispute--done">Отправлено — этот разбор пересмотрят.</p>
+
+  return (
+    <p className="dispute">
+      {state === 'fail' && 'Не ушло — попробуй ещё раз. '}
+      <button
+        type="button"
+        className="dispute__btn"
+        disabled={state === 'sending'}
+        onClick={() => {
+          setState('sending')
+          void reportDispute({
+            kind: TASKS[taskId].kind,
+            variant: variantId,
+            score: feedback.score,
+            max: feedback.max,
+            transcript,
+            feedback,
+          }).then((ok) => setState(ok ? 'done' : 'fail'))
+        }}
+      >
+        {state === 'sending' ? 'Отправляю…' : 'Не согласен с оценкой'}
+      </button>
+    </p>
+  )
+}
+
 export function ResultView({
   taskId,
   feedback,
   transcript,
   reference,
   audioUrl,
+  variantId,
 }: {
   taskId: TaskId
   feedback: TaskFeedback
   transcript?: string
   reference?: string
   audioUrl?: string | null
+  variantId?: string
 }) {
   const criteria = feedback.criteria ?? []
   // У №40 и №41 критерии — это сами вопросы, их место в шапке, а не в кольце.
@@ -308,6 +355,13 @@ export function ResultView({
       {taskId === 40 && <ItemsResult feedback={feedback} label="ВОПРОС" />}
       {taskId === 41 && <ItemsResult feedback={feedback} label="ОТВЕТ" />}
       {taskId === 42 && <MonologueResult feedback={feedback} transcript={transcript} />}
+
+      <DisputeRow
+        taskId={taskId}
+        feedback={feedback}
+        transcript={transcript}
+        variantId={variantId}
+      />
     </div>
   )
 }

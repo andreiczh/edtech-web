@@ -69,6 +69,43 @@ def strictness_block(persona: str | None) -> str:
     return STRICTNESS.get((persona or "").strip(), "")
 
 
+def recheck_prompt(kind: str, items: list[dict], task_text: str,
+                   transcript: str, persona: str | None) -> str:
+    """Второй проход по СПОРНЫМ пунктам — аналог третьей проверки из методички.
+
+    Пересматриваются только пункты, которые первый проход сам пометил
+    borderline (или завалил без внятной причины): полный повторный разбор
+    удвоил бы задержку на каждой работе, а спорных пунктов обычно 0-2.
+    Модель здесь видит один вопрос за раз и судит внимательнее, чем в общем
+    проходе, — это и есть смысл второго взгляда."""
+    unit = "question the student had to ask" if kind == "dialogue" else "question and the student's answer"
+    # Правила ОБЯЗАНЫ ехать в промпт целиком. Первая версия писала «суди по тем
+    # же правилам», не вкладывая их, — и «старший эксперт» судил вслепую,
+    # ссылаясь на выдуманное «правило 3.2» и заваливая чистые ответы.
+    rules = _DIALOGUE_RULES if kind == "dialogue" else _INTERVIEW_RULES
+    listed = "\n".join(
+        f'- n={it["n"]}: {it["point"]}\n  first verdict: '
+        f'{"accepted" if it["accepted"] else "rejected"} ({it["reason"] or "no reason given"})'
+        for it in items
+    )
+    return (
+        "You are the SENIOR examiner called in for a second opinion on the Russian "
+        f"EGE oral exam. A first examiner has already marked the work; only the "
+        f"disputed items below are re-examined — each is a {unit}.\n\n"
+        f"Task:\n{task_text}\n\n"
+        f"Full transcript of the student's recording:\n{transcript}\n\n"
+        f"THE OFFICIAL RULES:\n{rules}\n\n"
+        f"Disputed items:\n{listed}\n\n"
+        "Re-judge ONLY these items, carefully and by the rules above. You are the "
+        "final word: do not split the difference, decide.\n"
+        + strictness_block(persona) +
+        "\nReturn ONLY this JSON:\n"
+        '{"items": [{"n": <номер>, "accepted": true, "reason": "<по-русски, до 12 '
+        "слов: какое правило и какие слова ученика — только из транскрипта, ничего "
+        "не выдумывая>\"}]}"
+    )
+
+
 def loads_forgiving(raw: str) -> dict | None:
     """JSON от модели, даже если ответ обрезали на лимите токенов.
 
@@ -217,14 +254,19 @@ def dialogue_prompt(ad: str, points: list[str]) -> str:
         f"{_RU}\n\n"
         "Return ONLY this JSON:\n"
         '{"questions": [{"n": 1, "heard": "<the question as the student asked it, or '
-        '\\"не задан\\">", "accepted": true, "reason": "<по-русски: почему принят или '
-        'не принят>", "model": "<пример правильного вопроса, English — заполняй только '
-        'если не принят>"}], "errors": [{"cat": "gram|lex|order|missing", "quote": '
-        '"<English>", "correction": "<English>", "explanation": "<по-русски>"}], '
-        '"summary": "<одно предложение по-русски>"}\n'
+        '\\"не задан\\">", "accepted": true, "borderline": false, "reason": '
+        '"<по-русски>", "model": "<пример правильного вопроса, English — заполняй '
+        'только если не принят>"}], "errors": [{"cat": "gram|lex|order|missing", '
+        '"quote": "<English>", "correction": "<English>", "explanation": '
+        '"<по-русски>"}], "summary": "<одно предложение по-русски>"}\n'
         "questions must contain exactly one object per point, in order, even when a "
         "question was not asked. errors: up to 6 most important, for the student's "
-        "long-term mistake profile."
+        "long-term mistake profile.\n"
+        "reason: at most 12 Russian words, and for a rejection it MUST name the "
+        "specific rule broken and quote the offending words («не вопрос, а "
+        "утверждение: ...», «ошибка: do you can»). Never a bare «не принят».\n"
+        "borderline: set true ONLY when the judgement could honestly go either way "
+        "under the rules — it will trigger a second expert look. Clear cases: false."
     )
 
 
@@ -300,11 +342,16 @@ def interview_prompt(questions: list[str]) -> str:
         f"{_RU}\n\n"
         "Return ONLY this JSON:\n"
         '{"answers": [{"n": 1, "phrases": <how many countable phrases>, "accepted": '
-        'true, "reason": "<по-русски: почему зачтён или нет>"}], "errors": [{"cat": '
+        'true, "borderline": false, "reason": "<по-русски>"}], "errors": [{"cat": '
         '"gram|lex|order|missing|logic", "quote": "<English>", "correction": '
         '"<English>", "explanation": "<по-русски>"}], "summary": "<одно предложение '
         'по-русски>"}\n'
-        "answers must contain exactly one object per question, in order."
+        "answers must contain exactly one object per question, in order.\n"
+        "reason: at most 12 Russian words; for a rejection it MUST name the rule "
+        "broken and quote the offending words («одна фраза и фрагмент: Quite warm», "
+        "«ошибка: it save»). Never a bare «не зачтён».\n"
+        "borderline: set true ONLY when the judgement could honestly go either way "
+        "under the rules — it will trigger a second expert look. Clear cases: false."
     )
 
 

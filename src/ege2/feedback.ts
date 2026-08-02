@@ -94,3 +94,31 @@ export async function requestTaskFeedback(
   if (!res.ok || !parsed || detail) throw new Error(httpErrorMessage(res.status, detail))
   return data as FeedbackResponse
 }
+
+/**
+ * «Не согласен с оценкой» — жалоба в копилку на сервере.
+ *
+ * Вместе с жалобой уходит расшифровка ответа: это ЕДИНСТВЕННЫЙ случай, когда
+ * транскрипт речи сохраняется, и происходит он по явному нажатию ученика —
+ * человек сам отдаёт свой ответ на пересмотр. Из таких жалоб складывается
+ * калибровочный набор, который делает проверку точнее для всех.
+ */
+export async function reportDispute(args: {
+  kind: TaskKind
+  variant?: string
+  score: number
+  max: number
+  transcript: string
+  feedback: TaskFeedback
+}): Promise<boolean> {
+  try {
+    const res = await fetch(`${BACKEND}/task_dispute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Device': identityId() },
+      body: JSON.stringify({ ...args, persona: getSettings().persona }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}

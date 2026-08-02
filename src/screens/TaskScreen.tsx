@@ -435,6 +435,7 @@ export function TaskScreen({
                   transcript={transcript}
                   reference={variant.readText}
                   audioUrl={audioUrl}
+                  variantId={variant.id}
                 />
               )
             )}
