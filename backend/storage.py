@@ -348,6 +348,15 @@ def save_settings(student_id: str, data: str) -> None:
           (student_id, data, _now()))
 
 
+def reset_password(nickname: str, pass_hash: str) -> bool:
+    """Сброс пароля ПО НИКУ — только для админ-ручки. У аккаунтов нет ни
+    почты, ни телефона, так что «забыл пароль» решается через владельца:
+    он один знает своих учеников в лицо. False — ника нет."""
+    cur = _exec("UPDATE accounts SET pass_hash=? WHERE nickname=?",
+                (pass_hash, nickname))
+    return bool(getattr(cur, "rowcount", 0))
+
+
 def rename_account(acc_id: str, nickname: str) -> bool:
     """Сменить ник. False — аккаунта нет; занятый ник летит наружу
     IntegrityError, как и при регистрации (main.py превращает его в 409)."""
@@ -627,3 +636,26 @@ def disputes_stats() -> dict:
     by_persona = _exec("SELECT persona, COUNT(*) FROM disputes GROUP BY persona").fetchall()
     return {"by_kind": {r[0]: r[1] for r in by_kind},
             "by_persona": {r[0] or "?": r[1] for r in by_persona}}
+
+
+# ---------------------------------------------------------------- Бэкап
+
+# Таблицы, входящие в дамп. task_images — отдельным флагом: base64-картинки
+# весят мегабайты, а меняются только при импорте.
+_BACKUP_TABLES = ("students", "accounts", "results", "mistakes", "digests",
+                  "tasks", "usage_daily", "activity_days", "settings", "disputes")
+
+
+def dump_all(with_images: bool = False) -> dict:
+    """Полный дамп для GET /admin/backup: {таблица: [строки-словари]}.
+
+    Neon free — одна база без бэкапов; этот дамп, скачиваемый по расписанию
+    на ноут владельца, и есть стратегия восстановления. Формат — честный
+    JSON: восстановление в любую SQL-базу без спецсредств."""
+    tables = _BACKUP_TABLES + (("task_images",) if with_images else ())
+    out: dict = {}
+    for t in tables:
+        cur = _exec(f"SELECT * FROM {t}")  # noqa: S608 — имена из белого списка
+        cols = [d[0] for d in cur.description]
+        out[t] = [dict(zip(cols, row)) for row in cur.fetchall()]
+    return out

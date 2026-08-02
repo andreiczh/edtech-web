@@ -214,6 +214,53 @@ function BankList({
   )
 }
 
+/** «Забыл пароль» без почты и телефона решает владелец: вводит ник, сервер
+    генерирует новый пароль и показывает его ОДИН раз — продиктуй ученику. */
+function ResetPassword({ adminKey }: { adminKey: string }) {
+  const [nick, setNick] = useState('')
+  const [result, setResult] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  const run = async () => {
+    setErr(null)
+    setResult(null)
+    try {
+      const data = (await api('/admin/reset_password', adminKey, {
+        method: 'POST',
+        body: JSON.stringify({ nickname: nick.trim() }),
+      })) as { nickname: string; password: string }
+      setResult(`${data.nickname} → новый пароль: ${data.password}`)
+      setNick('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  return (
+    <div className="card2" style={{ width: 'min(100%, 760px)' }}>
+      <p style={{ margin: '0 0 8px', fontWeight: 800 }}>Сброс пароля ученика</p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <input
+          className="auth-input"
+          style={{ flex: 1, minWidth: 180 }}
+          value={nick}
+          onChange={(e) => setNick(e.target.value)}
+          placeholder="ник ученика (точно как в аккаунте)"
+        />
+        <Pill disabled={!nick.trim()} onClick={() => void run()}>
+          Сбросить
+        </Pill>
+      </div>
+      {result && (
+        <p style={{ color: '#2f7d63', fontWeight: 800, margin: '8px 0 0' }}>
+          {result} — покажи его ученику, второй раз не увидишь.
+        </p>
+      )}
+      {err && <p style={{ color: '#b4485c', fontWeight: 700, margin: '8px 0 0' }}>{err}</p>}
+    </div>
+  )
+}
+
 export function AdminScreen({ onExit }: { onExit: () => void }) {
   const [key, setKey] = useState(() => sessionStorage.getItem(KEY_STORE) ?? '')
   const [authed, setAuthed] = useState(false)
@@ -492,6 +539,8 @@ export function AdminScreen({ onExit }: { onExit: () => void }) {
         </div>
 
         <BankList list={list} adminKey={key} onChanged={() => refresh(key)} />
+
+        <ResetPassword adminKey={key} />
       </div>
     </div>
   )

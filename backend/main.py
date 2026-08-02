@@ -1564,6 +1564,43 @@ async def admin_task_toggle(tid: str, x_admin_key: str | None = Header(None)):
     return {"active": state}
 
 
+@app.get("/admin/backup")
+async def admin_backup(images: int = 0,
+                       x_admin_key: str | None = Header(None)):
+    """Полный дамп базы одним JSON — стратегия бэкапа для Neon free (там
+    своих бэкапов нет). Качается по расписанию на ноут владельца:
+    backend/backup.ps1 + Планировщик задач Windows (docs/MONITORING.md).
+    images=1 добавляет картинки заданий (+несколько МБ, меняются редко)."""
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    data = await asyncio.to_thread(storage.dump_all, bool(images))
+    return {"created_at": datetime.now(timezone.utc).isoformat(),
+            "storage": storage.describe(), "tables": data}
+
+
+@app.post("/admin/reset_password")
+async def admin_reset_password(body: dict = Body(...),
+                               x_admin_key: str | None = Header(None)):
+    """«Забыл пароль» при аккаунтах без почты и телефона: сброс делает
+    владелец руками — он один знает своих учеников в лицо и может проверить,
+    что просит настоящий хозяин ника. Новый пароль генерирует СЕРВЕР
+    (не админ): случайный, читаемый, показывается один раз в ответе."""
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    nickname = str(body.get("nickname") or "").strip()
+    if not nickname:
+        raise HTTPException(status_code=422, detail="Нужен ник.")
+    # Без похожих символов (l/1, O/0): пароль диктуют голосом или пишут от руки.
+    alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
+    new_password = "".join(secrets.choice(alphabet) for _ in range(10))
+    ok = await asyncio.to_thread(storage.reset_password, nickname, _hash_pw(new_password))
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Ник «{nickname}» не найден.")
+    return {"nickname": nickname, "password": new_password}
+
+
 @app.delete("/admin/tasks/{tid}")
 async def admin_task_delete(tid: str, x_admin_key: str | None = Header(None)):
     """Удаление задания насовсем — для бракованных черновиков импорта
