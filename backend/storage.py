@@ -659,3 +659,73 @@ def dump_all(with_images: bool = False) -> dict:
         cols = [d[0] for d in cur.description]
         out[t] = [dict(zip(cols, row)) for row in cur.fetchall()]
     return out
+
+
+# ------------------------------------------------- Аналитика ученика (/me)
+
+def analytics_summary(student_id: str) -> dict:
+    """Сырьё для экрана аналитики: динамика балла по типам + профиль ошибок.
+
+    Всё считается из УЖЕ записываемых results/mistakes — новых источников
+    данных экран не требует. Группировка в Python, а не в SQL: запросы
+    остаются одинаковыми для SQLite и Postgres, а объём на ученика крошечный
+    (сотни строк максимум).
+    """
+    rows = _exec(
+        "SELECT kind, score, max_score, created_at FROM results"
+        " WHERE student_id=? ORDER BY created_at ASC", (student_id,)).fetchall()
+
+    kinds: dict = {}
+    for kind, score, mx, _at in rows:
+        if not mx:
+            continue
+        k = kinds.setdefault(kind, {"attempts": 0, "pcts": []})
+        k["attempts"] += 1
+        k["pcts"].append(100.0 * (score or 0) / mx)
+
+    out_kinds = {}
+    for kind, k in kinds.items():
+        pcts = k["pcts"]
+        recent = pcts[-5:]
+        prev = pcts[-10:-5]
+        avg = sum(pcts) / len(pcts)
+        recent_avg = sum(recent) / len(recent)
+        # Тренд только когда есть с чем сравнивать: стрелка по двум попыткам
+        # врала бы. Порог 7 п.п. — меньше не отличимо от шума оценивания.
+        trend = "flat"
+        if len(prev) >= 3:
+            prev_avg = sum(prev) / len(prev)
+            if recent_avg - prev_avg > 7:
+                trend = "up"
+            elif prev_avg - recent_avg > 7:
+                trend = "down"
+        out_kinds[kind] = {
+            "attempts": k["attempts"],
+            "avg_pct": round(avg),
+            "recent_pct": round(recent_avg),
+            "trend": trend,
+        }
+
+    mrows = _exec(
+        "SELECT cat, quote, correction FROM mistakes"
+        " WHERE student_id=? ORDER BY created_at DESC LIMIT 300",
+        (student_id,)).fetchall()
+    by_cat: dict = {}
+    repeats: dict = {}
+    for cat, quote, corr in mrows:
+        cat = cat or "other"
+        c = by_cat.setdefault(cat, {"n": 0, "example": None})
+        c["n"] += 1
+        if c["example"] is None and quote and corr:
+            c["example"] = {"quote": quote, "correction": corr}
+        if quote:
+            key = (quote or "").lower().strip()[:80]
+            r = repeats.setdefault(key, {"quote": quote, "correction": corr or "", "n": 0})
+            r["n"] += 1
+
+    top_repeats = sorted((r for r in repeats.values() if r["n"] >= 2),
+                         key=lambda r: -r["n"])[:5]
+    cats = sorted(
+        ({"cat": c, **v} for c, v in by_cat.items()), key=lambda x: -x["n"])[:6]
+    return {"kinds": out_kinds,
+            "mistakes": {"total": len(mrows), "by_cat": cats, "repeats": top_repeats}}

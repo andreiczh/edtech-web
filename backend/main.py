@@ -1187,6 +1187,24 @@ async def me_settings_post(body: dict = Body(...),
     return {"settings": clean}
 
 
+@app.get("/me/analytics")
+async def me_analytics(x_device: str | None = Header(None),
+                       x_admin_key: str | None = Header(None)):
+    """Аналитика ученика: динамика балла по типам заданий и профиль ошибок.
+
+    Считается из уже записываемых results/mistakes — ученик видит, куда
+    движется его балл и какие ошибки он таскает за собой из работы в работу.
+    Это же сырьё для решения «что решать дальше»."""
+    await _require_account(x_device, x_admin_key)
+    if not (_storage_ok and x_device):
+        return {"kinds": {}, "mistakes": {"total": 0, "by_cat": [], "repeats": []}}
+    try:
+        return await asyncio.to_thread(storage.analytics_summary, x_device)
+    except Exception as e:  # noqa: BLE001
+        print(f"[analytics] не собралась ({type(e).__name__}) — отдаю пустую")
+        return {"kinds": {}, "mistakes": {"total": 0, "by_cat": [], "repeats": []}}
+
+
 @app.post("/me/nickname")
 async def me_nickname(request: Request, body: dict = Body(...),
                       x_device: str | None = Header(None),

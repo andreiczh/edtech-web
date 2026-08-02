@@ -250,6 +250,37 @@ export async function fetchMeStats(): Promise<MeStats | null> {
   }
 }
 
+/* ------------------------------------------------------------- Аналитика */
+
+export interface KindAnalytics {
+  attempts: number
+  avg_pct: number
+  recent_pct: number
+  trend: 'up' | 'down' | 'flat'
+}
+
+export interface MeAnalytics {
+  kinds: Record<string, KindAnalytics>
+  mistakes: {
+    total: number
+    by_cat: Array<{ cat: string; n: number; example: { quote: string; correction: string } | null }>
+    repeats: Array<{ quote: string; correction: string; n: number }>
+  }
+}
+
+/** null — сервер недоступен: экран покажет «нет связи», а не нули,
+    которые читались бы как «ошибок нет, ты молодец». */
+export async function fetchMeAnalytics(): Promise<MeAnalytics | null> {
+  if (!currentUser()) return null
+  try {
+    const res = await fetch(`${BACKEND}/me/analytics`, { headers: { 'X-Device': identityId() } })
+    if (!res.ok) return null
+    return (await res.json()) as MeAnalytics
+  } catch {
+    return null
+  }
+}
+
 /* -------------------------------------------------------------- Смена ника */
 
 /** Меняет ник на сервере. Имя — только сгенерированное (то же правило, что при

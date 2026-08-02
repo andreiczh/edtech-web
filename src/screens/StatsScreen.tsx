@@ -9,7 +9,7 @@
  */
 import { useEffect, useState, type CSSProperties } from 'react'
 
-import { fetchMeStats, type MeStats } from '../account/me'
+import { fetchMeAnalytics, fetchMeStats, type MeAnalytics, type MeStats } from '../account/me'
 import { Pill } from '../design/ui'
 import {
   TASKS,
@@ -201,7 +201,143 @@ function StatsTab({
           )
         })}
       </div>
+
+      <ServerAnalytics />
     </>
+  )
+}
+
+/* ----------------------------------------------------- Серверная аналитика */
+
+const CAT_RU: Record<string, string> = {
+  gram: 'грамматика',
+  lex: 'лексика',
+  order: 'структура вопроса',
+  missing: 'нет ответа',
+  logic: 'логика',
+  phon: 'произношение',
+  other: 'прочее',
+}
+
+const TREND_MARK: Record<string, { mark: string; hint: string }> = {
+  up: { mark: '↗', hint: 'последние работы лучше предыдущих' },
+  down: { mark: '↘', hint: 'последние работы слабее предыдущих' },
+  flat: { mark: '→', hint: 'без заметной динамики' },
+}
+
+/**
+ * Динамика балла и профиль ошибок — С СЕРВЕРА, по всем устройствам ученика.
+ * Отличие от блоков выше принципиальное: там последний срез из localStorage,
+ * здесь — история всех записанных разборов. Тренд появляется только когда
+ * попыток достаточно для сравнения (см. analytics_summary в storage.py) —
+ * стрелка по двум работам врала бы.
+ */
+function ServerAnalytics() {
+  const [data, setData] = useState<MeAnalytics | null | 'loading'>('loading')
+  useEffect(() => {
+    let alive = true
+    void fetchMeAnalytics().then((d) => alive && setData(d))
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (data === 'loading') return null
+  if (data === null) {
+    return (
+      <div className="card2" style={BLOCK}>
+        <p style={{ margin: 0, color: 'var(--card-ink-dim)' }}>
+          Аналитика недоступна: нет связи с сервером.
+        </p>
+      </div>
+    )
+  }
+
+  const kindRows = TASK_ORDER.map((id) => {
+    const kind = TASKS[id].kind
+    return { id, k: data.kinds[kind] }
+  }).filter((r) => r.k && r.k.attempts > 0)
+
+  const { by_cat: cats, repeats, total } = data.mistakes
+
+  if (kindRows.length === 0 && total === 0) {
+    return (
+      <div className="card2" style={BLOCK}>
+        <p style={{ margin: 0, color: 'var(--card-ink-dim)' }}>
+          Аналитика появится после первых разборов — реши любое задание.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card2" style={BLOCK}>
+      <p style={{ margin: '0 0 10px', fontWeight: 800 }}>
+        ДИНАМИКА{' '}
+        <span style={{ fontWeight: 600, color: 'var(--card-ink-dim)', fontSize: 12 }}>
+          по всем записанным разборам, на всех устройствах
+        </span>
+      </p>
+
+      {kindRows.length > 0 && (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+          {kindRows.map(({ id, k }) => {
+            const t = TREND_MARK[k!.trend]
+            return (
+              <div
+                key={id}
+                title={`${k!.attempts} разборов записано. ${t.hint}.`}
+                style={{
+                  flex: '1 1 130px',
+                  padding: '8px 12px',
+                  borderRadius: 12,
+                  background: 'rgba(0,0,0,0.05)',
+                }}
+              >
+                <div style={{ fontWeight: 800 }}>
+                  №{id}{' '}
+                  <span style={{ fontSize: 18 }} aria-label={t.hint}>
+                    {t.mark}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--card-ink-dim)' }}>
+                  средний {k!.avg_pct}% · недавние {k!.recent_pct}%
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--card-ink-dim)' }}>
+                  {k!.attempts} разб.
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {repeats.length > 0 && (
+        <>
+          <p style={{ margin: '0 0 6px', fontWeight: 800, fontSize: 14 }}>
+            ХОДЯТ ЗА ТОБОЙ{' '}
+            <span style={{ fontWeight: 600, color: 'var(--card-ink-dim)', fontSize: 12 }}>
+              одна и та же ошибка в разных работах
+            </span>
+          </p>
+          {repeats.map((r, i) => (
+            <p key={i} style={{ margin: '0 0 4px', fontSize: 14 }}>
+              <span style={{ color: '#b4485c', fontWeight: 700 }}>{r.quote}</span>
+              {' → '}
+              <span style={{ color: '#2f7d63', fontWeight: 700 }}>{r.correction || '—'}</span>
+              <span style={{ color: 'var(--card-ink-dim)' }}> ×{r.n}</span>
+            </p>
+          ))}
+        </>
+      )}
+
+      {cats.length > 0 && (
+        <p style={{ margin: repeats.length ? '10px 0 0' : 0, fontSize: 13, color: 'var(--card-ink-dim)' }}>
+          Всего ошибок записано: {total} ·{' '}
+          {cats.map((c) => `${CAT_RU[c.cat] ?? c.cat}: ${c.n}`).join(' · ')}
+        </p>
+      )}
+    </div>
   )
 }
 
