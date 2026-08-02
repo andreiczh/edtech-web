@@ -71,6 +71,149 @@ async function api(path: string, key: string, init?: RequestInit) {
   return data
 }
 
+/**
+ * Разборочный стол банка. Построен под реальную задачу: 94 черновика импорта
+ * ФИПИ, каждый нужно ГЛАЗАМИ проверить (OCR мог наврать, картинка может быть
+ * не о том) и опубликовать либо удалить. Отсюда предпросмотр целиком —
+ * полный текст, картинки, пункты — а не обрезка в 48 символов.
+ */
+function BankList({
+  list,
+  adminKey,
+  onChanged,
+}: {
+  list: AdminTask[]
+  adminKey: string
+  onChanged: () => void
+}) {
+  const [filter, setFilter] = useState<'drafts' | 'active' | 'all'>('drafts')
+  const [open, setOpen] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  const shown = list.filter((t) =>
+    filter === 'all' ? true : filter === 'active' ? t.active : !t.active,
+  )
+  const drafts = list.filter((t) => !t.active).length
+
+  const act = async (path: string, method: string, id: string) => {
+    setBusyId(id)
+    try {
+      await api(path, adminKey, { method })
+      onChanged()
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  return (
+    <div className="card2" style={{ width: 'min(100%, 760px)' }}>
+      <div className="rowbetween" style={{ marginBottom: 10 }}>
+        <p style={{ margin: 0, fontWeight: 800 }}>
+          Банк: {list.length} всего, черновиков {drafts}
+        </p>
+        <select value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
+          <option value="drafts">черновики</option>
+          <option value="active">опубликованные</option>
+          <option value="all">все</option>
+        </select>
+      </div>
+      {shown.length === 0 && <p style={{ margin: 0 }}>Здесь пусто.</p>}
+
+      {shown.map((t) => {
+        const p = t.payload
+        const title =
+          (p.imageCaption as string) ||
+          (p.readText as string)?.slice(0, 60) ||
+          (Array.isArray(p.steps) ? String(p.steps[0]) : '') ||
+          t.id.slice(0, 8)
+        const isOpen = open === t.id
+        return (
+          <div key={t.id} style={{ borderTop: '1px solid rgba(0,0,0,0.08)', padding: '8px 0' }}>
+            <div className="rowbetween">
+              <button
+                type="button"
+                onClick={() => setOpen(isOpen ? null : t.id)}
+                style={{
+                  all: 'unset',
+                  cursor: 'pointer',
+                  opacity: t.active ? 1 : 0.75,
+                  fontWeight: 700,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title="Показать задание целиком"
+              >
+                {t.active ? '🟢' : '📝'} №{t.task_no} · {KIND_LABEL[t.kind as TaskKind] ?? t.kind}
+                {' — '}
+                {title}
+              </button>
+              <span style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <Pill
+                  quiet
+                  disabled={busyId === t.id}
+                  onClick={() => void act(`/admin/tasks/${t.id}/toggle`, 'POST', t.id)}
+                >
+                  {t.active ? 'снять' : 'опубликовать'}
+                </Pill>
+                <Pill
+                  quiet
+                  disabled={busyId === t.id}
+                  onClick={() => {
+                    // confirm достаточно: это админка владельца, не ученики
+                    if (window.confirm('Удалить задание насовсем?'))
+                      void act(`/admin/tasks/${t.id}`, 'DELETE', t.id)
+                  }}
+                >
+                  ✕
+                </Pill>
+              </span>
+            </div>
+
+            {isOpen && (
+              <div style={{ padding: '8px 4px', fontSize: 14 }}>
+                {typeof p.brief === 'string' && (
+                  <p style={{ whiteSpace: 'pre-wrap', margin: '0 0 8px' }}>{p.brief}</p>
+                )}
+                {typeof p.readText === 'string' && (
+                  <p style={{ whiteSpace: 'pre-wrap', margin: '0 0 8px', fontStyle: 'italic' }}>
+                    {p.readText}
+                  </p>
+                )}
+                {Array.isArray(p.steps) && (
+                  <ol style={{ margin: '0 0 8px', paddingLeft: 20 }}>
+                    {(p.steps as string[]).map((s, i) => (
+                      <li key={i}>{s}</li>
+                    ))}
+                  </ol>
+                )}
+                {Array.isArray(p.photoFacts) && (p.photoFacts as string[]).length > 0 && (
+                  <p style={{ margin: '0 0 8px', color: 'var(--card-ink-dim)' }}>
+                    факты для разбора: {(p.photoFacts as string[]).join(' | ')}
+                  </p>
+                )}
+                {Array.isArray(p.images) && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {(p.images as string[]).map((src) => (
+                      <img
+                        key={src}
+                        src={src}
+                        alt=""
+                        style={{ maxWidth: 220, maxHeight: 160, borderRadius: 8 }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export function AdminScreen({ onExit }: { onExit: () => void }) {
   const [key, setKey] = useState(() => sessionStorage.getItem(KEY_STORE) ?? '')
   const [authed, setAuthed] = useState(false)
@@ -348,36 +491,7 @@ export function AdminScreen({ onExit }: { onExit: () => void }) {
           </div>
         </div>
 
-        <div className="card2" style={{ width: 'min(100%, 760px)' }}>
-          <p style={{ margin: '0 0 10px', fontWeight: 800 }}>
-            В банке: {list.length} (выключенные не попадают в выдачу)
-          </p>
-          {list.length === 0 && <p style={{ margin: 0 }}>Пока пусто.</p>}
-          {list.map((t) => (
-            <div className="rowbetween" key={t.id} style={{ padding: '6px 0' }}>
-              <span style={{ opacity: t.active ? 1 : 0.5 }}>
-                {t.exam} №{t.task_no} · {KIND_LABEL[t.kind as TaskKind] ?? t.kind}
-                {' — '}
-                {String(
-                  (t.payload.imageCaption as string) ??
-                    (t.payload.readText as string)?.slice(0, 40) ??
-                    (Array.isArray(t.payload.steps) ? t.payload.steps[0] : '') ??
-                    '',
-                ).slice(0, 48)}
-              </span>
-              <Pill
-                quiet
-                onClick={() =>
-                  void api(`/admin/tasks/${t.id}/toggle`, key, { method: 'POST' }).then(() =>
-                    refresh(key),
-                  )
-                }
-              >
-                {t.active ? 'выключить' : 'включить'}
-              </Pill>
-            </div>
-          ))}
-        </div>
+        <BankList list={list} adminKey={key} onChanged={() => refresh(key)} />
       </div>
     </div>
   )

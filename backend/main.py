@@ -1499,6 +1499,17 @@ async def admin_task_toggle(tid: str, x_admin_key: str | None = Header(None)):
     return {"active": state}
 
 
+@app.delete("/admin/tasks/{tid}")
+async def admin_task_delete(tid: str, x_admin_key: str | None = Header(None)):
+    """Удаление задания насовсем — для бракованных черновиков импорта
+    (кривой OCR, картинка не о том). Выключение (toggle) — для «отложить»."""
+    _require_admin(x_admin_key)
+    ok = await asyncio.to_thread(storage.task_delete, tid)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Задание не найдено.")
+    return {"deleted": tid}
+
+
 @app.get("/admin/usage")
 async def admin_usage(x_admin_key: str | None = Header(None)):
     """Расход Mistral по дням: свой счётчик вместо консоли, которую видно
