@@ -342,6 +342,12 @@ def reading_diff(reference: str, transcript: str) -> dict:
     }
 
 
+# Ниже этой доли совпадения с эталоном «чтение» не считается чтением вообще.
+# Порог нарочно щадящий: даже слабое чтение с акцентом и оговорками даёт
+# coverage 0.7+, а полсотни процентов не набирает только речь НЕ по тексту.
+MIN_READ_COVERAGE = 0.5
+
+
 def score_reading(diff: dict, misread_words: int) -> tuple[int, str]:
     """1 или 0 за чтение вслух.
 
@@ -352,6 +358,15 @@ def score_reading(diff: dict, misread_words: int) -> tuple[int, str]:
     """
     if not diff.get("ok"):
         return 0, "не с чем сверять: нет эталонного текста"
+    # Сначала — совпадение в целом. Без этой проверки был реальный обход:
+    # скажи вместо текста любую отсебятину, и difflib пометит весь эталон
+    # «заменой», а не «пропуском» — missing_total останется 0, и ответ
+    # проходил как «прочитан полностью» при coverage 0.0. Поймано 03.08.2026
+    # живым запросом: «Well, you know, actually...» получал 1/1.
+    if diff.get("coverage", 0.0) < MIN_READ_COVERAGE:
+        pct = round(diff.get("coverage", 0.0) * 100)
+        return 0, (f"это не чтение задания: с текстом совпало лишь {pct}% слов — "
+                   "нужно читать вслух именно предложенный текст")
     if diff["tail_missing"] > 2:
         return 0, f"текст не дочитан до конца: осталось {diff['tail_missing']} слов"
     if diff["longest_missing_run"] >= SKIPPED_LINE_RUN:

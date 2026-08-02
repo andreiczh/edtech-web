@@ -183,6 +183,18 @@ def check_reading() -> list[str]:
     if not any("tall" in s["expected"] for s in d["swaps"]):
         bad.append("подмена слова не попала в улики")
 
+    # 7. Отсебятина вместо текста — ноль. Регресс на реальный обход
+    # (03.08.2026): difflib метит чужую речь «заменой», missing_total = 0,
+    # и без проверки coverage чепуха проходила как «прочитано полностью».
+    d = sc.reading_diff(REF, "Well, you know, actually, interesting, nice, good, yes.")
+    if sc.score_reading(d, 0)[0] != 0:
+        bad.append(f"отсебятина прошла как чтение (coverage {d['coverage']})")
+    # ...а слабое, но настоящее чтение (потерян каждый десятый кусок) — не ноль.
+    weak = " ".join(w for i, w in enumerate(REF.split()) if i % 10 != 9)
+    d = sc.reading_diff(REF, weak)
+    if d["coverage"] < sc.MIN_READ_COVERAGE:
+        bad.append(f"порог coverage душит настоящее чтение: {d['coverage']}")
+
     print(f"{'OK  ' if not bad else 'FAIL'} чтение вслух: пропуски, хвост, пропущенная строка")
     return bad
 

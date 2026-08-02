@@ -2116,25 +2116,31 @@ async def _monologue_work(data: bytes) -> dict:
 # Для monologue используется старый промпт с критериями ФИПИ, а score/max
 # досчитываются на сервере — фронт везде видит одну и ту же форму.
 
-def _feedback_prompt(kind: str, payload: dict, transcript: str) -> tuple[str, dict]:
+def _feedback_prompt(kind: str, payload: dict, transcript: str,
+                     persona: str | None = None) -> tuple[str, dict]:
     """Промпт эксперта и контекст, который понадобится при подсчёте балла.
 
     Транскрипт нужен уже здесь: для чтения вслух эталон сверяется с ним ДО
-    обращения к модели, и модель получает готовые улики, а не сырой текст."""
+    обращения к модели, и модель получает готовые улики, а не сырой текст.
+
+    `persona` меняет СТРОГОСТЬ и ГОЛОС разбора (см. ege_prompts.STRICTNESS),
+    но не правила и не шкалу: спорное решается за или против ученика, а балл
+    считается одной и той же таблицей ФИПИ."""
+    extra = ege_prompts.strictness_block(persona)
     if kind == "reading":
         ref = str(payload.get("referenceText") or "")
         diff = ege_scoring.reading_diff(ref, transcript)
-        return ege_prompts.reading_prompt(ref, diff), {"diff": diff}
+        return ege_prompts.reading_prompt(ref, diff) + extra, {"diff": diff}
     if kind == "dialogue":
         points = [str(p) for p in (payload.get("points") or [])]
         ad = str(payload.get("ad") or "")
-        return ege_prompts.dialogue_prompt(ad, points), {"points": points}
+        return ege_prompts.dialogue_prompt(ad, points) + extra, {"points": points}
     if kind == "interview":
         questions = [str(q) for q in (payload.get("questions") or [])]
-        return ege_prompts.interview_prompt(questions), {"questions": questions}
+        return ege_prompts.interview_prompt(questions) + extra, {"questions": questions}
     brief = str(payload.get("brief") or "") or FALLBACK_MONOLOGUE_BRIEF
     facts = [str(f) for f in (payload.get("photoFacts") or [])]
-    return ege_prompts.monologue_prompt(brief, facts), {}
+    return ege_prompts.monologue_prompt(brief, facts) + extra, {}
 
 
 _loads_forgiving = ege_prompts.loads_forgiving
@@ -2257,7 +2263,8 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
 async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                               device: str | None, variant: str,
                               duration_sec: int, session_done: bool = False,
-                              filename: str = "speech.webm") -> dict:
+                              filename: str = "speech.webm",
+                              persona: str = "") -> dict:
     t0 = time.time()
     # Выжимки памяти тянем ПАРАЛЛЕЛЬНО с распознаванием: STT занимает 0.5-2 с,
     # SELECT успевает заведомо раньше — добавка к задержке ровно ноль.
@@ -2282,7 +2289,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     if mem:
         print(f"[memory] выжимки в промпте разбора: {', '.join(sorted(mem))}")
 
-    prompt, ctx = _feedback_prompt(kind, payload, transcript_text)
+    prompt, ctx = _feedback_prompt(kind, payload, transcript_text, persona)
     client = llm_client()
     try:
         completion = await asyncio.to_thread(
@@ -2333,6 +2340,8 @@ async def task_feedback(
     payload: str = Form("{}"),
     variant: str = Form(""),
     duration: int = Form(0),
+    # Собеседник: меняет строгость спорных решений и голос разбора, не шкалу.
+    persona: str = Form(""),
     # «1» на последнем варианте серии — бонус XP за доведённую до конца сессию.
     # Флаг клиентский, но цена ему 25 XP под общими рейт-лимитами — воровать тут
     # нечего, а серверу пришлось бы ради него хранить состояние сессий.
@@ -2354,7 +2363,8 @@ async def task_feedback(
     return StreamingResponse(
         _json_with_heartbeat(
             _task_feedback_work(kind, payload, data, x_device, variant, duration,
-                                bool(session_done), audio.filename or "speech.webm")
+                                bool(session_done), audio.filename or "speech.webm",
+                                persona)
         ),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},

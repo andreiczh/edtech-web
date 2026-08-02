@@ -18,6 +18,56 @@ from __future__ import annotations
 
 import json
 
+# --------------------------------------------------------------------------
+# Строгость проверки — зависит от выбранного собеседника.
+#
+# ЧТО можно менять строгостью, а что нельзя, — граница принципиальная:
+#   МОЖНО: как решаются спорные случаи (реальные эксперты расходятся на ±1 в
+#   рамках тех же правил — методичка прямо описывает третью проверку); сколько
+#   ошибок попадает в разбор; тон русских комментариев.
+#   НЕЛЬЗЯ: сами правила, калибровочные примеры и шкалы ege_scoring. Иначе балл
+#   перестаёт быть экзаменационным, и вся ценность тренажёра исчезает.
+# Поэтому каждый блок начинается с напоминания, что калибровка выше строгости.
+
+STRICTNESS: dict[str, str] = {
+    # Наставник: нейтральный эксперт, поведение по умолчанию — как до персон.
+    "tutor": "",
+    # Гондон: строжайший из допустимых экспертов + голос персонажа в разборе.
+    "critic": (
+        "\n\nSTRICTNESS AND VOICE FOR THIS REVIEW:\n"
+        "- The rules and CALIBRATION examples above stay binding — never fail an "
+        "answer the calibration accepts, never pass one it rejects.\n"
+        "- But where a judgement is genuinely borderline and the rules allow either "
+        "reading, resolve it AGAINST the student, like the strictest real examiner "
+        "on the panel.\n"
+        "- Report EVERY error you can find in `errors` (up to the limit), including "
+        "ones that did not cost points.\n"
+        "- All Russian text the student sees (summary, reason, comment, explanation): "
+        "the voice of a rude, sarcastic drill instructor. Russian swearing is allowed. "
+        "Mock the ANSWER, never the person: no remarks about intelligence, looks, "
+        "family, nationality or accent, no 'brosay eto delo'. Every comment must "
+        "still teach: name what was wrong and what is correct.\n"
+    ),
+    # Терпеливый: сомнение — в пользу ученика, разбор объясняет, а не перечисляет.
+    "mentor": (
+        "\n\nSTRICTNESS AND VOICE FOR THIS REVIEW:\n"
+        "- The rules and CALIBRATION examples above stay binding — never pass an "
+        "answer the calibration rejects.\n"
+        "- Where a judgement is genuinely borderline and the rules allow either "
+        "reading, resolve it IN FAVOUR of the student.\n"
+        "- In `errors`, pick only the few MOST instructive mistakes, and make each "
+        "explanation genuinely teach: what was said, what is correct, WHY, plus one "
+        "tiny example.\n"
+        "- All Russian text the student sees: warm and unhurried; normalise mistakes "
+        "('эту ошибку делают почти все'), never scold.\n"
+    ),
+}
+
+
+def strictness_block(persona: str | None) -> str:
+    """Блок строгости по id персоны; неизвестный id — нейтральная проверка."""
+    return STRICTNESS.get((persona or "").strip(), "")
+
 
 def loads_forgiving(raw: str) -> dict | None:
     """JSON от модели, даже если ответ обрезали на лимите токенов.

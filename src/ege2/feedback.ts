@@ -8,6 +8,7 @@
  * 200 — проверять надо И код, И поле. res.json() тоже может упасть: страница
  * ошибки прокси это HTML, без try человек увидел бы «Unexpected token <».
  */
+import { getSettings } from '../account/me'
 import { backendUnreachableMessage, httpErrorMessage } from '../backendError'
 import { identityId } from '../auth/auth'
 import type { TaskKind } from './tasks'
@@ -62,6 +63,9 @@ export async function requestTaskFeedback(
   if (meta?.variantId) fd.append('variant', meta.variantId)
   if (meta?.durationSec) fd.append('duration', String(meta.durationSec))
   if (meta?.sessionDone) fd.append('session_done', '1')
+  // Собеседник: Гондон решает спорное против ученика, Терпеливый — в пользу.
+  // Шкала ФИПИ у всех одна — меняются суждения в спорных местах и тон разбора.
+  fd.append('persona', getSettings().persona)
 
   let res: Response
   try {
