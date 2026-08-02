@@ -49,12 +49,17 @@ export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
                 <div className="answer__meta">
                   {latency && (
                     <>
+                      {/* first_audio теперь считается сервером ОТ ПРИХОДА
+                          запроса (03.08.2026) — это и есть пауза, складывать
+                          со stt больше нельзя: задвоило бы распознавание. */}
                       <span>
-                        пауза до ответа{' '}
-                        <b>{(latency.stt + latency.first_audio).toFixed(2)}s</b>
+                        пауза до ответа <b>{latency.first_audio.toFixed(2)}s</b>
                       </span>
                       <span>распознавание {latency.stt}s</span>
-                      <span>ответ и озвучка {latency.first_audio}s</span>
+                      <span>
+                        ответ и озвучка{' '}
+                        {Math.max(0, latency.first_audio - latency.stt).toFixed(2)}s
+                      </span>
                       <span>сервер всего {latency.total}s</span>
                     </>
                   )}

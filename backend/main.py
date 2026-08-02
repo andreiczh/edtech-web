@@ -822,7 +822,7 @@ def _check_voice_rate(identity: str) -> None:
 
     if not _rate_ok(f"v:{identity}", per_min, 60.0):
         raise HTTPException(status_code=429, detail="Слишком много запросов подряд — подожди минутку.")
-    if not _rate_ok(f"vd:{identity}", per_day, 86_400.0):
+    if not _voice_day_ok(identity, per_day):
         raise HTTPException(
             status_code=429,
             detail="Дневной лимит занятий исчерпан — продолжим завтра. Так мы бережём общий бюджет.",
@@ -832,6 +832,43 @@ def _check_voice_rate(identity: str) -> None:
             status_code=429,
             detail="Сервис сейчас занят другими учениками — попробуй через минуту.",
         )
+
+
+# Дневной счётчик — ЕДИНСТВЕННЫЙ лимит, которому нельзя жить только в памяти:
+# деплой у нас = каждый git push, и раньше он выдавал всем свежие 300 запросов
+# в день. Теперь: память для скорости (проверка без похода в базу), запись
+# фоном в voice_daily, прогрев на старте. Минутные окна остаются в памяти
+# осознанно — их сброс рестартом безвреден.
+#
+# Заодно лимит стал КАЛЕНДАРНЫМ (московский день), а не скользящими 24 часами:
+# фраза «продолжим завтра» теперь означает именно завтра, а не «через сутки
+# после первой реплики».
+_VOICE_DAY: dict = {"day": "", "counts": {}}
+
+
+def _voice_day_ok(identity: str, per_day: int) -> bool:
+    day = storage.msk_day()
+    if _VOICE_DAY["day"] != day:  # полночь по МСК — счётчики с нуля
+        _VOICE_DAY.update(day=day, counts={})
+    counts = _VOICE_DAY["counts"]
+    used = counts.get(identity, 0)
+    if used >= per_day:
+        return False
+    counts[identity] = used + 1
+    if len(counts) > 10_000:  # страховка от мусорных identity, как в _RATE
+        counts.clear()
+        counts[identity] = used + 1
+    if _storage_ok:
+        threading.Thread(target=_voice_bump_safe, args=(identity, day),
+                         daemon=True).start()
+    return True
+
+
+def _voice_bump_safe(identity: str, day: str) -> None:
+    try:
+        storage.voice_bump(identity, day)
+    except Exception as e:  # noqa: BLE001 — счётчик не важнее занятия
+        print(f"[rate] запись дневного счётчика не удалась ({type(e).__name__})")
 
 
 async def _load_memory(device: str | None, kind: str | None) -> dict:
@@ -2085,6 +2122,17 @@ async def _warmup():
         _storage_ok = False
         print(f"[startup] память НЕдоступна ({type(e).__name__}: {e}) — работаю без неё")
 
+    # Дневные лимиты переживают деплой: поднимаем сегодняшние счётчики из базы.
+    if _storage_ok:
+        try:
+            day = storage.msk_day()
+            counts = await asyncio.to_thread(storage.voice_counts, day)
+            _VOICE_DAY.update(day=day, counts=counts)
+            if counts:
+                print(f"[startup] дневные лимиты восстановлены: {len(counts)} учеников")
+        except Exception as e:  # noqa: BLE001
+            print(f"[startup] счётчики дня не поднялись ({type(e).__name__}) — с нуля")
+
     # Месячный бюджет: после рестарта память процесса пустая, а месяц — нет.
     # Сверяемся с базой сразу, не дожидаясь ленивого триггера в _check_voice_rate.
     # Строго ПОСЛЕ включения памяти: _budget_sync_bg без _storage_ok — no-op.
@@ -2889,10 +2937,15 @@ async def talk_stream(audio: UploadFile = File(...),
         _note_reply_bg(x_device)
 
         t2 = time.time()
+        # first_audio — ОТ ПРИХОДА ЗАПРОСА, а не от конца распознавания.
+        # Старая метрика (от t1) показывала красивые 0.9с там, где ученик ждал
+        # 2.3с, и по ней принимались решения о скорости. Сеть и загрузка файла
+        # сюда всё равно не входят — это честный минимум ожидания, что виден
+        # серверу; фронт больше не складывает её со stt.
         yield json.dumps(
             {"done": True, "user": user_text, "reply": reply_full.strip(),
              "latency": {"stt": round(t1 - t0, 2),
-                         "first_audio": round((first_audio_at or t2) - t1, 2),
+                         "first_audio": round((first_audio_at or t2) - t0, 2),
                          "total": round(t2 - t0, 2)}}
         ) + "\n"
 

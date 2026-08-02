@@ -173,6 +173,11 @@ def ensure_schema() -> None:
         # Общее решение «транскрипты не храним» остаётся в силе для всего
         # остального. Зачем копилка: спорные разборы + вердикт человека = свой
         # калибровочный набор, как шесть работ ФИПИ, только растущий.
+        # Дневные счётчики голосовых запросов: лимит 300/день должен
+        # переживать деплой (= каждый git push), иначе он декоративный.
+        "CREATE TABLE IF NOT EXISTS voice_daily ("
+        " student_id TEXT NOT NULL, day TEXT NOT NULL,"
+        " n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (student_id, day))",
         "CREATE TABLE IF NOT EXISTS disputes ("
         " id TEXT PRIMARY KEY, student_id TEXT NOT NULL, kind TEXT NOT NULL,"
         " variant TEXT, persona TEXT, score INTEGER, max_score INTEGER,"
@@ -729,3 +734,31 @@ def analytics_summary(student_id: str) -> dict:
         ({"cat": c, **v} for c, v in by_cat.items()), key=lambda x: -x["n"])[:6]
     return {"kinds": out_kinds,
             "mistakes": {"total": len(mrows), "by_cat": cats, "repeats": top_repeats}}
+
+
+# ------------------------------------------- Дневной счётчик голосовых запросов
+
+# Публичный псевдоним: main.py нужен тот же «московский день», что и у стрика.
+msk_day = _msk_day
+
+
+def voice_bump(student_id: str, day: str) -> None:
+    """+1 к счётчику голосовых запросов ученика за день.
+
+    Зачем в базе: раньше дневной лимит жил в памяти процесса, и каждый деплой
+    (= каждый git push) выдавал всем ученикам свежие 300 запросов. Теперь
+    счётчик переживает рестарт. Пишется фоном, мимо горячего пути."""
+    if _IS_PG:
+        _exec("INSERT INTO voice_daily(student_id, day, n) VALUES(?,?,1)"
+              " ON CONFLICT (student_id, day) DO UPDATE SET n = voice_daily.n + 1",
+              (student_id, day))
+    else:
+        _exec("INSERT INTO voice_daily(student_id, day, n) VALUES(?,?,1)"
+              " ON CONFLICT(student_id, day) DO UPDATE SET n = n + 1",
+              (student_id, day))
+
+
+def voice_counts(day: str) -> dict:
+    """Счётчики всех учеников за день — для прогрева памяти на старте."""
+    rows = _exec("SELECT student_id, n FROM voice_daily WHERE day=?", (day,)).fetchall()
+    return {r[0]: int(r[1]) for r in rows}
