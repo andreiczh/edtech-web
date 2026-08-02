@@ -2678,55 +2678,70 @@ async def talk_stream(audio: UploadFile = File(...),
         if past:
             print(f"[dialog] история: {len(past)} реплик")
 
-        try:
-            stream = await client.chat.completions.create(
-                model=LLM_MODEL,
-                messages=[
-                    {"role": "system", "content": sys_prompt},
-                    *past,
-                    {"role": "user", "content": user_text},
-                ],
-                max_tokens=120,
-                stream=True,
-            )
-            stream_usage = None
-            async for chunk in stream:
-                # usage приезжает в последнем чанке стрима (если провайдер его
-                # шлёт) — запоминаем для счётчика расхода.
-                if getattr(chunk, "usage", None) is not None:
-                    stream_usage = chunk.usage
-                delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
-                if not delta:
-                    continue
-                buf += delta
-                reply_full += delta
-                # выгружаем все законченные предложения из буфера
-                while True:
-                    sentence, buf = _split_sentence(buf)
-                    if not sentence:
-                        break
-                    yield await emit(sentence)
-            # хвост (последнее предложение без завершающего пробела)
-            tail = buf.strip()
-            if tail:
-                yield await emit(tail)
-            # Учёт расхода: точно из usage, а если стрим его не отдал — оценкой
-            # по символам (~4 символа на токен): бюджету хватает точности ±20%.
-            if stream_usage is not None:
-                _track_usage(llm_req=1,
-                             llm_prompt_tokens=getattr(stream_usage, "prompt_tokens", 0) or 0,
-                             llm_completion_tokens=getattr(stream_usage, "completion_tokens", 0) or 0)
-            else:
-                approx_prompt = (len(sys_prompt) + sum(len(p["content"]) for p in past)
-                                 + len(user_text)) // 4
-                _track_usage(llm_req=1, llm_prompt_tokens=approx_prompt,
-                             llm_completion_tokens=max(1, len(reply_full) // 4))
-        except TtsFailed as e:
-            yield json.dumps({"error": f"TTS (edge-tts) ошибка: {e}"}) + "\n"
-            return
-        except Exception as e:  # noqa: BLE001
-            yield json.dumps({"error": f"LLM ошибка ({LLM_MODEL}): {e}"}) + "\n"
-            return
+        # Ретрай LLM (03.08.2026): на домашнем канале 2 запроса из 5 рвались с
+        # пустой ошибкой, и ученик молча терял свой ход. Повторяем ТОЛЬКО пока
+        # ученику не уехало ни одного чанка: после первого предложения повтор
+        # проиграл бы начало ответа дважды — тогда честнее отдать ошибку.
+        _LLM_ATTEMPTS = 3
+        for attempt in range(_LLM_ATTEMPTS):
+            try:
+                stream = await client.chat.completions.create(
+                    model=LLM_MODEL,
+                    messages=[
+                        {"role": "system", "content": sys_prompt},
+                        *past,
+                        {"role": "user", "content": user_text},
+                    ],
+                    max_tokens=120,
+                    stream=True,
+                )
+                stream_usage = None
+                async for chunk in stream:
+                    # usage приезжает в последнем чанке стрима (если провайдер
+                    # его шлёт) — запоминаем для счётчика расхода.
+                    if getattr(chunk, "usage", None) is not None:
+                        stream_usage = chunk.usage
+                    delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
+                    if not delta:
+                        continue
+                    buf += delta
+                    reply_full += delta
+                    # выгружаем все законченные предложения из буфера
+                    while True:
+                        sentence, buf = _split_sentence(buf)
+                        if not sentence:
+                            break
+                        yield await emit(sentence)
+                # хвост (последнее предложение без завершающего пробела)
+                tail = buf.strip()
+                if tail:
+                    yield await emit(tail)
+                # Учёт расхода: точно из usage, а если стрим его не отдал —
+                # оценкой по символам (~4 на токен): бюджету хватает ±20%.
+                if stream_usage is not None:
+                    _track_usage(llm_req=1,
+                                 llm_prompt_tokens=getattr(stream_usage, "prompt_tokens", 0) or 0,
+                                 llm_completion_tokens=getattr(stream_usage, "completion_tokens", 0) or 0)
+                else:
+                    approx_prompt = (len(sys_prompt) + sum(len(p["content"]) for p in past)
+                                     + len(user_text)) // 4
+                    _track_usage(llm_req=1, llm_prompt_tokens=approx_prompt,
+                                 llm_completion_tokens=max(1, len(reply_full) // 4))
+                break  # ответ дошёл целиком
+            except TtsFailed as e:
+                # У TTS свой запасной путь (edge -> Mistral); если не спас и он,
+                # повтор LLM не поможет — часть ответа уже могла прозвучать.
+                yield json.dumps({"error": f"TTS (edge-tts) ошибка: {e}"}) + "\n"
+                return
+            except Exception as e:  # noqa: BLE001
+                can_retry = not reply_full and attempt + 1 < _LLM_ATTEMPTS
+                print(f"[llm] стрим сорвался (попытка {attempt + 1}/{_LLM_ATTEMPTS}, "
+                      f"{type(e).__name__}: {str(e)[:80]}) — "
+                      + ("повторяю" if can_retry else "отдаю ошибку"))
+                if not can_retry:
+                    yield json.dumps({"error": f"LLM ошибка ({LLM_MODEL}): {e}"}) + "\n"
+                    return
+                await asyncio.sleep(1.0 * (attempt + 1))
 
         # Реплика состоялась целиком — только теперь она считается занятием
         # (стрик + XP). Оборванные и ошибочные ходы в статистику не попадают.
