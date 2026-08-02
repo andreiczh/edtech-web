@@ -70,6 +70,26 @@ export function useConversation(): ConversationApi {
   const playingRef = useRef(false)
   const streamDoneRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
+  /* Бесшовное проигрывание фраз (Web Audio).
+   *
+   * Ответ приезжает ПОФРАЗНО, отдельным mp3 на каждое предложение. Раньше каждый
+   * кусок играл свой <audio>, а следующий создавался в onended — и между фразами
+   * зияла тишина: замер показал ~200мс подкладки в начале каждого mp3 и ~870мс в
+   * конце, то есть около СЕКУНДЫ мёртвого воздуха на каждом стыке, плюс время на
+   * создание и декодирование нового элемента. Именно это слышалось как «робот
+   * с паузами» — сам голос был ни при чём.
+   *
+   * Теперь куски декодируются в AudioBuffer и ставятся на таймлайн встык:
+   * start(when, offset, duration) отрезает тишину по краям БЕЗ копирования
+   * буфера, а `when` считается от конца предыдущей фразы. Обрезка живёт на
+   * клиенте намеренно: на сервере это значило бы распаковывать и переупаковывать
+   * mp3 на каждую фразу, а процессор на бесплатном Render — самый дефицитный
+   * ресурс (см. backend/CLAUDE.md про перекодирование). */
+  const ctxRef = useRef<AudioContext | null>(null)
+  const nextStartRef = useRef(0)
+  const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set())
+  const decodeChainRef = useRef<Promise<void>>(Promise.resolve())
+  const pendingRef = useRef(0)
   /** Память диалога: последние 10 реплик (5 обменов). Живёт в sessionStorage —
       переживает переключение вкладок ПРИЛОЖЕНИЯ (Conversation → ЕГЭ → назад
       раньше стирало историю: компонент размонтировался, и тьютор всё забывал),
@@ -85,6 +105,7 @@ export function useConversation(): ConversationApi {
   }, [])
 
   // Проиграть следующий чанк из очереди; когда очередь пуста и стрим завершён — в покой.
+  // Запасной путь: используется, если Web Audio в браузере недоступен.
   const playNext = useCallback(() => {
     const next = queueRef.current.shift()
     if (!next) {
@@ -113,12 +134,88 @@ export function useConversation(): ConversationApi {
     })
   }, [])
 
+  /** Границы собственно речи в буфере, в секундах. Всё, что тише порога по
+      краям, — подкладка кодека, её и срезаем. */
+  const speechBounds = useCallback((buf: AudioBuffer): [number, number] => {
+    const d = buf.getChannelData(0)
+    const thr = 0.005
+    let a = 0
+    let b = d.length - 1
+    while (a < d.length && Math.abs(d[a]) <= thr) a++
+    while (b > a && Math.abs(d[b]) <= thr) b--
+    if (a >= b) return [0, buf.duration] // тишина целиком — не трогаем
+    // по 30 мс воздуха с краёв, чтобы не срезать атаку первого звука
+    const pad = 0.03 * buf.sampleRate
+    return [
+      Math.max(0, a - pad) / buf.sampleRate,
+      Math.min(d.length, b + pad) / buf.sampleRate,
+    ]
+  }, [])
+
   const enqueueAudio = useCallback(
     (b64: string) => {
-      queueRef.current.push(b64)
-      if (!playingRef.current) playNext()
+      const Ctor = window.AudioContext ?? (window as unknown as {
+        webkitAudioContext?: typeof AudioContext
+      }).webkitAudioContext
+      if (!Ctor) {
+        // Древний браузер — играем по-старому, с паузами, но играем.
+        queueRef.current.push(b64)
+        if (!playingRef.current) playNext()
+        return
+      }
+      if (!ctxRef.current || ctxRef.current.state === 'closed') {
+        ctxRef.current = new Ctor()
+        nextStartRef.current = 0
+      }
+      const ctx = ctxRef.current
+      void ctx.resume().catch(() => {})
+
+      pendingRef.current += 1
+      setState('speaking')
+
+      // Декодируем строго по очереди: чанки приходят по порядку, а
+      // decodeAudioData асинхронный и без цепочки переставил бы фразы местами.
+      decodeChainRef.current = decodeChainRef.current.then(async () => {
+        try {
+          const bin = atob(b64)
+          const bytes = new Uint8Array(bin.length)
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+          const buf = await ctx.decodeAudioData(bytes.buffer)
+
+          const [from, to] = speechBounds(buf)
+          const dur = Math.max(0, to - from)
+          if (dur <= 0) return
+
+          const src = ctx.createBufferSource()
+          src.buffer = buf
+          const gain = ctx.createGain()
+          gain.gain.value = getSettings().volume
+          src.connect(gain).connect(ctx.destination)
+
+          // Встык к предыдущей фразе; 0.15с — естественный вдох между
+          // предложениями, а не дыра от кодека.
+          const when = Math.max(ctx.currentTime + 0.02, nextStartRef.current)
+          src.start(when, from, dur)
+          nextStartRef.current = when + dur + 0.15
+
+          sourcesRef.current.add(src)
+          src.onended = () => {
+            sourcesRef.current.delete(src)
+            pendingRef.current = Math.max(0, pendingRef.current - 1)
+            if (pendingRef.current === 0 && streamDoneRef.current) {
+              setState((s) => (s === 'speaking' ? 'idle' : s))
+            }
+          }
+        } catch (e) {
+          pendingRef.current = Math.max(0, pendingRef.current - 1)
+          setError(
+            `Звук не проигрался (${(e as Error)?.name ?? 'ошибка'}). ` +
+              'Нажми на страницу и попробуй снова.',
+          )
+        }
+      })
     },
-    [playNext],
+    [playNext, speechBounds],
   )
 
   // Полностью гасим текущий ответ (barge-in / очистка): обрыв стрима, очередь, звук.
@@ -134,6 +231,20 @@ export function useConversation(): ConversationApi {
       audioRef.current.src = ''
       audioRef.current = null
     }
+    // Запланированные наперёд фразы: без этого перебивание глохло бы не сразу —
+    // уже поставленные на таймлайн куски продолжали бы звучать.
+    for (const src of sourcesRef.current) {
+      src.onended = null
+      try {
+        src.stop()
+      } catch {
+        /* ещё не стартовал — нечего останавливать */
+      }
+    }
+    sourcesRef.current.clear()
+    pendingRef.current = 0
+    nextStartRef.current = 0
+    decodeChainRef.current = Promise.resolve()
   }, [])
 
   // Отправка записи + потребление NDJSON-потока ответа.
@@ -237,7 +348,9 @@ export function useConversation(): ConversationApi {
           saveDialogHistory(historyRef.current)
         }
         // Стрим кончился, а звука нет/уже доиграл — вернёмся в покой.
-        if (!playingRef.current && queueRef.current.length === 0) {
+        // pendingRef — счётчик недоигранных фраз на пути Web Audio, queue/playing
+        // — на запасном; в покой уходим, только когда молчат оба.
+        if (pendingRef.current === 0 && !playingRef.current && queueRef.current.length === 0) {
           setState((s) => (s === 'processing' || s === 'speaking' ? 'idle' : s))
         }
       }

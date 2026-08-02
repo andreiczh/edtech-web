@@ -58,7 +58,7 @@ ICP: 17–25 лет, РФ. Solo-dev, bootstrap, бюджет $0.
 |---|---|
 | STT | **Mistral Voxtral**: `mini` в разговоре (быстро), `small` в оцениваемых заданиях (точно) — `docs/DECISIONS.md` §6.3 |
 | LLM | **Mistral** — `api.mistral.ai/v1`, `mistral-small-latest` |
-| TTS | **edge-tts** — `en-US-AriaNeural` (без ключа) |
+| TTS | **edge-tts** — `en-US-AvaMultilingualNeural` (без ключа) |
 
 Нужен **ОДИН** ключ: `LLM_API_KEY` в `backend/.env` (только на Windows, в git его нет).
 

@@ -40,7 +40,7 @@ short_description: Голосовой ИИ-тренажёр устного ан�
 |---|---|---|
 | STT | faster-whisper `base.en` **локально** | $0, без ключа |
 | LLM | Mistral `mistral-small-latest` | $0 на free-тарифе |
-| TTS | edge-tts `en-US-AriaNeural` | $0, без ключа |
+| TTS | edge-tts `en-US-AvaMultilingualNeural` | $0, без ключа |
 | Бэкенд | FastAPI + uvicorn, раздаёт собранный фронт | — |
 | Фронт | React 19 + Vite 6 + TS, обычный CSS, Liquid Glass | — |
 

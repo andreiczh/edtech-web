@@ -60,7 +60,7 @@ cd backend
 | `LLM_BASE_URL` | `https://api.mistral.ai/v1` |
 | `LLM_MODEL` | `mistral-small-latest` |
 | `WHISPER_MODEL` | `base.en` |
-| `TTS_VOICE` | `en-US-AriaNeural` |
+| `TTS_VOICE` | `en-US-AvaMultilingualNeural` |
 
 ## Грабли
 

@@ -34,7 +34,7 @@ $lines = @(
     "LLM_MODEL=mistral-small-latest",
     ("LLM_API_KEY=" + $key),
     "WHISPER_MODEL=base.en",
-    "TTS_VOICE=en-US-AriaNeural"
+    "TTS_VOICE=en-US-AvaMultilingualNeural"
 )
 Set-Content -Path ".env" -Value $lines -Encoding ascii
 Remove-Variable key, sec, bstr

@@ -56,7 +56,7 @@ Silero VAD пропускает паузы) → **стриминг STT НЕ НУ
 |---|---|---|
 | **STT** | **faster-whisper ЛОКАЛЬНО**, модель `base.en` | офлайн, без ключа, без гео-блока; `small` слишком тяжёл для слабого ноута |
 | **LLM** | **Mistral** (`api.mistral.ai/v1`, `mistral-small-latest`) | из РФ без VPN, free-тариф без карты; свапается через `.env` |
-| **TTS** | **edge-tts** (`en-US-AriaNeural`) | нейро-голоса Microsoft, без ключа, из РФ ок |
+| **TTS** | **edge-tts** (`en-US-AvaMultilingualNeural`) | нейро-голоса Microsoft, без ключа, из РФ ок |
 | **Бэкенд** | FastAPI + uvicorn, раздаёт собранный фронт | один сервер, один адрес |
 
 Нужен **ОДИН** ключ — Mistral (`LLM_API_KEY` в `backend/.env`). STT и TTS без ключей.
@@ -121,7 +121,7 @@ cd backend
 .\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 `.env` (в `backend/`, не в git): `LLM_API_KEY=<ключ Mistral>`, `LLM_BASE_URL=https://api.mistral.ai/v1`,
-`LLM_MODEL=mistral-small-latest`, `WHISPER_MODEL=base.en`, `TTS_VOICE=en-US-AriaNeural`.
+`LLM_MODEL=mistral-small-latest`, `WHISPER_MODEL=base.en`, `TTS_VOICE=en-US-AvaMultilingualNeural`.
 Открыть `http://localhost:8000/` (микрофон работает — localhost secure context). `/health` для проверки.
 Быстрее итерировать фронт: `npm run dev` (:5173, HMR, прокси на :8000) — без пересборки.
 

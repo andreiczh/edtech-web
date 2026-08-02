@@ -200,7 +200,7 @@ STT_FALLBACK_LOCAL = os.environ.get("STT_FALLBACK_LOCAL", "1").strip() not in ("
 # ключе, что STT и LLM.
 #
 # Цена запасного пути — голос. У Mistral для английского только мужские голоса
-# ("Paul"), тогда как сейчас звучит женский en-US-AriaNeural. Для тренажёра это
+# ("Paul"), тогда как сейчас звучит женский en-US-AvaMultilingualNeural. Для тренажёра это
 # приемлемо, но заметно, поэтому переключение автоматическое и только при отказе.
 # Не давать хостингу усыпить сервис: сами дёргаем свой публичный адрес.
 #
@@ -244,7 +244,10 @@ TTS_REMOTE_VOICE = os.environ.get("TTS_REMOTE_VOICE", "en_paul_neutral")
 # строкой: WHISPER_MODEL_FAST=base.en в backend/.env.
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base.en")
 WHISPER_MODEL_FAST = os.environ.get("WHISPER_MODEL_FAST", "tiny.en")
-TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AriaNeural")
+# Голос разговора. Ava — поколение Multilingual (2024+), заметно живее старой
+# Aria и вдобавок быстрее: один и тот же текст 7.8с против 9.4с (замер 02.08.2026).
+# Меняется переменной TTS_VOICE, список — `edge_tts.list_voices()`.
+TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AvaMultilingualNeural")
 # Mistral — дефолт: подтверждённо работает из РФ без VPN и активируется без
 # карты. (DeepSeek не начислил бесплатный грант — 402 Insufficient Balance;
 # OpenRouter за Cloudflare-блоком РФ — 403.) Свапается через .env, см. .env.example.
