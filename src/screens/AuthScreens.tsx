@@ -48,6 +48,7 @@ export function WelcomeScreen({
 export function RegisterScreen({ onDone }: { onDone: (u: AuthUser) => void }) {
   const [nickname, setNickname] = useState(randomNickname)
   const [password, setPassword] = useState('')
+  const [invite, setInvite] = useState('')
   const [exam, setExam] = useState<Exam | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -75,13 +76,13 @@ export function RegisterScreen({ onDone }: { onDone: (u: AuthUser) => void }) {
     setBusy(true)
     setError(null)
     try {
-      setCreated(await register(nickname.trim(), password, exam))
+      setCreated(await register(nickname.trim(), password, exam, invite.trim()))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
     }
-  }, [busy, exam, nickname, password])
+  }, [busy, exam, nickname, password, invite])
 
   if (created) {
     return (
@@ -146,6 +147,19 @@ export function RegisterScreen({ onDone }: { onDone: (u: AuthUser) => void }) {
           maxLength={64}
         />
 
+        {/* Регистрация только по приглашению: код выдаёт владелец. Без кода
+            сервер откажет — поле не спрятать и не обойти. */}
+        <input
+          className="auth-input"
+          value={invite}
+          onChange={(e) => setInvite(e.target.value)}
+          placeholder="код доступа"
+          aria-label="Код доступа"
+          maxLength={64}
+          autoCapitalize="off"
+          autoCorrect="off"
+        />
+
         <div className="auth-chiprow">
           <button
             type="button"
@@ -177,14 +191,16 @@ export function RegisterScreen({ onDone }: { onDone: (u: AuthUser) => void }) {
       <button
         type="button"
         className="auth-btn"
-        disabled={busy || !exam || password.length < 4}
+        disabled={busy || !exam || password.length < 4 || !invite.trim()}
         onClick={() => void submit()}
         title={
           !exam
             ? 'Выбери ЕГЭ или «другое»'
             : password.length < 4
               ? 'Пароль — минимум 4 символа'
-              : undefined
+              : !invite.trim()
+                ? 'Нужен код доступа'
+                : undefined
         }
       >
         {busy ? '…' : 'CONTINUE'}

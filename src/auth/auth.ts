@@ -134,14 +134,20 @@ async function post(path: string, body: unknown): Promise<AuthUser> {
   return data as AuthUser
 }
 
-export async function register(nickname: string, password: string, exam: string): Promise<AuthUser> {
+export async function register(
+  nickname: string,
+  password: string,
+  exam: string,
+  /** Код доступа: регистрация только по приглашению (см. INVITE_CODES на сервере) */
+  invite: string,
+): Promise<AuthUser> {
   // Занятый ник (409) решаем сами: генерируем другой и пробуем снова — человек
   // ник не выбирает, значит и разруливать коллизию не его работа. Финальное имя
   // он видит на экране «запиши данные».
   let nick = nickname
   for (let attempt = 0; ; attempt++) {
     try {
-      const user = await post('/auth/register', { nickname: nick, password, exam })
+      const user = await post('/auth/register', { nickname: nick, password, exam, invite })
       saveUser(user)
       return user
     } catch (e) {

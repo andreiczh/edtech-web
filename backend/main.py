@@ -541,6 +541,38 @@ _storage_ok = False
 
 REQUIRE_ACCOUNT = os.environ.get("REQUIRE_ACCOUNT", "1").strip() not in ("0", "false", "no")
 
+# Коды доступа на РЕГИСТРАЦИЮ (03.08.2026, хвост №1 из CLAUDE.md: открытая
+# ссылка жгла бы квоту ключа любому прохожему). Логика fail-closed НАМЕРЕННО:
+# нет кодов в окружении — регистрация закрыта, а не открыта. Забытая
+# переменная должна закрывать дверь, а не распахивать её. Уже созданных
+# аккаунтов это не касается: вход и занятия работают как работали.
+#
+# Формат: INVITE_CODES="код1,код2" — несколько кодов, чтобы разным группам
+# (друзья, класс, репетитор) можно было выдать свой и отзывать по одному.
+# Сравнение — hmac.compare_digest, как у ADMIN_KEY.
+INVITE_CODES = frozenset(
+    c.strip() for c in os.environ.get("INVITE_CODES", "").split(",") if c.strip()
+)
+
+
+def _check_invite(code: str) -> None:
+    if not INVITE_CODES:
+        raise HTTPException(
+            status_code=503,
+            detail="Регистрация закрыта: коды доступа не настроены на сервере.",
+        )
+    # any() по всем кодам, БЕЗ раннего выхода по длине: время ответа не должно
+    # подсказывать перебором, похож ли код на настоящий.
+    ok = False
+    for c in INVITE_CODES:
+        if hmac.compare_digest(code, c):
+            ok = True
+    if not ok:
+        raise HTTPException(
+            status_code=403,
+            detail="Неверный код доступа. Спроси код у того, кто поделился ссылкой.",
+        )
+
 _ACCOUNT_CACHE: dict[str, float] = {}
 _ACCOUNT_CACHE_TTL = 600.0
 
@@ -879,6 +911,9 @@ async def auth_register(request: Request, body: dict = Body(...)):
     # этого мало.
     if not _rate_ok(f"a:{_client_ip(request)}", 12, 60.0):
         raise HTTPException(status_code=429, detail="Слишком много попыток — подожди минутку.")
+    # Код доступа проверяется ПЕРВЫМ, до валидации полей: не-приглашённому
+    # незачем знать, какие у нас правила на ники и пароли.
+    _check_invite(str(body.get("invite") or "").strip())
     nickname = str(body.get("nickname") or "").strip()
     password = str(body.get("password") or "")
     exam = str(body.get("exam") or "ege")
@@ -1959,6 +1994,10 @@ def health():
         "llm_model": LLM_MODEL,
         "llm_key": bool(os.environ.get("LLM_API_KEY")),
         "memory": storage.describe() if _storage_ok else "выключена",
+        # Показываем ТОЛЬКО число кодов, не сами коды. «закрыта» здесь — не
+        # ошибка, а сигнал владельцу: задай INVITE_CODES в панели Render.
+        "registration": (f"по кодам ({len(INVITE_CODES)} шт)"
+                         if INVITE_CODES else "ЗАКРЫТА: задай INVITE_CODES"),
         # Сводка расхода за сегодня — секретов не содержит, а увидеть «сколько
         # уже сожгли» можно без ключа админки. Полная разбивка — /admin/usage.
         "usage_today": _usage_today(),
