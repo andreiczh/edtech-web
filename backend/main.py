@@ -593,6 +593,7 @@ def _budget_sync_bg() -> None:
 
 # Алерты владельцу вынесены в alerts.py — блок без зависимостей на main.
 import alerts  # noqa: E402
+import delivery  # noqa: E402
 from alerts import note_failure, notify_owner  # noqa: E402
 
 
@@ -2493,6 +2494,16 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
 
     prompt, ctx = _feedback_prompt(kind, payload, transcript_text, persona)
     client = llm_client()
+
+    # Чтение вслух: ПАРАЛЛЕЛЬНО с разбором меряем подачу (темп и паузы по
+    # пословным таймкодам). Параллельно — чтобы замер на процессоре не
+    # прибавлялся к ожиданию ученика. Выключен по умолчанию, см. delivery.py.
+    delivery_task = None
+    if kind == "reading" and delivery.DELIVERY_ANALYSIS:
+        delivery_task = asyncio.create_task(
+            asyncio.to_thread(delivery.measure, data,
+                              os.path.splitext(filename)[1].lower() or ".mp3"))
+
     try:
         completion = await asyncio.to_thread(
             lambda: client.chat.completions.create(
@@ -2525,6 +2536,19 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
 
     # Балл считает шкала ФИПИ, а не модель, — см. ege_scoring.py.
     feedback = _score_feedback(kind, observations, ctx)
+
+    # Подача — ДОПОЛНЕНИЕ к разбору, на балл не влияет. «Дочитано ли» берём из
+    # детерминированной сверки с эталоном, а не из аудио: код это знает точно.
+    if delivery_task is not None:
+        measured = await delivery_task
+        if measured:
+            diff = ctx.get("diff") or {}
+            finished = diff.get("tail_missing", 0) <= 2
+            feedback["delivery"] = {
+                **measured,
+                "finished": finished,
+                "comment": delivery.comment(measured, finished),
+            }
 
     # В память — после того как ответ готов, мимо критического пути.
     _remember(device, kind, variant, feedback, duration_sec, session_done)

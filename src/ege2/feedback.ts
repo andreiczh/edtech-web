@@ -33,6 +33,19 @@ export interface FeedbackError {
   cat?: string
 }
 
+/** Подача чтения (№39): ИЗМЕРЕНО по пословным таймкодам, не суждение модели.
+    На балл не влияет — см. backend/delivery.py. Приходит, только когда замер
+    включён на сервере (процессор есть). */
+export interface Delivery {
+  wpm: number
+  pace: 'slow' | 'ok' | 'fast'
+  seconds: number
+  pauses: Array<{ after: string; sec: number }>
+  pause_count: number
+  finished: boolean
+  comment: string
+}
+
 export interface TaskFeedback {
   summary: string
   score: number
@@ -40,6 +53,7 @@ export interface TaskFeedback {
   errors: FeedbackError[]
   /** Только у монолога: три критерия ФИПИ */
   criteria?: FeedbackCriterion[]
+  delivery?: Delivery
 }
 
 export interface FeedbackResponse {

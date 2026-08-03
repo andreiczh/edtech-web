@@ -19,7 +19,7 @@
  */
 import { useMemo, useState } from 'react'
 
-import { reportDispute, type TaskFeedback } from '../ege2/feedback'
+import { reportDispute, type Delivery, type TaskFeedback } from '../ege2/feedback'
 import { TASKS, type TaskId } from '../ege2/tasks'
 import { highlightPieces } from '../ege2/selection'
 
@@ -57,6 +57,49 @@ function OwnRecording({ url }: { url: string | null }) {
 
 /* --------------------------------------------------- №39: чтение вслух */
 
+/**
+ * «Как это прозвучало» — единственный блок на ИЗМЕРЕНИЯХ звука: темп и паузы
+ * посчитаны по пословным таймкодам, а не выданы моделью. Первая попытка
+ * (спросить модель) провалилась — она отвечала одинаково на любую запись,
+ * см. DECISIONS §6.5. Оценки произношения тут нет и не будет: пословная
+ * вероятность распознавания не фонетика, выдавать её за неё — тот же обман.
+ * Блока нет — значит замер выключен или не удался; молчим, а не выдумываем.
+ */
+function DeliveryBlock({ d }: { d?: Delivery }) {
+  if (!d) return null
+  const PACE: Record<string, string> = { slow: 'медленно', ok: 'ровный', fast: 'быстро' }
+  return (
+    <div className="card2 resblock">
+      <h3 className="resblock__title">КАК ЭТО ПРОЗВУЧАЛО</h3>
+      <div className="pair">
+        <div className="pair__side">
+          <span className="pair__label">темп</span>
+          <span className={d.pace === 'ok' ? 'pair__ok' : 'pair__wrong'}>
+            {d.wpm} слов/мин · {PACE[d.pace] ?? d.pace}
+          </span>
+        </div>
+        <div className="pair__side">
+          <span className="pair__label">заминки</span>
+          <span className={d.pause_count === 0 ? 'pair__ok' : 'pair__wrong'}>
+            {d.pause_count === 0 ? 'нет' : d.pause_count}
+          </span>
+        </div>
+        <div className="pair__side">
+          <span className="pair__label">звучало</span>
+          <span>{d.seconds} с</span>
+        </div>
+      </div>
+      {d.pauses.length > 0 && (
+        <p className="pair__why">
+          Самые долгие:{' '}
+          {d.pauses.map((p) => `${p.sec} с после «${p.after}»`).join(', ')}.
+        </p>
+      )}
+      {d.comment && <p className="pair__why">{d.comment}</p>}
+    </div>
+  )
+}
+
 function ReadingResult({
   feedback,
   reference,
@@ -93,9 +136,12 @@ function ReadingResult({
           )}
         </p>
         <p className="resnote">
-          Произношение и интонацию разбор не слышит — он сверяет расшифровку с эталоном.
+          Балл считается по сверке с текстом. Произношение и акцент не оцениваем —
+          проверить это нечем, а выдуманная оценка хуже её отсутствия.
         </p>
       </div>
+
+      <DeliveryBlock d={feedback.delivery} />
 
       {errors.length > 0 && (
         <div className="card2 resblock">
