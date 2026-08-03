@@ -775,6 +775,16 @@ def _track_usage(**metrics) -> None:
         pass  # вне event loop — в наших путях не случается
 
 
+def _track_latency(stage: str, seconds: float) -> None:
+    """Скорость этапа — СУММОЙ миллисекунд и СЧЁТЧИКОМ, а не «последним
+    значением»: среднее потом считается точно (sum/n) по всем запросам, без
+    выборок и потерь. Пишется тем же фоновым путём, что и остальной расход."""
+    ms = int(seconds * 1000)
+    if ms <= 0:
+        return
+    _track_usage(**{f"lat_{stage}_ms": ms, f"lat_{stage}_n": 1})
+
+
 def _track_llm(completion) -> None:
     u = getattr(completion, "usage", None)
     if u is not None:
@@ -1507,6 +1517,54 @@ async def admin_test_alert(x_admin_key: str | None = Header(None)):
     if not ok:
         raise HTTPException(status_code=502, detail=f"Телеграм не принял: {detail}")
     return {"sent": True}
+
+
+@app.get("/admin/overview")
+async def admin_overview(x_admin_key: str | None = Header(None)):
+    """Сводка о работе системы: люди, расход, скорости, результаты.
+
+    Правила точности (это витрина владельца, ей верят на слово):
+      - все числа из БАЗЫ одним снимком (storage.overview) — не из памяти
+        процесса, которую обнуляет каждый деплой;
+      - расход месяца считается из тех же строк usage_daily, из которых
+        бюджет делает свою сверку, — расхождений «сводка говорит одно,
+        бюджет другое» не бывает по построению;
+      - производные (на юзера, в день, прогноз) считаются ЗДЕСЬ и только
+        делением проверенных чисел; при пустом делителе поле = None, и
+        фронт пишет «нет данных», а не ноль.
+
+    Прогноз остатка — экстраполяция среднего дневного расхода по дням,
+    В КОТОРЫЕ был трафик (тихие дни не размывают среднее). Это оценка
+    «если пользоваться как сейчас», а не обещание.
+    """
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    month = _budget_month()          # 'YYYY-MM' UTC — тот же ключ, что у бюджета
+    data = await asyncio.to_thread(storage.overview, month, storage.msk_day())
+
+    used = data["llm_requests"]
+    budget = MONTHLY_LLM_BUDGET
+    remaining = max(0, budget - used) if budget > 0 else None
+    days = data["days_with_traffic"]
+    active = data["users"]["active_month"]
+
+    per_day = round(used / days, 1) if days else None
+    per_user = round(used / active, 1) if active else None
+    days_left = (round(remaining / per_day)
+                 if (remaining is not None and per_day) else None)
+
+    data["budget"] = {
+        "limit": budget if budget > 0 else None,
+        "used": used,
+        "remaining": remaining,
+        "pct": round(100.0 * used / budget, 1) if budget > 0 else None,
+        "per_day_avg": per_day,
+        "per_active_user_avg": per_user,
+        "days_left_estimate": days_left,
+        "mode": _budget_state().get("mode"),
+    }
+    return data
 
 
 @app.get("/admin/telegram")
@@ -2480,6 +2538,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
         note_failure("stt", str(e))
         raise HTTPException(status_code=502, detail=e.user_message)
     t1 = time.time()
+    _track_latency("task_stt", t1 - t0)
     if not transcript_text:
         raise HTTPException(
             status_code=422, detail="Тишина — ничего не распознали. Запиши ответ ещё раз."
@@ -2574,6 +2633,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     _remember(device, kind, variant, feedback, duration_sec, session_done)
 
     t2 = time.time()
+    _track_latency("task_llm", t2 - t1)
     return {
         "transcript": transcript_text,
         "feedback": feedback,
@@ -2702,6 +2762,7 @@ async def talk_stream(audio: UploadFile = File(...),
             ) + "\n"
             return
 
+        _track_latency("conv_stt", t1 - t0)
         # Расшифровку отдаём сразу — фронт покажет «Ты сказал…», пока стримится ответ.
         yield json.dumps({"user": user_text}) + "\n"
 
@@ -2817,6 +2878,7 @@ async def talk_stream(audio: UploadFile = File(...),
         _note_reply_bg(x_device)
 
         t2 = time.time()
+        _track_latency("conv_answer", (first_audio_at or t2) - t0)
         # first_audio — ОТ ПРИХОДА ЗАПРОСА, а не от конца распознавания.
         # Старая метрика (от t1) показывала красивые 0.9с там, где ученик ждал
         # 2.3с, и по ней принимались решения о скорости. Сеть и загрузка файла

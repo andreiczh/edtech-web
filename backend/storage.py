@@ -822,3 +822,71 @@ def invites_list() -> list[dict]:
 def invites_count() -> int:
     row = _exec("SELECT COUNT(*) FROM invites WHERE active=1").fetchone()
     return int(row[0]) if row else 0
+
+
+# ------------------------------------------------------- Сводка для админки
+
+def overview(month: str, msk_today: str) -> dict:
+    """Все числа сводки ОДНИМ снимком из базы.
+
+    Правила точности, ради которых функция вообще существует:
+      - источник один — таблицы, а не счётчики в памяти процесса (те
+        обнуляются рестартом и врали бы после каждого деплоя);
+      - средние скорости считаются из СУММЫ и СЧЁТЧИКА (sum/n) — это точное
+        среднее по всем запросам, а не по выборке и не «последнее значение»;
+      - деления на ноль невозможны по построению: каждый делитель проверен.
+
+    `month` — 'YYYY-MM' по UTC (тот же ключ, что у месячного бюджета),
+    `msk_today` — московский день (тот же, что у стрика и дневных лимитов).
+    """
+    # Расход за месяц: те же строки usage_daily, из которых бюджет делает
+    # свою сверку, — расхождений между сводкой и бюджетом быть не может.
+    usage: dict = {}
+    for metric, total in _exec(
+            "SELECT metric, SUM(value) FROM usage_daily WHERE day LIKE ?"
+            " GROUP BY metric", (month + "%",)).fetchall():
+        usage[metric] = int(total or 0)
+
+    days_with_traffic = _exec(
+        "SELECT COUNT(DISTINCT day) FROM usage_daily WHERE day LIKE ? AND"
+        " metric='llm_req'", (month + "%",)).fetchone()[0] or 0
+
+    users_total = _exec("SELECT COUNT(*) FROM accounts").fetchone()[0] or 0
+    active_today = _exec(
+        "SELECT COUNT(DISTINCT student_id) FROM activity_days WHERE day=?",
+        (msk_today,)).fetchone()[0] or 0
+    active_month = _exec(
+        "SELECT COUNT(DISTINCT student_id) FROM activity_days WHERE day LIKE ?",
+        (msk_today[:7] + "%",)).fetchone()[0] or 0
+
+    # Результаты учеников за месяц: попытки и средний процент от максимума.
+    results = {}
+    for kind, n, avg in _exec(
+            "SELECT kind, COUNT(*), AVG(100.0*score/max_score) FROM results"
+            " WHERE max_score > 0 AND created_at LIKE ? GROUP BY kind",
+            (month + "%",)).fetchall():
+        results[kind] = {"attempts": int(n), "avg_pct": round(float(avg or 0))}
+
+    # Скорости: sum/n по каждому этапу. n=0 -> None, фронт покажет «нет данных»
+    # вместо нуля — ноль читался бы как «мгновенно», а это неправда.
+    latency = {}
+    for stage in ("conv_stt", "conv_answer", "task_stt", "task_llm"):
+        ms = usage.get(f"lat_{stage}_ms", 0)
+        n = usage.get(f"lat_{stage}_n", 0)
+        latency[stage] = {"avg_sec": round(ms / n / 1000, 2), "n": n} if n else None
+
+    return {
+        "users": {"total": users_total, "active_today": active_today,
+                  "active_month": active_month},
+        "month": month,
+        "days_with_traffic": int(days_with_traffic),
+        "llm_requests": usage.get("llm_req", 0),
+        "llm_tokens": (usage.get("llm_prompt_tokens", 0)
+                       + usage.get("llm_completion_tokens", 0)),
+        "stt_requests": usage.get("stt_req", 0),
+        "stt_audio_seconds": usage.get("stt_audio_seconds", 0),
+        "tts_chars": (usage.get("tts_edge_chars", 0)
+                      + usage.get("tts_mistral_chars", 0)),
+        "latency": latency,
+        "results": results,
+    }

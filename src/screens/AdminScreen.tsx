@@ -249,6 +249,174 @@ function BankList({
   )
 }
 
+interface Overview {
+  users: { total: number; active_today: number; active_month: number }
+  month: string
+  days_with_traffic: number
+  llm_requests: number
+  llm_tokens: number
+  stt_requests: number
+  stt_audio_seconds: number
+  tts_chars: number
+  latency: Record<string, { avg_sec: number; n: number } | null>
+  results: Record<string, { attempts: number; avg_pct: number }>
+  budget: {
+    limit: number | null
+    used: number
+    remaining: number | null
+    pct: number | null
+    per_day_avg: number | null
+    per_active_user_avg: number | null
+    days_left_estimate: number | null
+    mode: string
+  }
+}
+
+const KIND_RU: Record<string, string> = {
+  reading: '№39 чтение',
+  dialogue: '№40 вопросы',
+  interview: '№41 интервью',
+  monologue: '№42 монолог',
+}
+
+const STAGE_RU: Record<string, string> = {
+  conv_stt: 'разговор: распознавание',
+  conv_answer: 'разговор: пауза до звука',
+  task_stt: 'задания: распознавание',
+  task_llm: 'задания: разбор LLM',
+}
+
+/** Число или «нет данных» — ноль вместо отсутствия здесь ЗАПРЕЩЁН: ноль
+    в скорости читался бы как «мгновенно», а в расходе — как «не тратим». */
+const fmt = (v: number | null | undefined, unit = ''): string =>
+  v === null || v === undefined ? 'нет данных' : `${v}${unit}`
+
+/**
+ * Сводка о работе системы. Все числа приходят ОДНИМ снимком из базы
+ * (/admin/overview) — тут ничего не считается, только рисуется: арифметика
+ * на двух сторонах разошлась бы при первом же изменении формулы.
+ */
+function OverviewCard({ adminKey }: { adminKey: string }) {
+  const [o, setO] = useState<Overview | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    api('/admin/overview', adminKey)
+      .then((d) => setO(d as Overview))
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+  }, [adminKey])
+
+  if (err)
+    return (
+      <div className="card2" style={{ width: 'min(100%, 760px)' }}>
+        <p style={{ margin: 0, color: '#b4485c' }}>Сводка недоступна: {err}</p>
+      </div>
+    )
+  if (!o) return null
+
+  const b = o.budget
+  const cell: React.CSSProperties = {
+    flex: '1 1 150px',
+    padding: '8px 12px',
+    borderRadius: 12,
+    background: 'rgba(0,0,0,0.05)',
+  }
+  const label: React.CSSProperties = { fontSize: 12, color: 'var(--card-ink-dim)' }
+  const value: React.CSSProperties = { fontWeight: 800, fontSize: 18 }
+
+  return (
+    <div className="card2" style={{ width: 'min(100%, 760px)' }}>
+      <p style={{ margin: '0 0 10px', fontWeight: 800 }}>
+        Сводка за {o.month}{' '}
+        <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--card-ink-dim)' }}>
+          все числа из базы, обновляются при открытии
+        </span>
+      </p>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        <div style={cell}>
+          <div style={label}>учеников всего</div>
+          <div style={value}>{o.users.total}</div>
+          <div style={label}>
+            активных: {o.users.active_month} за месяц · {o.users.active_today} сегодня
+          </div>
+        </div>
+        <div style={cell}>
+          <div style={label}>запросы LLM за месяц</div>
+          <div style={value}>
+            {b.used}
+            {b.limit ? ` / ${b.limit}` : ''}
+          </div>
+          <div style={label}>
+            {b.pct !== null ? `${b.pct}% бюджета` : 'бюджет выключен'} · режим {b.mode}
+          </div>
+        </div>
+        <div style={cell}>
+          <div style={label}>хватит ещё примерно</div>
+          <div style={value}>{fmt(b.days_left_estimate, ' дн')}</div>
+          <div style={label}>при расходе как сейчас</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        <div style={cell}>
+          <div style={label}>в день (дни с трафиком: {o.days_with_traffic})</div>
+          <div style={value}>{fmt(b.per_day_avg)}</div>
+        </div>
+        <div style={cell}>
+          <div style={label}>на активного ученика</div>
+          <div style={value}>{fmt(b.per_active_user_avg)}</div>
+        </div>
+        <div style={cell}>
+          <div style={label}>токены · STT · TTS</div>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>
+            {o.llm_tokens.toLocaleString('ru')} ток · {o.stt_requests} расп ·{' '}
+            {o.tts_chars.toLocaleString('ru')} симв
+          </div>
+        </div>
+      </div>
+
+      <p style={{ margin: '4px 0', fontWeight: 800, fontSize: 13 }}>
+        СКОРОСТЬ{' '}
+        <span style={{ fontWeight: 600, fontSize: 11, color: 'var(--card-ink-dim)' }}>
+          точное среднее по всем запросам месяца (сумма/число)
+        </span>
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        {Object.entries(STAGE_RU).map(([k, name]) => {
+          const l = o.latency[k]
+          return (
+            <div key={k} style={cell}>
+              <div style={label}>{name}</div>
+              <div style={value}>{l ? `${l.avg_sec} с` : 'нет данных'}</div>
+              {l && <div style={label}>{l.n} замеров</div>}
+            </div>
+          )
+        })}
+      </div>
+
+      <p style={{ margin: '4px 0', fontWeight: 800, fontSize: 13 }}>
+        РЕЗУЛЬТАТЫ УЧЕНИКОВ{' '}
+        <span style={{ fontWeight: 600, fontSize: 11, color: 'var(--card-ink-dim)' }}>
+          средний % от максимума за месяц
+        </span>
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {Object.keys(o.results).length === 0 && (
+          <span style={label}>разборов в этом месяце ещё не было</span>
+        )}
+        {Object.entries(o.results).map(([k, r]) => (
+          <div key={k} style={cell}>
+            <div style={label}>{KIND_RU[k] ?? k}</div>
+            <div style={value}>{r.avg_pct}%</div>
+            <div style={label}>{r.attempts} разб.</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 interface Invite {
   code: string
   note: string
@@ -662,6 +830,8 @@ export function AdminScreen({ onExit }: { onExit: () => void }) {
         className="screen__body scroll-soft scroll-soft--onDark"
         style={{ overflowY: 'auto', justifyContent: 'safe center', padding: '8px 10px' }}
       >
+        <OverviewCard adminKey={key} />
+
         <div className="card2" style={{ width: 'min(100%, 760px)' }}>
           <p style={{ margin: '0 0 10px', fontWeight: 800 }}>Добавить вариант</p>
 
