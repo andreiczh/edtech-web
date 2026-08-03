@@ -214,6 +214,154 @@ function BankList({
   )
 }
 
+interface Invite {
+  code: string
+  note: string
+  uses: number
+  max_uses: number
+  active: boolean
+}
+
+/**
+ * Коды доступа. Живут в базе, а не в переменной Render: выдать код классу,
+ * исчерпать лимит или отключить один — всё отсюда, без редеплоя.
+ * Пока активных кодов нет, регистрация на проде ЗАКРЫТА (fail-closed).
+ */
+function Invites({ adminKey }: { adminKey: string }) {
+  const [list, setList] = useState<Invite[]>([])
+  const [note, setNote] = useState('')
+  const [maxUses, setMaxUses] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const d = (await api('/admin/invites', adminKey)) as { invites: Invite[] }
+      setList(d.invites ?? [])
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    }
+  }, [adminKey])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const create = async () => {
+    setErr(null)
+    try {
+      await api('/admin/invites', adminKey, {
+        method: 'POST',
+        // Пустой код — сервер придумает сам: короче и безопаснее наспех
+        // сочинённого «qwerty».
+        body: JSON.stringify({ note, max_uses: Number(maxUses) || 0 }),
+      })
+      setNote('')
+      setMaxUses('')
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const active = list.filter((i) => i.active).length
+
+  return (
+    <div className="card2" style={{ width: 'min(100%, 760px)' }}>
+      <p style={{ margin: '0 0 4px', fontWeight: 800 }}>Коды доступа</p>
+      <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--card-ink-dim)' }}>
+        {active > 0
+          ? `Регистрация открыта: ${active} активных кода.`
+          : 'Активных кодов нет — регистрация закрыта для всех новых.'}
+      </p>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        <input
+          className="auth-input"
+          style={{ flex: 1, minWidth: 160 }}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="для кого (например: 11А)"
+        />
+        <input
+          className="auth-input"
+          style={{ width: 130 }}
+          value={maxUses}
+          onChange={(e) => setMaxUses(e.target.value.replace(/\D/g, ''))}
+          placeholder="лимит (0 = ∞)"
+        />
+        <Pill onClick={() => void create()}>Создать код</Pill>
+      </div>
+
+      {list.map((i) => (
+        <div className="rowbetween" key={i.code} style={{ padding: '5px 0' }}>
+          <span style={{ opacity: i.active ? 1 : 0.5 }}>
+            <b style={{ fontFamily: 'monospace' }}>{i.code}</b>
+            {i.note && ` — ${i.note}`}
+            <span style={{ color: 'var(--card-ink-dim)' }}>
+              {' '}
+              · использован {i.uses}
+              {i.max_uses > 0 ? ` из ${i.max_uses}` : ' раз'}
+            </span>
+          </span>
+          <Pill
+            quiet
+            onClick={() =>
+              void api(`/admin/invites/${i.code}/toggle`, adminKey, {
+                method: 'POST',
+                body: JSON.stringify({ active: !i.active }),
+              }).then(load)
+            }
+          >
+            {i.active ? 'отключить' : 'включить'}
+          </Pill>
+        </div>
+      ))}
+      {err && <p style={{ color: '#b4485c', fontWeight: 700, margin: '8px 0 0' }}>{err}</p>}
+    </div>
+  )
+}
+
+/** Проверка канала алертов. Без неё владелец узнаёт, что Telegram настроен
+    неверно, ровно тогда, когда что-то упало — то есть слишком поздно. */
+function AlertCheck({ adminKey }: { adminKey: string }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'ok'>('idle')
+  const [err, setErr] = useState<string | null>(null)
+  return (
+    <div className="card2" style={{ width: 'min(100%, 760px)' }}>
+      <div className="rowbetween">
+        <span>
+          <b>Алерты в Telegram</b>
+          <span style={{ color: 'var(--card-ink-dim)' }}>
+            {' '}
+            — проверь, что сообщения доходят
+          </span>
+        </span>
+        <Pill
+          disabled={state === 'busy'}
+          onClick={() => {
+            setState('busy')
+            setErr(null)
+            void api('/admin/test_alert', adminKey, { method: 'POST' })
+              .then(() => setState('ok'))
+              .catch((e) => {
+                setState('idle')
+                setErr(e instanceof Error ? e.message : String(e))
+              })
+          }}
+        >
+          {state === 'busy' ? 'Отправляю…' : 'Отправить тест'}
+        </Pill>
+      </div>
+      {state === 'ok' && (
+        <p style={{ color: '#2f7d63', fontWeight: 700, margin: '8px 0 0' }}>
+          Отправлено — проверь Telegram.
+        </p>
+      )}
+      {err && <p style={{ color: '#b4485c', fontWeight: 700, margin: '8px 0 0' }}>{err}</p>}
+    </div>
+  )
+}
+
 /** «Забыл пароль» без почты и телефона решает владелец: вводит ник, сервер
     генерирует новый пароль и показывает его ОДИН раз — продиктуй ученику. */
 function ResetPassword({ adminKey }: { adminKey: string }) {
@@ -538,9 +686,13 @@ export function AdminScreen({ onExit }: { onExit: () => void }) {
           </div>
         </div>
 
+        <Invites adminKey={key} />
+
         <BankList list={list} adminKey={key} onChanged={() => refresh(key)} />
 
         <ResetPassword adminKey={key} />
+
+        <AlertCheck adminKey={key} />
       </div>
     </div>
   )

@@ -178,6 +178,15 @@ def ensure_schema() -> None:
         "CREATE TABLE IF NOT EXISTS voice_daily ("
         " student_id TEXT NOT NULL, day TEXT NOT NULL,"
         " n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (student_id, day))",
+        # Коды приглашений. Переехали из переменной окружения в базу
+        # (03.08.2026): владелец не должен ходить в панель Render и делать
+        # редеплой, чтобы выдать код классу или забрать его у одного человека.
+        # Переменная INVITE_CODES осталась как «первый ключ» для холодного
+        # старта — ею создаётся первый код, когда база ещё пустая.
+        "CREATE TABLE IF NOT EXISTS invites ("
+        " code TEXT PRIMARY KEY, note TEXT, uses INTEGER NOT NULL DEFAULT 0,"
+        " max_uses INTEGER NOT NULL DEFAULT 0,"
+        " active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS disputes ("
         " id TEXT PRIMARY KEY, student_id TEXT NOT NULL, kind TEXT NOT NULL,"
         " variant TEXT, persona TEXT, score INTEGER, max_score INTEGER,"
@@ -770,3 +779,46 @@ def voice_counts(day: str) -> dict:
     """Счётчики всех учеников за день — для прогрева памяти на старте."""
     rows = _exec("SELECT student_id, n FROM voice_daily WHERE day=?", (day,)).fetchall()
     return {r[0]: int(r[1]) for r in rows}
+
+
+# --------------------------------------------------------- Коды приглашений
+
+def invite_add(code: str, note: str, max_uses: int) -> bool:
+    """Новый код. False — такой уже есть (перетирать чужой код опасно)."""
+    try:
+        _exec("INSERT INTO invites(code, note, uses, max_uses, active, created_at)"
+              " VALUES(?,?,0,?,1,?)", (code, note, int(max_uses), _now()))
+        return True
+    except Exception:  # noqa: BLE001 — нарушение уникальности = код занят
+        return False
+
+
+def invite_check(code: str) -> bool:
+    """Годен ли код: существует, включён и не исчерпан. Без побочных эффектов —
+    расход считается ОТДЕЛЬНО (invite_use), уже после успешной регистрации."""
+    row = _exec("SELECT active, uses, max_uses FROM invites WHERE code=?",
+                (code,)).fetchone()
+    if row is None or not row[0]:
+        return False
+    return row[2] <= 0 or row[1] < row[2]   # max_uses<=0 — без ограничения
+
+
+def invite_use(code: str) -> None:
+    _exec("UPDATE invites SET uses = uses + 1 WHERE code=?", (code,))
+
+
+def invite_set_active(code: str, active: bool) -> bool:
+    cur = _exec("UPDATE invites SET active=? WHERE code=?", (1 if active else 0, code))
+    return bool(getattr(cur, "rowcount", 0))
+
+
+def invites_list() -> list[dict]:
+    rows = _exec("SELECT code, note, uses, max_uses, active, created_at FROM invites"
+                 " ORDER BY created_at DESC").fetchall()
+    return [{"code": r[0], "note": r[1], "uses": r[2], "max_uses": r[3],
+             "active": bool(r[4]), "created_at": r[5]} for r in rows]
+
+
+def invites_count() -> int:
+    row = _exec("SELECT COUNT(*) FROM invites WHERE active=1").fetchone()
+    return int(row[0]) if row else 0

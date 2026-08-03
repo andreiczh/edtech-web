@@ -419,23 +419,57 @@ INVITE_CODES = frozenset(
 )
 
 
-def _check_invite(code: str) -> None:
-    if not INVITE_CODES:
-        raise HTTPException(
-            status_code=503,
-            detail="Регистрация закрыта: коды доступа не настроены на сервере.",
-        )
-    # any() по всем кодам, БЕЗ раннего выхода по длине: время ответа не должно
-    # подсказывать перебором, похож ли код на настоящий.
+def _invite_env_ok(code: str) -> bool:
+    """Код из переменной окружения — «первый ключ» для холодного старта.
+    Сравнение по всем кодам БЕЗ раннего выхода: время ответа не должно
+    подсказывать перебором, похож ли код на настоящий."""
     ok = False
     for c in INVITE_CODES:
         if hmac.compare_digest(code, c):
             ok = True
-    if not ok:
+    return ok
+
+
+async def _check_invite(code: str) -> None:
+    """Код доступа: сначала база (управляется из админки), потом переменная.
+
+    Порядок такой намеренно. Коды в базе — рабочий инструмент владельца:
+    выдал классу, исчерпал лимит, отключил один — всё без похода в панель
+    Render и без редеплоя. Переменная INVITE_CODES осталась ровно для одного
+    случая: база ещё пуста, и надо впустить первого человека, который заведёт
+    остальные коды.
+
+    Fail-closed сохраняется: нет ни кодов в базе, ни переменной — регистрация
+    закрыта. Забытая настройка закрывает дверь, а не распахивает.
+    """
+    db_ok = False
+    if _storage_ok and code:
+        try:
+            db_ok = await asyncio.to_thread(storage.invite_check, code)
+        except Exception as e:  # noqa: BLE001
+            print(f"[invite] база не ответила ({type(e).__name__}) — проверяю только переменную")
+    if db_ok:
+        await asyncio.to_thread(storage.invite_use, code)
+        return
+    if _invite_env_ok(code):
+        return
+    # Различать «кодов нет вовсе» и «код неверный» полезно ВЛАДЕЛЬЦУ, а не
+    # постороннему: первое видно в /health, наружу — одна и та же фраза.
+    has_any = bool(INVITE_CODES)
+    if not has_any and _storage_ok:
+        try:
+            has_any = await asyncio.to_thread(storage.invites_count) > 0
+        except Exception:  # noqa: BLE001
+            pass
+    if not has_any:
         raise HTTPException(
-            status_code=403,
-            detail="Неверный код доступа. Спроси код у того, кто поделился ссылкой.",
+            status_code=503,
+            detail="Регистрация пока закрыта. Напиши тому, кто дал ссылку.",
         )
+    raise HTTPException(
+        status_code=403,
+        detail="Неверный код доступа. Спроси код у того, кто поделился ссылкой.",
+    )
 
 _ACCOUNT_CACHE: dict[str, float] = {}
 _ACCOUNT_CACHE_TTL = 600.0
@@ -566,6 +600,7 @@ def _budget_sync_bg() -> None:
 
 
 # Алерты владельцу вынесены в alerts.py — блок без зависимостей на main.
+import alerts  # noqa: E402
 from alerts import note_failure, notify_owner  # noqa: E402
 
 
@@ -826,7 +861,7 @@ async def auth_register(request: Request, body: dict = Body(...)):
         raise HTTPException(status_code=429, detail="Слишком много попыток — подожди минутку.")
     # Код доступа проверяется ПЕРВЫМ, до валидации полей: не-приглашённому
     # незачем знать, какие у нас правила на ники и пароли.
-    _check_invite(str(body.get("invite") or "").strip())
+    await _check_invite(str(body.get("invite") or "").strip())
     nickname = str(body.get("nickname") or "").strip()
     password = str(body.get("password") or "")
     exam = str(body.get("exam") or "ege")
@@ -1438,6 +1473,90 @@ async def admin_task_toggle(tid: str, x_admin_key: str | None = Header(None)):
     return {"active": state}
 
 
+def _registration_state() -> str:
+    """Открыта ли регистрация — видно без админ-ключа, но БЕЗ самих кодов."""
+    db = 0
+    if _storage_ok:
+        try:
+            db = storage.invites_count()
+        except Exception:  # noqa: BLE001
+            db = -1
+    if db > 0:
+        return f"по кодам ({db} в базе)"
+    if INVITE_CODES:
+        return f"по кодам ({len(INVITE_CODES)} из переменной, заведи в админке)"
+    return "ЗАКРЫТА: заведи код в админке или задай INVITE_CODES"
+
+
+@app.post("/admin/test_alert")
+async def admin_test_alert(x_admin_key: str | None = Header(None)):
+    """Проверка канала алертов одной кнопкой.
+
+    Без неё владелец узнавал бы, что Telegram настроен неверно, ровно в тот
+    момент, когда что-то упало, — то есть когда алерт уже не придёт.
+    Кулдаун обходим намеренно: это ручная проверка, а не событие.
+    """
+    _require_admin(x_admin_key)
+    if not (alerts.TG_TOKEN and alerts.TG_CHAT):
+        raise HTTPException(
+            status_code=503,
+            detail="Telegram не настроен: задай TELEGRAM_BOT_TOKEN и "
+                   "TELEGRAM_CHAT_ID в переменных Render (docs/MONITORING.md).",
+        )
+    ok, detail = await asyncio.to_thread(alerts.send_now,
+                                         "Проверка связи. Если видишь это "
+                                         "сообщение — алерты настроены верно.")
+    if not ok:
+        raise HTTPException(status_code=502, detail=f"Телеграм не принял: {detail}")
+    return {"sent": True}
+
+
+@app.get("/admin/invites")
+async def admin_invites(x_admin_key: str | None = Header(None)):
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    return {"invites": await asyncio.to_thread(storage.invites_list)}
+
+
+@app.post("/admin/invites")
+async def admin_invite_add(body: dict = Body(...),
+                           x_admin_key: str | None = Header(None)):
+    """Новый код. Пустой code — сервер придумает сам: так короче и безопаснее,
+    чем «qwerty», который владелец сочинит второпях."""
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    code = str(body.get("code") or "").strip()
+    if not code:
+        alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
+        code = "".join(secrets.choice(alphabet) for _ in range(8))
+    if not re.fullmatch(r"[A-Za-z0-9\-_]{4,64}", code):
+        raise HTTPException(status_code=422,
+                            detail="Код: 4-64 символа, латиница, цифры, дефис.")
+    try:
+        max_uses = max(0, int(body.get("max_uses") or 0))
+    except (TypeError, ValueError):
+        max_uses = 0
+    ok = await asyncio.to_thread(storage.invite_add, code,
+                                 str(body.get("note") or "").strip()[:120], max_uses)
+    if not ok:
+        raise HTTPException(status_code=409, detail="Такой код уже есть.")
+    return {"code": code, "max_uses": max_uses}
+
+
+@app.post("/admin/invites/{code}/toggle")
+async def admin_invite_toggle(code: str, body: dict = Body(default={}),
+                              x_admin_key: str | None = Header(None)):
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    active = bool(body.get("active"))
+    if not await asyncio.to_thread(storage.invite_set_active, code, active):
+        raise HTTPException(status_code=404, detail="Код не найден.")
+    return {"code": code, "active": active}
+
+
 @app.get("/admin/backup")
 async def admin_backup(images: int = 0,
                        x_admin_key: str | None = Header(None)):
@@ -2001,8 +2120,7 @@ def health():
         "memory": storage.describe() if _storage_ok else "выключена",
         # Показываем ТОЛЬКО число кодов, не сами коды. «закрыта» здесь — не
         # ошибка, а сигнал владельцу: задай INVITE_CODES в панели Render.
-        "registration": (f"по кодам ({len(INVITE_CODES)} шт)"
-                         if INVITE_CODES else "ЗАКРЫТА: задай INVITE_CODES"),
+        "registration": _registration_state(),
         # Сводка расхода за сегодня — секретов не содержит, а увидеть «сколько
         # уже сожгли» можно без ключа админки. Полная разбивка — /admin/usage.
         "usage_today": _usage_today(),

@@ -66,3 +66,24 @@ def note_failure(node: str, detail: str = "") -> None:
         notify_owner(f"fail:{node}",
                      f"{node.upper()}: {len(win)} сбоев за 10 минут. "
                      f"Последний: {detail[:120]}")
+
+
+def send_now(text: str) -> tuple[bool, str]:
+    """Синхронная отправка БЕЗ кулдауна — для ручной проверки канала из
+    админки. Возвращает (успех, детали): владельцу нужна причина отказа,
+    иначе «не пришло» неотличимо от «неверный chat_id»."""
+    if not (TG_TOKEN and TG_CHAT):
+        return False, "не заданы TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID"
+    try:
+        r = httpx.post(
+            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+            json={"chat_id": TG_CHAT, "text": f"[Pingo] {text}"[:3900]},
+            timeout=15.0,
+        )
+    except Exception as e:  # noqa: BLE001
+        return False, f"{type(e).__name__}"
+    if r.status_code != 200:
+        # Тело телеграма содержит внятную причину («chat not found»),
+        # но не токен — показать владельцу можно.
+        return False, f"HTTP {r.status_code}: {r.text[:160]}"
+    return True, "ok"
