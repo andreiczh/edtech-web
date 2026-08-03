@@ -18,5 +18,9 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Тесты гоняет node (npm run test), в бандл они не попадают. Из сборки
+  // исключены, потому что используют process/globalThis, а @types/node тут
+  // нет и поставить его нельзя: npm install переписывает лок-файл (CLAUDE.md).
+  "exclude": ["src/**/*.test.ts"]
 }

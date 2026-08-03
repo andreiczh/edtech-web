@@ -10,6 +10,7 @@
  * 40 — по 20 секунд на каждый из четырёх вопросов; 41 — по 40 секунд на каждый
  * из пяти ответов; 42 — три минуты речи.
  */
+import { mergeSolved, pickVariants } from './selection'
 
 export type TaskId = 39 | 40 | 41 | 42
 export type TaskKind = 'reading' | 'dialogue' | 'interview' | 'monologue'
@@ -403,15 +404,24 @@ export async function syncRemoteTasks(): Promise<void> {
 
 /**
  * Прогресс с сервера: какие варианты ученик сдавал на ЛЮБОМ устройстве.
- * Сервер знает это из записанных результатов; здесь мы просто доливаем их в
- * локальные отметки, чтобы выдача сессий вычёркивала уже сделанное.
+ *
+ * Источник правды — СЕРВЕР: у него есть время каждой сдачи, а значит честная
+ * хронология. localStorage остаётся кэшем (мгновенная отрисовка без сети) и
+ * буфером для того, что сервер ещё не знает: разбор мог не доехать из-за сети,
+ * но вариант ученик уже решил, и повторно подсовывать его нечестно.
+ *
+ * Раньше здесь стоял цикл markVariantSolved по ответу сервера. Это ломало
+ * порядок: каждый вызов двигает вариант в конец, а сервер отдавал их
+ * произвольно — «самые давние» переставали быть давними, и добор в сессию
+ * выдавал случайные повторы (03.08.2026).
  */
 export async function syncServerProgress(identity: string): Promise<void> {
   try {
     const res = await fetch(`${BACKEND}/progress`, { headers: { 'X-Device': identity } })
     if (!res.ok) return
     const data = (await res.json()) as { solved?: string[] }
-    for (const vid of data.solved ?? []) markVariantSolved(vid)
+    const fromServer = (data.solved ?? []).filter((s) => typeof s === 'string')
+    writeSolved(mergeSolved(fromServer, solvedVariantIds()))
   } catch {
     /* без сети останутся локальные отметки */
   }
@@ -423,9 +433,11 @@ export function variantById(taskId: TaskId, variantId: string): TaskVariant | un
 
 /* ------------------------------------------- Память о пройденном (localStorage)
  *
- * Базы нет — это честная заглушка до логирования сессий: переживает перезагрузку
- * страницы, но живёт только в этом браузере. Порядок в массиве = хронология,
- * этим пользуется добор давно решённых вариантов в сессию.
+ * КЭШ, а не источник правды: правда живёт на сервере (таблица results, где у
+ * каждой сдачи есть время). Локальная копия нужна для двух вещей — мгновенно
+ * отрисовать прогресс без сети и не потерять отметку, если разбор не доехал.
+ * Порядок в массиве = хронология, самые давние первыми: на этом стоит добор
+ * давно решённых вариантов в сессию (см. pickSession).
  */
 
 const SOLVED_KEY = 'pingo.solvedVariants.v2'
@@ -439,15 +451,18 @@ export function solvedVariantIds(): string[] {
   }
 }
 
-export function markVariantSolved(id: string) {
+function writeSolved(ids: string[]) {
   try {
-    // Повтор варианта двигает его в конец: он снова «самый свежий», и добор
-    // в следующую сессию возьмёт его в последнюю очередь.
-    const next = [...solvedVariantIds().filter((s) => s !== id), id]
-    localStorage.setItem(SOLVED_KEY, JSON.stringify(next))
+    localStorage.setItem(SOLVED_KEY, JSON.stringify(ids))
   } catch {
     /* приватный режим — живём без памяти */
   }
+}
+
+export function markVariantSolved(id: string) {
+  // Повтор варианта двигает его в конец: он снова «самый свежий», и добор
+  // в следующую сессию возьмёт его в последнюю очередь.
+  writeSolved([...solvedVariantIds().filter((s) => s !== id), id])
 }
 
 export function taskProgress(id: TaskId): { done: number; total: number } {
@@ -464,13 +479,14 @@ export function taskProgress(id: TaskId): { done: number; total: number } {
  */
 export function pickSession(id: TaskId, want = 5): TaskVariant[] {
   const variants = getVariants(id)
-  const solvedOrder = solvedVariantIds()
-  const solved = new Set(solvedOrder)
-  const fresh = variants.filter((v) => !solved.has(v.id))
-  const stale = solvedOrder
-    .map((vid) => variants.find((v) => v.id === vid))
-    .filter((v): v is TaskVariant => Boolean(v))
-  return [...fresh, ...stale].slice(0, Math.min(want, variants.length))
+  const byId = new Map(variants.map((v) => [v.id, v]))
+  // Сам отбор — в selection.ts: там он без localStorage и покрыт тестами.
+  const chosen = pickVariants(
+    variants.map((v) => v.id),
+    solvedVariantIds(),
+    want,
+  )
+  return chosen.map((vid) => byId.get(vid)!).filter(Boolean)
 }
 
 /** DEMO: по одному варианту каждого типа — первый нерешённый (или самый давний). */

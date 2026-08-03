@@ -466,10 +466,18 @@ def account_exists(acc_id: str) -> bool:
 
 
 def solved_variants(student_id: str) -> list[str]:
-    """Какие варианты этот ученик уже сдавал — по записанным результатам.
-    Нужно, чтобы выдача сессий вычёркивала пройденное на ЛЮБОМ устройстве."""
-    rows = _exec("SELECT DISTINCT variant FROM results WHERE student_id=? AND variant<>''",
-                 (student_id,)).fetchall()
+    """Сданные варианты В ХРОНОЛОГИЧЕСКОМ ПОРЯДКЕ: самые давние первыми.
+
+    Порядок здесь — не украшение: фронт добирает в сессию давно решённые
+    варианты именно с начала списка. Раньше стоял SELECT DISTINCT без
+    ORDER BY, порядок был произвольный, и синхронизация перемешивала
+    локальную хронологию (03.08.2026). Ключ сортировки — ПОСЛЕДНЯЯ сдача
+    варианта: пересдал сегодня — уходит в конец очереди на повтор.
+    """
+    rows = _exec(
+        "SELECT variant, MAX(created_at) AS last FROM results"
+        " WHERE student_id=? AND variant<>'' GROUP BY variant ORDER BY last ASC",
+        (student_id,)).fetchall()
     return [r[0] for r in rows]
 
 

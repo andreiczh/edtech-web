@@ -191,13 +191,13 @@ export function RegisterScreen({ onDone }: { onDone: (u: AuthUser) => void }) {
       <button
         type="button"
         className="auth-btn"
-        disabled={busy || !exam || password.length < 4 || !invite.trim()}
+        disabled={busy || !exam || password.length < 8 || !invite.trim()}
         onClick={() => void submit()}
         title={
           !exam
             ? 'Выбери ЕГЭ или «другое»'
-            : password.length < 4
-              ? 'Пароль — минимум 4 символа'
+            : password.length < 8
+              ? 'Пароль — минимум 8 символов'
               : !invite.trim()
                 ? 'Нужен код доступа'
                 : undefined
