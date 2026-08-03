@@ -259,11 +259,15 @@ export function BottomBar({
   onQuit,
   onFeedback,
   quitLabel = 'QUIT',
+  quitIcon = <ExitIcon />,
 }: {
   caption?: ReactNode
   onQuit?: () => void
   onFeedback?: () => void
   quitLabel?: string
+  /** Иконка левой кнопки. Отключается (`null`) там, где кнопка не про выход:
+      значок «выйти» рядом со словом «Разбор» обещал бы не то действие. */
+  quitIcon?: ReactNode
 }) {
   return (
     <footer className="bottombar2">
@@ -272,7 +276,8 @@ export function BottomBar({
           Feedback не съехали влево. */}
       {onQuit ? (
         <Pill onClick={onQuit}>
-          {quitLabel} <ExitIcon />
+          {quitLabel}
+          {quitIcon ? <> {quitIcon}</> : null}
         </Pill>
       ) : (
         <span />

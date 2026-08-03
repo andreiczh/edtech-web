@@ -11,10 +11,18 @@
  *  - префикса «Ответ от ИИ» нет — в карточке сразу текст;
  *  - если ответ длинный, прокручивается САМА карточка (max-height + overflow),
  *    иначе кнопка микрофона уезжала бы за нижнюю панель.
+ *
+ * Сверху (04.08.2026) — ТЕМА беседы. Ученик видит только её название и одну
+ * строку подсказки; ступени разговора остаются на сервере, иначе человек
+ * перестаёт разговаривать и начинает отвечать по списку.
  */
+import { useCallback, useState } from 'react'
+
 import { useSettings } from '../account/me'
 import { MicButton } from '../components/MicButton'
 import { BottomBar } from '../design/ui'
+import { ReviewCard } from '../talk/ReviewCard'
+import { requestTalkReview, type TalkReview } from '../talk/review'
 import { useConversation, type ConversationState } from '../useConversation'
 
 const CAPTIONS: Record<ConversationState, string> = {
@@ -24,22 +32,78 @@ const CAPTIONS: Record<ConversationState, string> = {
   speaking: 'Отвечаю…',
 }
 
+/** Столько реплик нужно, чтобы разбор имел смысл (то же число на сервере).
+    Меньше — и разбирать нечего, а запрос к модели стоит столько же. */
+const MIN_TURNS_FOR_REVIEW = 3
+
 export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
-  const { state, toggle, transcript, reply, error, latency } = useConversation()
+  const {
+    state,
+    toggle,
+    transcript,
+    reply,
+    error,
+    latency,
+    topic,
+    turns,
+    newTopic,
+    endSession,
+    getHistory,
+  } = useConversation()
   /* Режим «чисто аудио» (настройка кабинета): карточка с текстом ответа не
      рисуется вовсе — только круги и голос, как в живом разговоре. Ошибки
      показываются ВСЕГДА: молчание вместо объяснения — худший из отказов. */
   const { showText } = useSettings()
+
+  const [review, setReview] = useState<TalkReview | null>(null)
+  const [reviewing, setReviewing] = useState(false)
+  const [reviewError, setReviewError] = useState<string | null>(null)
+
+  const runReview = useCallback(async () => {
+    if (reviewing) return
+    setReviewing(true)
+    setReviewError(null)
+    try {
+      setReview(await requestTalkReview(getHistory(), topic?.id ?? null))
+    } catch (e) {
+      setReviewError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setReviewing(false)
+    }
+  }, [getHistory, reviewing, topic])
+
+  const canReview = turns >= MIN_TURNS_FOR_REVIEW
 
   /* Шапку с тумблером рисует App: она общая для верхних экранов и не
      пересоздаётся при переключении вкладок — в этом и есть «бесшовность». */
   return (
     <div className="screenbody">
       <div className="screen__body">
-        {((showText && reply) || error) && (
+        {topic && (
+          <div className="topicbar">
+            <div className="topicbar__text">
+              <span className="topicbar__label">Тема разговора</span>
+              <b className="topicbar__title">{topic.title}</b>
+              <span className="topicbar__hint">{topic.hint}</span>
+            </div>
+            {/* Смена темы стирает беседу — она была про другое. Поэтому кнопка
+                недоступна, пока идёт запись или ответ: обрывать себя на
+                полуслове кнопкой в углу экрана человек не планировал. */}
+            <button
+              type="button"
+              className="pill pressable topicbar__swap"
+              onClick={newTopic}
+              disabled={state !== 'idle'}
+            >
+              Другая
+            </button>
+          </div>
+        )}
+
+        {((showText && reply) || error || reviewError) && (
           <div className="card2 answer scroll-soft" aria-live="polite">
-            {error ? (
-              <p className="dialog__err">{error}</p>
+            {error || reviewError ? (
+              <p className="dialog__err">{error ?? reviewError}</p>
             ) : (
               <>
                 <p>{reply}</p>
@@ -87,8 +151,26 @@ export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
       </div>
 
       {/* QUIT здесь некуда: разговор — корневой экран, выходить из него не во
-          что. Кнопки без смысла быть не должно. */}
-      <BottomBar caption={CAPTIONS[state]} onFeedback={onFeedback} />
+          что. Левый слот отдан разбору — он появляется, только когда набралось
+          что разбирать, чтобы кнопка никогда не жгла запрос впустую. */}
+      <BottomBar
+        caption={CAPTIONS[state]}
+        onFeedback={onFeedback}
+        onQuit={canReview ? runReview : undefined}
+        quitLabel={reviewing ? 'Разбираю…' : 'Разбор'}
+        quitIcon={null}
+      />
+
+      {review && (
+        <ReviewCard
+          review={review}
+          onClose={() => setReview(null)}
+          onNewTopic={() => {
+            setReview(null)
+            endSession()
+          }}
+        />
+      )}
     </div>
   )
 }

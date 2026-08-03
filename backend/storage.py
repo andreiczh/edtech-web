@@ -269,6 +269,38 @@ def save_result(student_id: str, kind: str, variant: str, score: int,
     _maybe_rebuild_global_digest(kind)
 
 
+def save_talk_mistakes(student_id: str, errors: list) -> None:
+    """Ошибки из разбора РАЗГОВОРА — в ту же копилку, что и ошибки заданий.
+
+    Отдельная функция, а не `save_result` с нулевым баллом: разговор не
+    оценивается баллом, и строка в `results` со счётом 0 из 0 испортила бы и
+    среднюю успеваемость в сводке, и начисление XP (оно живёт в save_result).
+    Здесь только память об ошибках — ровно то, ради чего копилка и заведена:
+    частые ошибки ученика подмешиваются в промпты следующих разборов.
+    """
+    if not student_id or not errors:
+        return
+    now = _now()
+    if _IS_PG:
+        _exec("INSERT INTO students(id, created_at) VALUES(?, ?) ON CONFLICT (id) DO NOTHING",
+              (student_id, now))
+    else:
+        _exec("INSERT OR IGNORE INTO students(id, created_at) VALUES(?, ?)",
+              (student_id, now))
+    for e in errors[:10]:
+        if not isinstance(e, dict):
+            continue
+        quote = str(e.get("quote") or "").strip()
+        if not quote:
+            continue
+        _exec("INSERT INTO mistakes(id, student_id, kind, cat, quote, correction,"
+              " explanation, created_at) VALUES(?,?,?,?,?,?,?,?)",
+              (str(uuid.uuid4()), student_id, "talk", "talk", quote[:_TRUNC],
+               str(e.get("correction") or "")[:_TRUNC],
+               str(e.get("explanation") or "")[:_TRUNC], now))
+    _rebuild_user_digest(student_id)
+
+
 def _upsert_digest(scope: str, text: str) -> None:
     # Синтаксис ON CONFLICT одинаков в SQLite 3.24+ и Postgres.
     # Жёсткая крышка длины: выжимка едет в промпт КАЖДОГО запроса, и токены
@@ -870,7 +902,7 @@ def overview(month: str, msk_today: str) -> dict:
     # Скорости: sum/n по каждому этапу. n=0 -> None, фронт покажет «нет данных»
     # вместо нуля — ноль читался бы как «мгновенно», а это неправда.
     latency = {}
-    for stage in ("conv_stt", "conv_answer", "task_stt", "task_llm"):
+    for stage in ("conv_stt", "conv_answer", "task_stt", "task_llm", "talk_review"):
         ms = usage.get(f"lat_{stage}_ms", 0)
         n = usage.get(f"lat_{stage}_n", 0)
         latency[stage] = {"avg_sec": round(ms / n / 1000, 2), "n": n} if n else None

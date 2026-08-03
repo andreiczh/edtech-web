@@ -3,23 +3,38 @@
 import { getSettings } from './account/me'
 import { backendUnreachableMessage, httpErrorMessage } from './backendError'
 import { identityId } from './auth/auth'
+import { clearTopic, currentTopic, fetchTopic, type Topic } from './talk/topic'
+import type { DialogTurn } from './talk/review'
 
 const DIALOG_KEY = 'pingo.dialog.v1'
 
-function loadDialogHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
+/* Две разные глубины памяти, и это не путаница, а расчёт.
+ *
+ * SESSION_KEEP — сколько реплик храним у себя. Из них собирается разбор в
+ * конце беседы, поэтому нужен ВЕСЬ разговор, а не хвост.
+ *
+ * SENT_TURNS — сколько уезжает с каждой репликой в промпт. Было 10 (пять
+ * обменов) — собеседник забывал, о чём говорили три минуты назад, и переспрашивал
+ * уже отвеченное. Стало 16. Дальше растить незачем: ограничитель тут не бюджет
+ * (он считает ЗАПРОСЫ, а история стоит только токенов), а лимит 50k токенов в
+ * минуту на ключ. */
+const SESSION_KEEP = 48
+const SENT_TURNS = 16
+
+function loadDialogHistory(): DialogTurn[] {
   try {
     const raw = sessionStorage.getItem(DIALOG_KEY)
     if (!raw) return []
     const items = JSON.parse(raw) as Array<{ role: string; content: string }>
     return items
       .filter((i) => (i.role === 'user' || i.role === 'assistant') && i.content)
-      .slice(-10) as Array<{ role: 'user' | 'assistant'; content: string }>
+      .slice(-SESSION_KEEP) as DialogTurn[]
   } catch {
     return []
   }
 }
 
-function saveDialogHistory(items: Array<{ role: 'user' | 'assistant'; content: string }>) {
+function saveDialogHistory(items: DialogTurn[]) {
   try {
     sessionStorage.setItem(DIALOG_KEY, JSON.stringify(items))
   } catch {
@@ -44,6 +59,17 @@ export interface ConversationApi {
   reply: string // текст ответа ИИ (наполняется по мере стрима)
   error: string | null // текст последней ошибки (или null)
   latency: Record<string, number> | null // { stt, first_audio, total }
+  /** Тема беседы: название для ученика, план беседы остался на сервере. */
+  topic: Topic | null
+  /** Сменить тему — беседа начинается заново, поэтому история стирается. */
+  newTopic: () => void
+  /** Сколько раз ученик говорил: по этому числу решается, есть ли что разбирать. */
+  turns: number
+  /** Вся история сессии — вход разбора. Не state: копировать массив на каждую
+      реплику незачем, экрану достаточно счётчика выше. */
+  getHistory: () => DialogTurn[]
+  /** Разговор разобран и закрыт: чистим историю и берём новую тему. */
+  endSession: () => void
 }
 
 // Адрес бэкенда. По умолчанию ПУСТОЙ = тот же origin, что отдал страницу
@@ -56,9 +82,15 @@ export function useConversation(): ConversationApi {
   const [reply, setReply] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [latency, setLatency] = useState<Record<string, number> | null>(null)
+  const [topic, setTopic] = useState<Topic | null>(() => currentTopic())
+  const [turns, setTurns] = useState(
+    () => loadDialogHistory().filter((m) => m.role === 'user').length,
+  )
 
   const stateRef = useRef(state)
   stateRef.current = state
+  const topicRef = useRef(topic)
+  topicRef.current = topic
 
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -95,9 +127,7 @@ export function useConversation(): ConversationApi {
       раньше стирало историю: компонент размонтировался, и тьютор всё забывал),
       но умирает вместе со вкладкой БРАУЗЕРА. Сервер историю не хранит
       намеренно: приватность + ноль состояния. */
-  const historyRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>(
-    loadDialogHistory(),
-  )
+  const historyRef = useRef<DialogTurn[]>(loadDialogHistory())
 
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
@@ -275,7 +305,12 @@ export function useConversation(): ConversationApi {
         // тьютор помнит, о чём шла речь. Хранится только в этой вкладке
         // (historyRef): сервер намеренно ничего не запоминает, закрыл вкладку —
         // диалог забыт. Дёшево по построению: ~10 коротких строк.
-        fd.append('history', JSON.stringify(historyRef.current))
+        // В промпт уезжает ХВОСТ истории, а у себя мы держим всю сессию —
+        // из неё собирается разбор в конце.
+        fd.append('history', JSON.stringify(historyRef.current.slice(-SENT_TURNS)))
+        // Тема беседы: по её id сервер достаёт скрытый план. Пусто — разговор
+        // идёт без плана, как до сценариев.
+        fd.append('topic', topicRef.current?.id ?? '')
         // Собеседник: голос и (в будущем) характер. Читаем на каждый запрос,
         // а не при монтировании — сменил персону в настройках, и уже следующая
         // реплика звучит новым голосом, без перезахода в разговор.
@@ -340,16 +375,16 @@ export function useConversation(): ConversationApi {
           }
         }
         streamDoneRef.current = true
-        // Реплика состоялась целиком — дописываем пару в историю и режем до
-        // 10 последних записей (5 обменов): больше не нужно ни тьютору, ни
-        // токенам. Ошибочные и пустые обмены в историю не попадают.
+        // Реплика состоялась целиком — дописываем пару в историю сессии.
+        // Ошибочные и пустые обмены в историю не попадают.
         if (finalUser && finalReply) {
           historyRef.current = [
             ...historyRef.current,
             { role: 'user' as const, content: finalUser },
             { role: 'assistant' as const, content: finalReply },
-          ].slice(-10)
+          ].slice(-SESSION_KEEP)
           saveDialogHistory(historyRef.current)
+          setTurns((n) => n + 1)
         }
         // Стрим кончился, а звука нет/уже доиграл — вернёмся в покой.
         // pendingRef — счётчик недоигранных фраз на пути Web Audio, queue/playing
@@ -439,6 +474,38 @@ export function useConversation(): ConversationApi {
     }
   }, [startRecording, stopRecording, stopSpeaking])
 
+  /** Стереть беседу и взять свежую тему. Одна операция на два случая: ученик
+      сам нажал «другая тема» и разговор закончился разбором. В обоих случаях
+      старая история собеседнику только мешала бы — она про другое. */
+  const resetConversation = useCallback(() => {
+    stopSpeaking()
+    historyRef.current = []
+    saveDialogHistory([])
+    setTurns(0)
+    setTranscript('')
+    setReply('')
+    setLatency(null)
+    clearTopic()
+    setTopic(null)
+    void fetchTopic().then(setTopic)
+  }, [stopSpeaking])
+
+  /* Тема нужна ДО первой фразы: ученик должен видеть, о чём разговор, ещё
+     нажимая микрофон. Берём её один раз при входе на экран — если в этой
+     вкладке темы ещё нет. Сеть не ответила — молчим: разговор без темы
+     работает так же, как работал до сценариев, и блокировать его нельзя. */
+  useEffect(() => {
+    let alive = true
+    if (!currentTopic()) {
+      void fetchTopic().then((t) => {
+        if (alive && t) setTopic(t)
+      })
+    }
+    return () => {
+      alive = false
+    }
+  }, [])
+
   // Очистка при размонтировании.
   useEffect(() => {
     return () => {
@@ -448,5 +515,17 @@ export function useConversation(): ConversationApi {
     }
   }, [stopSpeaking, stopStream])
 
-  return { state, toggle, transcript, reply, error, latency }
+  return {
+    state,
+    toggle,
+    transcript,
+    reply,
+    error,
+    latency,
+    topic,
+    turns,
+    newTopic: resetConversation,
+    endSession: resetConversation,
+    getHistory: () => historyRef.current,
+  }
 }

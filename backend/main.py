@@ -128,7 +128,14 @@ from personas import (  # noqa: E402 — после настройки окру�
     PERSONAS,
     SYSTEM_PROMPT,
     persona_of,
+    reply_tokens,
 )
+
+# Сценарии разговора — тоже чистые данные: банк тем со скрытым планом беседы.
+import scenarios  # noqa: E402
+
+# Разбор беседы: промпт, проверка цитат и форма ответа. Сети не касается.
+import talk_review  # noqa: E402
 
 # Промпт-ревьюер устного ЕГЭ, Задание 4 (монолог, голосовое сообщение другу).
 # Разбор устной части живёт в двух соседних модулях:
@@ -634,14 +641,24 @@ def _check_voice_rate(identity: str) -> None:
        ответ), в лимит упрётся только скрипт.
     2. 300/день на человека: усердный ученик делает 100-150 реплик за день;
        кап ловит уведённый аккаунт и зацикленный клиент, не мешая людям.
-    3. 45/мин ГЛОБАЛЬНО — ниже провайдерских 50: когда все ученики разом
-       упираются в бюджет, они получают наш вежливый 429 «сервис занят», а не
-       ошибку Mistral посреди начатого стрима с уже сожжённым STT.
+    3. 25/мин ГЛОБАЛЬНО. Раньше стояло 45 — «чуть ниже провайдерских 50
+       запросов в минуту». Но узкое место у ключа не запросы, а ТОКЕНЫ: их
+       50000 в минуту, и одна реплика в разгаре беседы стоит ~1800 (замерено
+       04.08.2026 по заголовку x-ratelimit-tokens-query-cost, после того как
+       в промпт приехали план беседы и более глубокая история). 50000/1800 —
+       это 27 реплик в минуту, а не 50. Лимит 45 стал декоративным: до него
+       не доходило, зато Mistral начал бы отдавать 429 посреди начатого
+       стрима, с уже сожжённым распознаванием.
+
+       Цена вопроса честная: одновременно говорить смогут ~12-15 учеников.
+       Поднять потолок можно двумя способами — платный тариф или более
+       короткая история (см. _HISTORY_TURNS); ужать историю обратно можно за
+       минуту, но именно она чинила «собеседник не помнит, о чём говорили».
 
     Поверх — месячный бюджет: при перерасходе лимиты ужимаются (см. _BUDGET),
     полный отказ — только когда месяц выбран целиком.
     """
-    per_min, per_day, per_glob = 20, 300, 45
+    per_min, per_day, per_glob = 20, 300, 25
     state = _budget_state()
     if state["mode"] != "off":
         now = time.monotonic()
@@ -655,9 +672,9 @@ def _check_voice_rate(identity: str) -> None:
                        "Спасибо, что занимаешься так много!",
             )
         if state["mode"] == "low":
-            per_min, per_day, per_glob = 6, 60, 15
+            per_min, per_day, per_glob = 6, 60, 10
         elif state["mode"] == "eco":
-            per_min, per_day, per_glob = 10, 150, 30
+            per_min, per_day, per_glob = 10, 150, 18
 
     if not _rate_ok(f"v:{identity}", per_min, 60.0):
         raise HTTPException(status_code=429, detail="Слишком много запросов подряд — подожди минутку.")
@@ -2683,17 +2700,41 @@ async def task_feedback(
     )
 
 
-def _sanitize_history(raw: str) -> list[dict]:
-    """История диалога от клиента — по 10 последних реплик.
+# Глубина памяти диалога. Было 10 реплик по 300 символов — пять обменов, и
+# длинный ответ ученика резался на полуслове: собеседник не помнил, о чём
+# говорили три минуты назад, и переспрашивал уже отвеченное.
+#
+# Стало 16 реплик (восемь обменов), но с УБЫВАЮЩЕЙ подробностью: последние
+# шесть едут целиком, что старше — сжато до сути. Так сделано после замера
+# (04.08.2026): 16 реплик по 500 символов подняли цену одной реплики с ~950 до
+# 1846 токенов, а лимит ключа — 50000 токенов в минуту. То есть потолок
+# системы падал с ~50 до 26 реплик в минуту ради подробностей десятиминутной
+# давности, которые собеседнику нужны только как «о чём вообще шла речь».
+#
+# Ограничитель здесь именно ТОКЕНЫ, не бюджет: месячный бюджет считает ЗАПРОСЫ,
+# и длина истории на него не влияет вовсе.
+_HISTORY_TURNS = 16
+_HISTORY_CHARS = 500
+# Сколько последних реплик сохраняют полную длину. Шесть — три обмена: ровно
+# то, на что собеседник отвечает содержательно.
+_HISTORY_FULL = 6
+_HISTORY_CHARS_OLD = 200
+
+
+def _sanitize_history(raw: str, turns: int = _HISTORY_TURNS,
+                      chars: int = _HISTORY_CHARS,
+                      full: int = _HISTORY_FULL,
+                      chars_old: int = _HISTORY_CHARS_OLD) -> list[dict]:
+    """История диалога от клиента — последние реплики сессии.
 
     Память диалога НАМЕРЕННО клиентская: живёт в вкладке браузера и приходит с
     каждым запросом. Серверу это даёт ноль состояния и ноль хранения (мы решили
     не хранить транскрипты речи), а истории — естественную смерть вместе со
-    вкладкой. Цена — ~400 токенов промпта, около +0.05 с у Mistral.
+    вкладкой.
 
-    Клиенту, впрочем, не верим: максимум 10 реплик, роли только user/assistant,
-    каждая обрезается до 300 символов — иначе curl мог бы затолкать в промпт
-    роман и оплатить его нашим ключом.
+    Клиенту, впрочем, не верим: лимит реплик, роли только user/assistant,
+    каждая обрезается по длине — иначе curl мог бы затолкать в промпт роман и
+    оплатить его нашим ключом.
     """
     try:
         items = json.loads(raw or "[]")
@@ -2702,14 +2743,20 @@ def _sanitize_history(raw: str) -> list[dict]:
     if not isinstance(items, list):
         return []
     out = []
-    for it in items[-10:]:
+    for it in items[-turns:]:
         if not isinstance(it, dict):
             continue
         role = it.get("role")
         content = str(it.get("content") or "").strip()
         if role not in ("user", "assistant") or not content:
             continue
-        out.append({"role": role, "content": content[:300]})
+        out.append({"role": role, "content": content})
+    # Обрезка — ПОСЛЕ отбора и по расстоянию от конца: свежее целиком, старое
+    # сжато. Считать позицию до фильтрации нельзя — мусорные записи сдвинули бы
+    # границу и обрезали бы свежую реплику как древнюю.
+    for i, m in enumerate(out):
+        limit = chars if i >= len(out) - full else chars_old
+        m["content"] = m["content"][:limit]
     return out
 
 
@@ -2717,6 +2764,7 @@ def _sanitize_history(raw: str) -> list[dict]:
 async def talk_stream(audio: UploadFile = File(...),
                       history: str = Form("[]"),
                       persona: str = Form(""),
+                      topic: str = Form(""),
                       x_device: str | None = Header(None),
                       x_admin_key: str | None = Header(None)):
     await _require_account(x_device, x_admin_key)
@@ -2771,15 +2819,21 @@ async def talk_stream(audio: UploadFile = File(...),
         reply_full = ""
         buf = ""
         first_audio_at = None
+        # Ушло ли ученику хоть одно ОЗВУЧЕННОЕ предложение. Именно это, а не
+        # «пришёл ли хоть один токен», решает, можно ли повторить запрос:
+        # токены, не сложившиеся в предложение, до ученика не доехали и
+        # проиграться дважды не могут.
+        emitted = False
 
         async def emit(sentence: str):
-            nonlocal first_audio_at
+            nonlocal first_audio_at, emitted
             try:
                 wav = await synthesize(sentence, who["voice"])
             except Exception as e:  # noqa: BLE001
                 raise TtsFailed(str(e)) from e
             if first_audio_at is None:
                 first_audio_at = time.time()
+            emitted = True
             return json.dumps({"text": sentence, "audio_b64": base64.b64encode(wav).decode()}) + "\n"
 
         # Личная выжимка делает тьютора внимательнее к повторяющимся ошибкам
@@ -2787,19 +2841,9 @@ async def talk_stream(audio: UploadFile = File(...),
         # сохраняется — оно уже в SYSTEM_PROMPT.
         mem = await mem_task
         # Характер персоны дописывается ПОСЛЕ базовых правил: правила формата
-        # (короткий ответ, без markdown, вопрос в конце) должны пережить любой
-        # характер, иначе озвучка сломается. Сейчас prompt у всех пустой.
+        # (без markdown, вопрос в конце) и ремесло собеседника должны пережить
+        # любой характер, иначе сломается озвучка или сам разговор.
         sys_prompt = SYSTEM_PROMPT + (f"\n\n{who['prompt']}" if who.get("prompt") else "")
-        if mem.get("user"):
-            sys_prompt += (
-                "\n\nBackground context, secondary to everything above — memory about "
-                f"this student: {mem['user']}\n"
-                "Use it ONLY if one of these mistakes appears again in the current "
-                "utterance — then gently point it out (still at most one short tip). "
-                "Never bring up old mistakes on their own, and never let this memory "
-                "change the topic of the conversation."
-            )
-            print("[memory] профиль ученика подключён к разговору")
 
         # Память ДИАЛОГА: последние реплики сессии между system и текущей фразой.
         # Тьютор помнит, о чём шла речь, и перестаёт отвечать с чистого листа.
@@ -2807,13 +2851,55 @@ async def talk_stream(audio: UploadFile = File(...),
         if past:
             print(f"[dialog] история: {len(past)} реплик")
 
+        # Скрытый план беседы. Ступень считается ЗДЕСЬ, из длины истории —
+        # без отдельного вопроса к модели «на каком мы шаге»: это был бы второй
+        # запрос на каждую реплику, то есть удвоение расхода ради арифметики.
+        # Идёт до блока памяти: план — рабочая инструкция, а память объявлена
+        # «вторичной ко всему выше» и не должна перебивать её собой.
+        plan = scenarios.by_id(topic)
+        if plan:
+            sys_prompt += "\n" + scenarios.plan_block(plan, len(past) // 2)
+            print(f"[dialog] тема: {plan['id']}, шаг {len(past) // 2 // scenarios.TURNS_PER_STAGE + 1}")
+
+        if mem.get("user"):
+            sys_prompt += (
+                "\n\nBackground context, secondary to everything above — memory about "
+                f"this student: {mem['user']}\n"
+                "Use it ONLY if one of these mistakes appears again in the current "
+                "utterance — then gently point it out (still at most one short tip). "
+                "Never bring up old mistakes on their own, and never let this memory "
+                "change the topic of the conversation.\n"
+                # Поймано живым прогоном 04.08.2026: собеседник превратил выжимку
+                # в выдуманное воспоминание — «I remember you said you like watching
+                # films with subtitles», чего ученик не говорил никогда. Выдуманная
+                # общая память хуже её отсутствия: человек перестаёт верить всему
+                # остальному, что помнит собеседник.
+                "This memory is NOT part of your conversation and the student never "
+                "told you any of it. Never say 'I remember you said', never quote it "
+                "back, never treat it as something that happened between you. The "
+                "only things the student has told you are in the messages above."
+            )
+            print("[memory] профиль ученика подключён к разговору")
+
         # Ретрай LLM (03.08.2026): на домашнем канале 2 запроса из 5 рвались с
         # пустой ошибкой, и ученик молча терял свой ход. Повторяем ТОЛЬКО пока
-        # ученику не уехало ни одного чанка: после первого предложения повтор
-        # проиграл бы начало ответа дважды — тогда честнее отдать ошибку.
+        # ученику не уехало ни одного ОЗВУЧЕННОГО предложения: после первого
+        # повтор проиграл бы начало ответа дважды — тогда честнее отдать ошибку.
+        #
+        # Условие уточнено 04.08.2026 после сквозного прогона: раньше повтор
+        # запрещался, как только приходил первый ТОКЕН. Обрыв в середине
+        # генерации (канал рвал соединение через 30 с, обычное дело из РФ)
+        # оставлял огрызок фразы, который не сложился в предложение и до
+        # ученика не доехал, — но повтор уже считался небезопасным, и человек
+        # получал «LLM ошибка» на ровном месте. Ловилось стабильно, на второй
+        # реплике каждого прогона.
         _LLM_ATTEMPTS = 3
         for attempt in range(_LLM_ATTEMPTS):
             try:
+                # Повтор начинает ответ с чистого листа: недописанный огрызок
+                # прошлой попытки иначе склеился бы с новым текстом.
+                if attempt:
+                    reply_full, buf = "", ""
                 stream = await client.chat.completions.create(
                     model=LLM_MODEL,
                     messages=[
@@ -2821,7 +2907,7 @@ async def talk_stream(audio: UploadFile = File(...),
                         *past,
                         {"role": "user", "content": user_text},
                     ],
-                    max_tokens=120,
+                    max_tokens=reply_tokens(who),
                     stream=True,
                 )
                 stream_usage = None
@@ -2863,7 +2949,7 @@ async def talk_stream(audio: UploadFile = File(...),
                 yield json.dumps({"error": f"TTS (edge-tts) ошибка: {e}"}) + "\n"
                 return
             except Exception as e:  # noqa: BLE001
-                can_retry = not reply_full and attempt + 1 < _LLM_ATTEMPTS
+                can_retry = not emitted and attempt + 1 < _LLM_ATTEMPTS
                 print(f"[llm] стрим сорвался (попытка {attempt + 1}/{_LLM_ATTEMPTS}, "
                       f"{type(e).__name__}: {str(e)[:80]}) — "
                       + ("повторяю" if can_retry else "отдаю ошибку"))
@@ -2898,6 +2984,113 @@ async def talk_stream(audio: UploadFile = File(...),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
+
+
+@app.get("/talk_topic")
+async def talk_topic(recent: str = "",
+                     x_device: str | None = Header(None),
+                     x_admin_key: str | None = Header(None)):
+    """Тема для нового разговора. Ни одного вызова LLM — просто выбор из банка.
+
+    `recent` — список id, которые у ученика уже были (их помнит КЛИЕНТ, как и
+    историю диалога: серверу для этого не нужно ни таблицы, ни состояния).
+    Ученику уезжают только название и подсказка; сам план беседы остаётся на
+    сервере — увидев ступени, ученик перестал бы разговаривать и начал бы
+    отвечать по списку.
+    """
+    await _require_account(x_device, x_admin_key)
+    ids = [p.strip() for p in (recent or "").split(",") if p.strip()][-80:]
+    return scenarios.public(scenarios.pick(ids))
+
+
+@app.post("/talk_review")
+async def talk_review_endpoint(request: Request, body: dict = Body(...),
+                               x_device: str | None = Header(None),
+                               x_admin_key: str | None = Header(None)):
+    """Разбор всей беседы — ОДИН вызов LLM по явному нажатию ученика.
+
+    Почему не автоматически при уходе с экрана: разбор стоит запроса, а уход с
+    экрана случается и случайно. Пусть человек сам решает, закончил он или нет.
+
+    Почему история приезжает с клиента: она и так там живёт (сервер диалоги не
+    хранит — приватность). В базу из разбора попадают только ОШИБКИ, как и у
+    заданий, — они и есть память, которая делает следующие разборы точнее.
+    """
+    await _require_account(x_device, x_admin_key)
+    # Разбор — редкое действие: один на сессию. Лимит ловит зациклившийся
+    # клиент и скрипт, живому ученику не мешает.
+    if not _rate_ok(f"rv:{x_device or _client_ip(request)}", 6, 300.0):
+        raise HTTPException(status_code=429,
+                            detail="Слишком часто — подожди пару минут.")
+    # Дневной счётчик голоса разбор НЕ тратит: он не реплика, а итог занятия,
+    # и отнимать за него право говорить было бы наказанием за прилежание.
+    # Полный стоп по месячному бюджету — соблюдаем, как везде.
+    if _budget_state().get("mode") == "empty":
+        raise HTTPException(
+            status_code=429,
+            detail="Месячный запас занятий исчерпан — он обновится 1 числа.")
+
+    # Здесь, в отличие от разговора, история НЕ сжимается по давности: разбор
+    # ищет ошибки, а ошибка в обрезанном хвосте реплики просто не найдётся.
+    # Один вызов на сессию это себе позволяет.
+    history = _sanitize_history(json.dumps(body.get("history") or []),
+                                turns=48, chars=400, full=48)
+    exchanges = sum(1 for m in history if m["role"] == "user")
+    if exchanges < talk_review.MIN_EXCHANGES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Слишком короткий разговор для разбора — скажи хотя бы "
+                   f"{talk_review.MIN_EXCHANGES} реплики.")
+
+    who = persona_of(str(body.get("persona") or ""))
+    # Тема беседы в разбор НЕ едет: она сбивала модель с расшифровки на
+    # название — см. объяснение в talk_review.build_prompt.
+    prompt = talk_review.build_prompt(str(who.get("review_tone") or ""))
+
+    client = llm_client()
+    t0 = time.time()
+    try:
+        completion = await asyncio.to_thread(
+            lambda: client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": talk_review.transcript_of(history)},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.2,
+                max_tokens=900,
+            )
+        )
+    except Exception as e:  # noqa: BLE001
+        note_failure("llm", f"{type(e).__name__}: {str(e)[:80]}")
+        raise HTTPException(status_code=502, detail=f"LLM ошибка ({LLM_MODEL}): {e}")
+
+    _track_llm(completion)
+    _track_latency("talk_review", time.time() - t0)
+    raw = (completion.choices[0].message.content or "").strip()
+    parsed = _loads_forgiving(raw)
+    if parsed is None:
+        raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
+
+    # Сверка цитат с речью ученика: всё, чего он не говорил, выбрасывается.
+    review = talk_review.verify(parsed, history)
+
+    # Ошибки — в копилку памяти (фоном: ученик ответа не ждёт). Разговор баллом
+    # не оценивается, поэтому строки в results не появляется — только mistakes.
+    if _storage_ok and x_device and review["mistakes"]:
+        errors = [{"quote": m["quote"], "correction": m["correction"],
+                   "explanation": m["why"]} for m in review["mistakes"]]
+
+        async def _remember_talk():
+            try:
+                await asyncio.to_thread(storage.save_talk_mistakes, x_device, errors)
+            except Exception as e:  # noqa: BLE001
+                print(f"[memory] разговорные ошибки не записал ({type(e).__name__})")
+
+        asyncio.create_task(_remember_talk())
+
+    return review
 
 
 # Раздаём собранный React-фронт (../dist) на "/", если он собран (npm run build).
