@@ -1507,6 +1507,14 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+/* Метка 18+ у персоны с матом: видна ДО выбора, чтобы подтверждение не
+   становилось неожиданностью. */
+.persona__mark--adult {
+  color: #ffb3bd;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 5px;
+}
 .persona__desc {
   font-size: clamp(10px, 1.2vw, 12px);
   font-weight: 600;

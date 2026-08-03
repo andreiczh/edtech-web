@@ -18,7 +18,7 @@ import {
   type Persona,
 } from '../account/me'
 import { applyNickname, currentUser, logout, randomNickname } from '../auth/auth'
-import { Pill, SegmentedTabs } from '../design/ui'
+import { ConfirmDialog, Pill, SegmentedTabs } from '../design/ui'
 
 const BLOCK: CSSProperties = { width: 'min(100%, 940px)' }
 
@@ -48,9 +48,33 @@ function Flame({ lit }: { lit: boolean }) {
  * Сервер молчит или список пуст — блок просто не показывается, а разговор идёт
  * на персоне по умолчанию.
  */
+/* Согласие на «взрослую» персону: разовое, живёт в этом браузере. Намеренно
+   НЕ в настройках аккаунта — согласие даёт человек за конкретным экраном, и
+   переносить его на телефон, за которым может сидеть кто-то другой, неверно. */
+const ADULT_OK_KEY = 'pingo.adultOk.v1'
+
+function adultAccepted(id: string): boolean {
+  try {
+    return (JSON.parse(localStorage.getItem(ADULT_OK_KEY) || '[]') as string[]).includes(id)
+  } catch {
+    return false
+  }
+}
+
+function rememberAdultAccepted(id: string) {
+  try {
+    const prev = JSON.parse(localStorage.getItem(ADULT_OK_KEY) || '[]') as string[]
+    localStorage.setItem(ADULT_OK_KEY, JSON.stringify([...new Set([...prev, id])]))
+  } catch {
+    /* приватный режим — спросим ещё раз, это не страшно */
+  }
+}
+
 function PersonaPicker() {
   const settings = useSettings()
   const [personas, setPersonas] = useState<Persona[]>([])
+  /** Персона, которую выбрали, но она требует подтверждения возраста. */
+  const [confirming, setConfirming] = useState<Persona | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -61,6 +85,16 @@ function PersonaPicker() {
   }, [])
 
   if (personas.length === 0) return null
+
+  /* Признак «взрослой» приходит с СЕРВЕРА: даже если фронт устарел и не знает
+     про новую персону с матом, сервер пометит её, и подтверждение появится. */
+  const choose = (p: Persona) => {
+    if (p.adult && !adultAccepted(p.id)) {
+      setConfirming(p)
+      return
+    }
+    updateSettings({ persona: p.id })
+  }
 
   return (
     <div className="card2 card2--ghost glass settings" style={BLOCK}>
@@ -82,17 +116,36 @@ function PersonaPicker() {
               role="radio"
               aria-checked={active}
               className={`persona${active ? ' persona--on' : ''}`}
-              onClick={() => updateSettings({ persona: p.id })}
+              onClick={() => choose(p)}
             >
               <span className="persona__top">
                 <span className="persona__name">{p.label}</span>
-                {active && <span className="persona__mark">выбран</span>}
+                {active ? (
+                  <span className="persona__mark">выбран</span>
+                ) : (
+                  p.adult && <span className="persona__mark persona__mark--adult">18+</span>
+                )}
               </span>
               <span className="persona__desc">{p.description}</span>
             </button>
           )
         })}
       </div>
+
+      {confirming && (
+        <ConfirmDialog
+          title={`${confirming.label} — точно включаем?`}
+          body={confirming.warning || 'Этот собеседник говорит грубо.'}
+          stay="Не надо"
+          leave="Мне есть 18, включить"
+          onStay={() => setConfirming(null)}
+          onLeave={() => {
+            rememberAdultAccepted(confirming.id)
+            updateSettings({ persona: confirming.id })
+            setConfirming(null)
+          }}
+        />
+      )}
     </div>
   )
 }

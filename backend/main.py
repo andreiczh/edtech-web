@@ -1059,7 +1059,10 @@ async def personas_list():
         "default": DEFAULT_PERSONA,
         "personas": [
             {"id": pid, "label": p["label"], "description": p["description"],
-             "voice": p["voice"], "theme": p["theme"], "quit": p["quit"]}
+             "voice": p["voice"], "theme": p["theme"], "quit": p["quit"],
+             # Отдаём признак «взрослой» персоны и текст предупреждения:
+             # фронт обязан спросить подтверждение ДО первого включения.
+             "adult": bool(p.get("adult")), "warning": p.get("warning", "")}
             for pid, p in PERSONAS.items()
         ],
     }

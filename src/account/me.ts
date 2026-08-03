@@ -67,6 +67,10 @@ export interface Persona {
   theme: string
   /** Текст подтверждения выхода — своими словами для каждого характера */
   quit: PersonaQuit
+  /** Персона с матом: включается только через разовое подтверждение */
+  adult?: boolean
+  /** Что показать в этом подтверждении (приходит с сервера) */
+  warning?: string
 }
 
 let personasCache: Persona[] | null = null
