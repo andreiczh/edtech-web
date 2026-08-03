@@ -37,6 +37,8 @@ interface AdminTask {
   kind: string
   active: boolean
   payload: Record<string, unknown>
+  /** Замечания от детерминированных проверок: пусто — заметных дефектов нет */
+  problems?: string[]
 }
 
 const FIELD: CSSProperties = { width: '100%' }
@@ -90,10 +92,12 @@ function BankList({
   const [open, setOpen] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
-  const shown = list.filter((t) =>
-    filter === 'all' ? true : filter === 'active' ? t.active : !t.active,
-  )
+  const shown = list
+    .filter((t) => (filter === 'all' ? true : filter === 'active' ? t.active : !t.active))
+    // Проблемные — наверх: это рабочая очередь, а не витрина.
+    .sort((a, b) => (b.problems?.length ?? 0) - (a.problems?.length ?? 0))
   const drafts = list.filter((t) => !t.active).length
+  const cleanDrafts = list.filter((t) => !t.active && !(t.problems?.length ?? 0)).length
 
   const act = async (path: string, method: string, id: string) => {
     setBusyId(id)
@@ -117,6 +121,30 @@ function BankList({
           <option value="all">все</option>
         </select>
       </div>
+
+      {cleanDrafts > 0 && (
+        <div className="rowbetween" style={{ marginBottom: 10 }}>
+          <span style={{ fontSize: 13, color: 'var(--card-ink-dim)' }}>
+            Без замечаний: {cleanDrafts} из {drafts}. Остальные ждут твоих глаз.
+          </span>
+          <Pill
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Опубликовать ${cleanDrafts} черновиков без замечаний? ` +
+                    'Они сразу станут видны ученикам.',
+                )
+              )
+                void api('/admin/tasks/publish_clean', adminKey, {
+                  method: 'POST',
+                  body: JSON.stringify({}),
+                }).then(onChanged)
+            }}
+          >
+            Опубликовать чистые
+          </Pill>
+        </div>
+      )}
       {shown.length === 0 && <p style={{ margin: 0 }}>Здесь пусто.</p>}
 
       {shown.map((t) => {
@@ -145,7 +173,8 @@ function BankList({
                 }}
                 title="Показать задание целиком"
               >
-                {t.active ? '🟢' : '📝'} №{t.task_no} · {KIND_LABEL[t.kind as TaskKind] ?? t.kind}
+                {t.active ? '🟢' : t.problems?.length ? '⚠️' : '📝'} №{t.task_no} ·{' '}
+                {KIND_LABEL[t.kind as TaskKind] ?? t.kind}
                 {' — '}
                 {title}
               </button>
@@ -170,6 +199,12 @@ function BankList({
                 </Pill>
               </span>
             </div>
+
+            {(t.problems?.length ?? 0) > 0 && (
+              <p style={{ margin: '4px 0 0', fontSize: 13, color: '#b4485c', fontWeight: 700 }}>
+                {t.problems!.join(' · ')}
+              </p>
+            )}
 
             {isOpen && (
               <div style={{ padding: '8px 4px', fontSize: 14 }}>

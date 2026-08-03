@@ -1461,6 +1461,11 @@ async def admin_task_list(x_admin_key: str | None = Header(None)):
             r["payload"] = json.loads(r["payload"])
         except json.JSONDecodeError:
             r["payload"] = {}
+        # Замечания к черновику: считаются детерминированно (слова, поля), НЕ
+        # моделью — инструмент отбраковки сам ошибаться не должен. Пустой
+        # список не значит «хорошо», он значит «заметных дефектов нет»:
+        # решение всё равно за человеком, флаги лишь сортируют очередь.
+        r["problems"] = fipi_import.draft_problems(r["kind"], r["payload"])
     return {"tasks": rows}
 
 
@@ -1592,6 +1597,42 @@ async def admin_reset_password(body: dict = Body(...),
     if not ok:
         raise HTTPException(status_code=404, detail=f"Ник «{nickname}» не найден.")
     return {"nickname": nickname, "password": new_password}
+
+
+@app.post("/admin/tasks/publish_clean")
+async def admin_publish_clean(body: dict = Body(default={}),
+                              x_admin_key: str | None = Header(None)):
+    """Опубликовать разом все черновики БЕЗ замечаний.
+
+    Проверять глазами 90 черновиков нереально, а публиковать вслепую нельзя.
+    Компромисс: массово уходят только те, у кого детерминированные проверки
+    не нашли дефектов; всё с замечаниями остаётся человеку. dry_run=1 сначала
+    показывает, что будет опубликовано, — публикация задним числом заметна
+    ученикам, поэтому «посмотреть» отделено от «сделать».
+    """
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    rows = await asyncio.to_thread(storage.tasks_all)
+    clean, flagged = [], 0
+    for r in rows:
+        if r["active"]:
+            continue
+        try:
+            payload = json.loads(r["payload"])
+        except (json.JSONDecodeError, TypeError):
+            flagged += 1
+            continue
+        if fipi_import.draft_problems(r["kind"], payload):
+            flagged += 1
+        else:
+            clean.append(r["id"])
+    if body.get("dry_run"):
+        return {"would_publish": len(clean), "left_for_review": flagged}
+    for tid in clean:
+        await asyncio.to_thread(storage.task_toggle, tid)
+    print(f"[admin] опубликовано пачкой: {len(clean)}, оставлено на разбор: {flagged}")
+    return {"published": len(clean), "left_for_review": flagged}
 
 
 @app.delete("/admin/tasks/{tid}")

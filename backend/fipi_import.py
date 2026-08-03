@@ -337,3 +337,63 @@ def read_text_from_image(chat_client, model: str, data: bytes, mime: str) -> str
 def photo_fact(chat_client, model: str, data: bytes, mime: str) -> str:
     """Что на фотографии на самом деле — для ловли фактических ошибок."""
     return _vision(chat_client, model, PHOTO_FACT_PROMPT, data, mime, 220)
+
+
+# --------------------------------------------------------------- Контроль качества
+
+# Ожидаемая длина текста для чтения: в задании 1 это 100-150 слов. Сильно
+# короче — обрыв OCR, сильно длиннее — в текст затесалась соседняя колонка.
+_READ_WORDS_MIN, _READ_WORDS_MAX = 60, 260
+
+
+def draft_problems(kind: str, payload: dict) -> list[str]:
+    """Что не так с черновиком — по-русски, коротко, для админки.
+
+    Зачем: после импорта черновиков десятки, и проверять каждый глазами
+    дорого. Проверки ДЕТЕРМИНИРОВАННЫЕ — считают слова и поля, а не спрашивают
+    модель: инструмент отбраковки сам не должен ошибаться.
+
+    Пустой список — не гарантия качества, а отсутствие ЗАМЕТНЫХ дефектов:
+    решение всё равно за человеком, флаги только сортируют очередь.
+    """
+    out: list[str] = []
+    brief = str(payload.get("brief") or "")
+    if len(brief) < 40:
+        out.append("нет текста задания")
+
+    if kind == "reading":
+        words = len((payload.get("readText") or "").split())
+        if words == 0:
+            out.append("нет текста для чтения")
+        elif words < _READ_WORDS_MIN:
+            out.append(f"текст короткий: {words} слов — вероятно, OCR оборвался")
+        elif words > _READ_WORDS_MAX:
+            out.append(f"текст длинный: {words} слов — возможно, склеились два")
+        # Кириллица в английском тексте = OCR подобрал чужую страницу.
+        if any("а" <= ch.lower() <= "я" for ch in (payload.get("readText") or "")):
+            out.append("в тексте есть кириллица — распознано неверно")
+
+    if kind == "dialogue":
+        steps = payload.get("steps") or []
+        if len(steps) != 4:
+            out.append(f"пунктов {len(steps)}, а нужно 4")
+        if not (payload.get("images") or []):
+            out.append("нет картинки объявления")
+
+    if kind == "interview":
+        if len(payload.get("steps") or []) != 5:
+            out.append(f"вопросов {len(payload.get('steps') or [])}, а нужно 5")
+
+    if kind == "monologue":
+        imgs = payload.get("images") or []
+        facts = payload.get("photoFacts") or []
+        if len(imgs) != 2:
+            out.append(f"фотографий {len(imgs)}, а нужно 2")
+        if len(facts) != len(imgs):
+            out.append("описания фото не совпадают с числом картинок")
+        # Описание без людей — известная беда банка: задание просит рассказать,
+        # кто что делает, а на картинке пейзаж.
+        joined = " ".join(str(f) for f in facts).lower()
+        if joined and ("no people" in joined or "there are no people" in joined):
+            out.append("на фото НЕТ ЛЮДЕЙ — для задания 4 не годится")
+    return out
