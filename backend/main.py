@@ -1509,6 +1509,26 @@ async def admin_test_alert(x_admin_key: str | None = Header(None)):
     return {"sent": True}
 
 
+@app.get("/admin/telegram")
+async def admin_telegram(x_admin_key: str | None = Header(None)):
+    """Состояние настройки алертов + подсказка chat_id.
+
+    Показывает, ЧТО уже задано (не значения), и ищет chat_id по сообщениям
+    боту. Токен наружу не отдаём никогда — только факт «задан».
+    """
+    _require_admin(x_admin_key)
+    state = {
+        "token_set": bool(alerts.TG_TOKEN),
+        "chat_set": bool(alerts.TG_CHAT),
+        "ready": bool(alerts.TG_TOKEN and alerts.TG_CHAT),
+    }
+    if state["token_set"] and not state["chat_set"]:
+        ok, detail = await asyncio.to_thread(alerts.discover_chat_id)
+        state["chat_id_hint"] = detail if ok else None
+        state["hint_error"] = None if ok else detail
+    return state
+
+
 @app.get("/admin/invites")
 async def admin_invites(x_admin_key: str | None = Header(None)):
     _require_admin(x_admin_key)

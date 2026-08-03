@@ -87,3 +87,34 @@ def send_now(text: str) -> tuple[bool, str]:
         # но не токен — показать владельцу можно.
         return False, f"HTTP {r.status_code}: {r.text[:160]}"
     return True, "ok"
+
+
+def discover_chat_id() -> tuple[bool, str]:
+    """Найти chat_id по сообщениям, написанным боту.
+
+    Самый муторный шаг настройки: владельцу иначе пришлось бы вручную собирать
+    ссылку getUpdates и выковыривать число из сырого JSON. Токен при этом никуда
+    не уходит — запрос делает сервер своим собственным, уже настроенным токеном.
+    """
+    if not TG_TOKEN:
+        return False, "сначала задай TELEGRAM_BOT_TOKEN в переменных Render"
+    try:
+        r = httpx.get(f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates", timeout=15.0)
+    except Exception as e:  # noqa: BLE001
+        return False, f"телеграм недоступен ({type(e).__name__})"
+    if r.status_code != 200:
+        # Тело телеграма объясняет причину («Unauthorized» = неверный токен),
+        # но самого токена не содержит — показать владельцу можно.
+        return False, f"телеграм ответил {r.status_code}: {r.text[:160]}"
+    found: dict[str, str] = {}
+    for upd in (r.json().get("result") or []):
+        msg = upd.get("message") or upd.get("channel_post") or {}
+        chat = msg.get("chat") or {}
+        cid = chat.get("id")
+        if cid is not None:
+            who = chat.get("username") or chat.get("title") or chat.get("first_name") or "?"
+            found[str(cid)] = str(who)
+    if not found:
+        return False, ("сообщений боту нет. Напиши ему что-нибудь в Telegram "
+                       "и нажми ещё раз (бот не может написать первым)")
+    return True, "; ".join(f"{cid} — {who}" for cid, who in found.items())

@@ -356,23 +356,93 @@ function Invites({ adminKey }: { adminKey: string }) {
   )
 }
 
-/** Проверка канала алертов. Без неё владелец узнаёт, что Telegram настроен
-    неверно, ровно тогда, когда что-то упало — то есть слишком поздно. */
+interface TgState {
+  token_set: boolean
+  chat_set: boolean
+  ready: boolean
+  chat_id_hint?: string | null
+  hint_error?: string | null
+}
+
+/**
+ * Настройка алертов пошагово. Сделано мастером, а не одной кнопкой, потому что
+ * половину шагов может выполнить только владелец (BotFather, переменные
+ * Render), и ему важно видеть, какие уже закрыты. Всё, что можно было снять с
+ * человека, снято: chat_id ищет сервер, канал проверяется кнопкой.
+ */
 function AlertCheck({ adminKey }: { adminKey: string }) {
+  const [tg, setTg] = useState<TgState | null>(null)
   const [state, setState] = useState<'idle' | 'busy' | 'ok'>('idle')
   const [err, setErr] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      setTg((await api('/admin/telegram', adminKey)) as TgState)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    }
+  }, [adminKey])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const step = (done: boolean, text: string) => (
+    <p style={{ margin: '2px 0', color: done ? '#2f7d63' : 'var(--card-ink-dim)' }}>
+      {done ? '✅' : '⬜'} {text}
+    </p>
+  )
+
   return (
     <div className="card2" style={{ width: 'min(100%, 760px)' }}>
-      <div className="rowbetween">
-        <span>
-          <b>Алерты в Telegram</b>
-          <span style={{ color: 'var(--card-ink-dim)' }}>
-            {' '}
-            — проверь, что сообщения доходят
-          </span>
+      <p style={{ margin: '0 0 8px', fontWeight: 800 }}>
+        Алерты в Telegram{' '}
+        <span style={{ fontWeight: 600, color: 'var(--card-ink-dim)', fontSize: 13 }}>
+          — чтобы о падении узнать не от учеников
+        </span>
+      </p>
+
+      {tg && (
+        <>
+          {step(tg.token_set, 'TELEGRAM_BOT_TOKEN задан в переменных Render (бот из @BotFather)')}
+          {step(tg.chat_set, 'TELEGRAM_CHAT_ID задан там же')}
+
+          {tg.token_set && !tg.chat_set && (
+            <div
+              style={{
+                margin: '8px 0',
+                padding: '8px 10px',
+                borderRadius: 10,
+                background: 'rgba(0,0,0,0.05)',
+              }}
+            >
+              {tg.chat_id_hint ? (
+                <>
+                  <b>Твой chat_id: {tg.chat_id_hint}</b>
+                  <br />
+                  Скопируй число в переменную <code>TELEGRAM_CHAT_ID</code> на Render
+                  и передеплой.
+                </>
+              ) : (
+                <>
+                  {tg.hint_error}
+                  <br />
+                  <Pill quiet onClick={() => void load()}>
+                    Искать ещё раз
+                  </Pill>
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      <div className="rowbetween" style={{ marginTop: 8 }}>
+        <span style={{ fontSize: 13, color: 'var(--card-ink-dim)' }}>
+          {tg?.ready ? 'Всё задано — проверь, что сообщение дойдёт.' : 'Инструкция: docs/MONITORING.md'}
         </span>
         <Pill
-          disabled={state === 'busy'}
+          disabled={state === 'busy' || !tg?.ready}
           onClick={() => {
             setState('busy')
             setErr(null)
@@ -387,6 +457,7 @@ function AlertCheck({ adminKey }: { adminKey: string }) {
           {state === 'busy' ? 'Отправляю…' : 'Отправить тест'}
         </Pill>
       </div>
+
       {state === 'ok' && (
         <p style={{ color: '#2f7d63', fontWeight: 700, margin: '8px 0 0' }}>
           Отправлено — проверь Telegram.
