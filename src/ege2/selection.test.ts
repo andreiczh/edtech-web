@@ -6,7 +6,7 @@
  * переписывает лок-файл (см. CLAUDE.md), а бэкенд-тесты и так живут обычными
  * скриптами (test_ege_scoring.py). Здесь та же конвенция.
  */
-import { mergeSolved, pickVariants } from './selection.ts'
+import { highlightPieces, mergeSolved, pickVariants } from './selection.ts'
 
 let failed = 0
 
@@ -95,9 +95,81 @@ eq(
 
 eq(pickVariants([], ['v1'], 5), [], 'отбор: пустой банк — пустая сессия')
 
+
+/* -------------------------------------------------- highlightPieces (№39) */
+
+const REF = 'A tree is a tall plant with a trunk and branches.'
+
+eq(
+  highlightPieces(REF, []),
+  [{ text: REF }],
+  'подсветка: ошибок нет — текст одним куском',
+)
+
+eq(
+  highlightPieces(REF, [{ correction: 'trunk', cat: 'missing' }]),
+  [
+    { text: 'A tree is a tall plant with a ' },
+    { text: 'trunk', mark: 'missing' },
+    { text: ' and branches.' },
+  ],
+  'подсветка: пропущенное слово выделено, текст вокруг цел',
+)
+
+eq(
+  highlightPieces(REF, [
+    { correction: 'tree', cat: 'lex' },
+    { correction: 'branches', cat: 'missing' },
+  ]),
+  [
+    { text: 'A ' },
+    { text: 'tree', mark: 'misread' },
+    { text: ' is a tall plant with a trunk and ' },
+    { text: 'branches', mark: 'missing' },
+    { text: '.' },
+  ],
+  'подсветка: два куска, порядок по тексту, а не по списку ошибок',
+)
+
+// Перекрытие: «tall plant» и «plant» накладываются — второй должен отпасть,
+// иначе разметка порвётся и часть текста продублируется.
+eq(
+  highlightPieces(REF, [
+    { correction: 'tall plant', cat: 'lex' },
+    { correction: 'plant', cat: 'lex' },
+  ]),
+  [
+    { text: 'A tree is a ' },
+    { text: 'tall plant', mark: 'misread' },
+    { text: ' with a trunk and branches.' },
+  ],
+  'подсветка: перекрывающиеся куски не рвут текст',
+)
+
+eq(
+  highlightPieces(REF, [{ correction: 'слова нет в тексте', cat: 'lex' }]),
+  [{ text: REF }],
+  'подсветка: фрагмент не найден — текст не трогаем',
+)
+
+eq(
+  highlightPieces(REF, [{ correction: 'a', cat: 'lex' }]),
+  [{ text: REF }],
+  'подсветка: слишком короткий фрагмент игнорируется (иначе подсветит все «a»)',
+)
+
+// Склейка целого текста из кусков обязана давать исходный текст без потерь.
+{
+  const pieces = highlightPieces(REF, [
+    { correction: 'tree', cat: 'lex' },
+    { correction: 'branches', cat: 'missing' },
+  ])
+  eq(pieces.map((p) => p.text).join(''), REF, 'подсветка: склейка кусков = исходный текст')
+}
+
 console.log(
   failed === 0
-    ? '\nВсе проверки прошли: отбор вариантов и слияние прогресса.'
+    ? '\nВсе проверки прошли: отбор, слияние прогресса и подсветка разбора.'
     : `\nПРОВАЛЕНО проверок: ${failed}`,
 )
 process.exit(failed === 0 ? 0 : 1)

@@ -21,6 +21,7 @@ import { useMemo, useState } from 'react'
 
 import { reportDispute, type TaskFeedback } from '../ege2/feedback'
 import { TASKS, type TaskId } from '../ege2/tasks'
+import { highlightPieces } from '../ege2/selection'
 
 /* Кольцо с баллом. Заполняется долей набранного — это первое, что ищет глаз. */
 function ScoreRing({ score, max }: { score: number; max: number }) {
@@ -56,38 +57,6 @@ function OwnRecording({ url }: { url: string | null }) {
 
 /* --------------------------------------------------- №39: чтение вслух */
 
-interface Piece {
-  text: string
-  mark?: 'missing' | 'misread'
-}
-
-/** Режет эталонный текст на куски и помечает те, что ученик пропустил или
-    прочитал иначе. Ищем по фрагменту из разбора (correction) — это ровно тот
-    кусок эталона, к которому у проверяющего возникли вопросы. */
-function highlight(reference: string, feedback: TaskFeedback): Piece[] {
-  const marks: Array<{ from: number; to: number; mark: 'missing' | 'misread' }> = []
-  for (const e of feedback.errors ?? []) {
-    const needle = (e.correction || '').trim()
-    if (needle.length < 2) continue
-    const at = reference.toLowerCase().indexOf(needle.toLowerCase())
-    if (at < 0) continue
-    const mark = e.cat === 'missing' ? 'missing' : 'misread'
-    if (marks.some((m) => at < m.to && at + needle.length > m.from)) continue
-    marks.push({ from: at, to: at + needle.length, mark })
-  }
-  marks.sort((a, b) => a.from - b.from)
-
-  const out: Piece[] = []
-  let cursor = 0
-  for (const m of marks) {
-    if (m.from > cursor) out.push({ text: reference.slice(cursor, m.from) })
-    out.push({ text: reference.slice(m.from, m.to), mark: m.mark })
-    cursor = m.to
-  }
-  if (cursor < reference.length) out.push({ text: reference.slice(cursor) })
-  return out
-}
-
 function ReadingResult({
   feedback,
   reference,
@@ -95,7 +64,10 @@ function ReadingResult({
   feedback: TaskFeedback
   reference: string
 }) {
-  const pieces = useMemo(() => highlight(reference, feedback), [reference, feedback])
+  const pieces = useMemo(
+    () => highlightPieces(reference, feedback.errors ?? []),
+    [reference, feedback],
+  )
   const errors = feedback.errors ?? []
 
   return (
