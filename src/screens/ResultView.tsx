@@ -113,6 +113,22 @@ function ReadingResult({
   )
   const errors = feedback.errors ?? []
 
+  /* Подсвеченный кусок теперь можно нажать и увидеть, ЧТО с ним не так.
+     Раньше подсветка была немой: цвет есть, объяснения нет — жалоба
+     тестировщика 05.08.2026 («при нажатии на слово нет пояснения»).
+     Ищем разбор по тому же фрагменту, которым кусок и был помечен. */
+  const [openPiece, setOpenPiece] = useState<string | null>(null)
+  const explainOf = (text: string) => {
+    const key = text.trim().toLowerCase()
+    const hit = errors.find((e) => (e.correction || '').trim().toLowerCase() === key)
+    if (!hit) return null
+    return hit.explanation
+      ? hit.explanation
+      : hit.cat === 'missing'
+        ? 'этого куска в записи нет — он не прозвучал'
+        : 'здесь прозвучало не то, что написано'
+  }
+
   return (
     <>
       <div className="card2 resblock">
@@ -123,11 +139,24 @@ function ReadingResult({
           <span className="legend__item">
             <i className="legend__chip legend__chip--misread" /> прочитано иначе
           </span>
+          <span className="legend__item legend__hint">нажми на подсветку — покажу, что не так</span>
         </div>
         <p className="reftext">
           {pieces.map((p, i) =>
             p.mark ? (
-              <mark key={i} className={`hl hl--${p.mark}`}>
+              <mark
+                key={i}
+                className={`hl hl--${p.mark} hl--tappable`}
+                role="button"
+                tabIndex={0}
+                onClick={() => setOpenPiece(openPiece === p.text ? null : p.text)}
+                onKeyDown={(ev) => {
+                  if (ev.key === 'Enter' || ev.key === ' ') {
+                    ev.preventDefault()
+                    setOpenPiece(openPiece === p.text ? null : p.text)
+                  }
+                }}
+              >
                 {p.text}
               </mark>
             ) : (
@@ -135,6 +164,11 @@ function ReadingResult({
             ),
           )}
         </p>
+        {openPiece && (
+          <p className="hlnote">
+            <b>«{openPiece}»</b> — {explainOf(openPiece) ?? 'разбор не оставил пояснения к этому куску'}
+          </p>
+        )}
         <p className="resnote">
           Балл считается по сверке с текстом. Произношение и акцент не оцениваем —
           проверить это нечем, а выдуманная оценка хуже её отсутствия.
@@ -184,12 +218,16 @@ function ItemsResult({
             <h3 className="qsection__title">
               {label} №{i + 1}
             </h3>
+            {/* «Ваш ответ» — это ВСЕГДА то, что человек сказал, а не вердикт
+                проверки. Раньше у зачтённого пункта здесь стоял комментарий
+                модели («вопрос засчитан, грамматика верна»), и свой ответ
+                перечитать было негде — жалоба тестировщика 05.08.2026. */}
             <div className={`card2 qcard${failed ? ' qcard--bad' : ''}`}>
               <div className="pair">
                 <div className="pair__side">
                   <span className="pair__label">ваш ответ</span>
                   <span className={failed ? 'pair__wrong' : ''}>
-                    {failed && c.quote ? c.quote : c.comment || '—'}
+                    {c.quote || (failed ? '— не прозвучал —' : '—')}
                   </span>
                 </div>
                 <div className="pair__side">
@@ -201,7 +239,7 @@ function ItemsResult({
                   )}
                 </div>
               </div>
-              {failed && c.comment && <p className="pair__why">{c.comment}</p>}
+              {c.comment && <p className="pair__why">{c.comment}</p>}
             </div>
           </section>
         )

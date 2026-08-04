@@ -48,6 +48,7 @@ from fastapi.staticfiles import StaticFiles
 from faster_whisper import WhisperModel
 from openai import AsyncOpenAI, OpenAI
 
+import audio_check
 import ege_prompts
 import ege_scoring
 import fipi_import
@@ -2623,6 +2624,19 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                               filename: str = "speech.webm",
                               persona: str = "") -> dict:
     t0 = time.time()
+
+    # Осмотр САМОГО ЗВУКА до распознавания. Тишину нельзя отдавать в Voxtral:
+    # он не умеет отвечать «там ничего нет» и сочиняет текст — на шести
+    # секундах тишины выдал 960 слов чужого монолога (замер 05.08.2026).
+    # Ученику при этом приписывалось несказанное. Дешевле и честнее не
+    # спрашивать: заодно экономятся вызов STT и вызов LLM.
+    sound = await asyncio.to_thread(
+        audio_check.inspect, data, os.path.splitext(filename)[1].lower())
+    quiet = audio_check.silence_reason(sound)
+    if quiet is not None:
+        print(f"[audio] запись отклонена без распознавания: {sound}")
+        raise HTTPException(status_code=422, detail=quiet)
+
     # Выжимки памяти тянем ПАРАЛЛЕЛЬНО с распознаванием: STT занимает 0.5-2 с,
     # SELECT успевает заведомо раньше — добавка к задержке ровно ноль.
     mem_task = asyncio.create_task(_load_memory(device, kind))
@@ -2637,6 +2651,23 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     if not transcript_text:
         raise HTTPException(
             status_code=422, detail="Тишина — ничего не распознали. Запиши ответ ещё раз."
+        )
+
+    # Говорил долго, а слов пришло всего ничего — это провал РАСПОЗНАВАНИЯ, а не
+    # ученика. Ставить ноль за «слишком короткий ответ» здесь было бы ложным
+    # обвинением: тестировщик поймал ровно это («пишет, я прочитал только
+    # 2 слова, хотя фактически прочитал предложение»).
+    if audio_check.recognition_failed(sound, transcript_text):
+        mem_task.cancel()
+        print(f"[audio] распознавание не справилось: {sound}, "
+              f"слов {len(transcript_text.split())}")
+        note_failure("stt", "мало слов на длинной записи")
+        raise HTTPException(
+            status_code=502,
+            detail=(f"Не удалось разобрать запись: ты говорил "
+                    f"{int(sound.get('seconds') or 0)} секунд, а распознать "
+                    "удалось лишь пару слов. Это сбой распознавания, а не твой "
+                    "ответ — запиши ещё раз, ближе к микрофону."),
         )
 
     try:
@@ -3065,6 +3096,36 @@ async def talk_stream(audio: UploadFile = File(...),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
+
+
+@app.post("/speak")
+async def speak(request: Request, body: dict = Body(...),
+                x_device: str | None = Header(None),
+                x_admin_key: str | None = Header(None)):
+    """Озвучить готовый текст. Нужно интервью (№41).
+
+    По формату ЕГЭ вопросы интервьюера ЗВУЧАТ, а не показываются: экзаменуемый
+    воспринимает их на слух. Мы показывали их текстом — это меняло само
+    задание, потому что убирало аудирование (замечание тестировщика 05.08.2026).
+
+    Озвучиваются ТОЛЬКО вопросы из банка заданий, а не произвольный текст с
+    клиента: длина ограничена, а расход идёт в тот же счётчик, что и остальная
+    озвучка. Своего вызова LLM здесь нет вовсе — только синтез.
+    """
+    await _require_account(x_device, x_admin_key)
+    if not _rate_ok(f"say:{x_device or _client_ip(request)}", 40, 60.0):
+        raise HTTPException(status_code=429, detail="Слишком часто — подожди минутку.")
+    text = str(body.get("text") or "").strip()[:400]
+    if not text:
+        raise HTTPException(status_code=422, detail="Нечего озвучивать.")
+    who = persona_of(str(body.get("persona") or ""))
+    try:
+        audio = await synthesize(text, who)
+    except Exception as e:  # noqa: BLE001
+        note_failure("tts", f"{type(e).__name__}: {str(e)[:80]}")
+        raise HTTPException(status_code=502, detail=f"Озвучка не удалась: {e}")
+    return Response(content=audio, media_type="audio/mpeg",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.post("/talk_review")

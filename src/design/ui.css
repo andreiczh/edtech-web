@@ -1788,6 +1788,31 @@ body {
   background: rgba(240, 190, 106, 0.6);
 }
 
+/* Подсказка, что подсветку можно нажать: без неё её нажимать не догадываются. */
+.legend__hint {
+  color: var(--card-ink-dim);
+  font-style: italic;
+}
+
+.hl--tappable {
+  cursor: pointer;
+  border-radius: 4px;
+  outline-offset: 2px;
+}
+.hl--tappable:hover {
+  filter: brightness(0.94);
+}
+
+.hlnote {
+  margin: 10px 0 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(122, 116, 166, 0.1);
+  color: var(--card-ink);
+  font-size: clamp(12px, 1.4vw, 14px);
+  line-height: 1.45;
+}
+
 /* Пара «как сказал → как надо» */
 .pair {
   display: grid;

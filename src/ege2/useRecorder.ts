@@ -57,6 +57,36 @@ export function useRecorder() {
     }
   }, [stopStream])
 
+  /** Пауза и продолжение БЕЗ пересоздания записи.
+   *
+   * Нужно интервью (№41): вопрос звучит вслух, и микрофон не должен его
+   * записать — иначе голос экзаменатора попадёт в расшифровку и его же
+   * посчитают ответом ученика. Перезапуск рекордера тут не годится
+   * категорически: MediaRecorder теряет заголовок контейнера, а getUserMedia
+   * между шагами моргает индикатором микрофона и съедает первые слова. Пауза
+   * не трогает ни поток, ни контейнер — запись остаётся одним куском.
+   *
+   * Пауза не поддержана браузером — молча продолжаем писать: вопрос в
+   * расшифровке хуже, чем ничего, но не смертельно (он на английском и
+   * попадает между ответами), а потеря записи — смертельно. */
+  const pause = useCallback(() => {
+    const rec = recorderRef.current
+    try {
+      if (rec && rec.state === 'recording') rec.pause()
+    } catch {
+      /* браузер не умеет — пишем дальше */
+    }
+  }, [])
+
+  const resume = useCallback(() => {
+    const rec = recorderRef.current
+    try {
+      if (rec && rec.state === 'paused') rec.resume()
+    } catch {
+      /* см. выше */
+    }
+  }, [])
+
   /** Останавливает запись и отдаёт готовый blob. */
   const stop = useCallback(() => {
     return new Promise<Blob | null>((resolve) => {
@@ -84,5 +114,5 @@ export function useRecorder() {
     [stopStream],
   )
 
-  return { state, error, start, stop }
+  return { state, error, start, stop, pause, resume }
 }

@@ -91,6 +91,16 @@ check("правила ремесла собеседника в промпте",
       and "BANNED EMPTY PHRASES" in personas.SYSTEM_PROMPT)
 check("запрет выдумывать поправки — в общем промпте, для всех персон",
       "NEVER INVENT A MISTAKE" in personas.SYSTEM_PROMPT)
+# Жалобы тестировщика 05.08.2026: выдуманное «ты говорил про воду» и молчаливая
+# догадка вместо уточнения.
+check("запрет выдумывать сказанное учеником",
+      "NEVER INVENT WHAT THEY SAID" in personas.SYSTEM_PROMPT
+      and "You mentioned X earlier" in personas.SYSTEM_PROMPT)
+check("велено переспрашивать, а не догадываться",
+      "ask instead of guessing" in personas.SYSTEM_PROMPT)
+check("жёсткая персона не имеет права размякнуть насовсем",
+      "STAYING IN CHARACTER" in personas.PERSONAS["critic"]["prompt"]
+      and "you do not stop being hard" in personas.PERSONAS["critic"]["prompt"])
 check("длина ответа задана коридором, а не одной границей",
       all("roughly" in p["prompt"] for p in personas.PERSONAS.values())
       and "CEILING" in personas.SYSTEM_PROMPT)

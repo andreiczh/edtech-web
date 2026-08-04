@@ -195,6 +195,27 @@ def check_reading() -> list[str]:
     if d["coverage"] < sc.MIN_READ_COVERAGE:
         bad.append(f"порог coverage душит настоящее чтение: {d['coverage']}")
 
+    # 8. Пропуск, ПРИМКНУВШИЙ к ошибке распознавания (05.08.2026). difflib
+    # показывает такое одной «заменой», и раньше это считалось оговоркой, а не
+    # пропуском: балл оставался, хотя по критериям пропущенная строка — ноль.
+    # Жалоба тестировщика: «я пропустил предложение, а написало, что прочитано
+    # иначе».
+    glued = " ".join(words[:12] + ["something"] + words[26:])
+    d = sc.reading_diff(REF, glued)
+    if d["longest_missing_run"] < sc.SKIPPED_LINE_RUN:
+        bad.append(f"пропуск рядом с оговоркой не пойман: подряд "
+                   f"{d['longest_missing_run']} слов при 14 выброшенных")
+    if sc.score_reading(d, 0)[0] != 0:
+        bad.append("пропуск рядом с оговоркой обязан обнулять ответ")
+
+    # ...но обычная подмена в одно-два слова пропуском НЕ считается, иначе
+    # каждая оговорка обнуляла бы задание.
+    d = sc.reading_diff(REF, REF.replace("tall plant", "very small green plant"))
+    if d["longest_missing_run"] or d["missing_total"]:
+        bad.append(f"обычная подмена записана в пропуски: {d['missing_total']}")
+    if sc.score_reading(d, 0)[0] != 1:
+        bad.append("подмена пары слов не должна обнулять ответ")
+
     print(f"{'OK  ' if not bad else 'FAIL'} чтение вслух: пропуски, хвост, пропущенная строка")
     return bad
 

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Reac
 
 import { useCurrentPersona } from '../account/me'
 import { ConfirmDialog, CountdownBar, Mascot, Pill } from '../design/ui'
+import { askAloud } from '../ege2/askAloud'
 import { requestTaskFeedback, type TaskFeedback } from '../ege2/feedback'
 import { TASKS, feedbackPayload, type TaskId, type TaskVariant } from '../ege2/tasks'
 import { useCountdown } from '../ege2/useCountdown'
@@ -136,10 +137,19 @@ export function TaskScreen({
   const [failure, setFailure] = useState<string | null>(null)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
 
-  const { state, error: micError, start, stop } = useRecorder()
+  /* Интервью (№41) слушают, а не читают: вопрос ЗВУЧИТ, на экране его нет.
+     Показываем текст только если озвучить не удалось — задание без вопроса
+     хуже, чем задание в упрощённом виде. */
+  const spoken = task.kind === 'interview'
+  const [asking, setAsking] = useState(false)
+  const [showQuestion, setShowQuestion] = useState(!spoken)
+
+  const { state, error: micError, start, stop, pause, resume } = useRecorder()
 
   const phaseRef = useRef(phase)
   phaseRef.current = phase
+  const askingRef = useRef(false)
+  askingRef.current = asking
   const startedAtRef = useRef(0)
   const finishingRef = useRef(false)
   const blobRef = useRef<Blob | null>(null)
@@ -221,18 +231,51 @@ export function TaskScreen({
       return
     }
     if (phaseRef.current !== 'run') return
+    if (askingRef.current) return // вопрос ещё звучит — время ответа не пошло
     if (step + 1 < stepCount) setStep((s) => s + 1)
     else void finish()
   }, [finish, startRun, step, stepCount])
 
-  /* На подготовке тикает prepSeconds, на ответе — answerSeconds на каждый шаг. */
+  /* На подготовке тикает prepSeconds, на ответе — answerSeconds на каждый шаг.
+     `asking` в ключе сброса не для красоты: пока звучит вопрос, время ответа
+     идти не должно, а по концу вопроса отсчёт обязан начаться заново с полных
+     сорока секунд — иначе аудирование съедало бы время самого ответа. */
   const phaseSeconds = phase === 'prep' ? task.prepSeconds : task.answerSeconds
-  const left = useCountdown(phaseSeconds, onTimerDone, true, `${phase}:${step}`)
+  const left = useCountdown(phaseSeconds, onTimerDone, true, `${phase}:${step}:${asking}`)
 
   /* Хук нельзя вызвать условно, поэтому отсчёт тикает и на intro. Сброс приходит
      эффектом, уже после первой отрисовки prep/run, — без этой строки полоса на
      кадр вспыхивала бы красным 00:00. */
   const shown = left > 0 ? left : phaseSeconds
+
+  /* Вопрос интервью звучит вслух перед каждым ответом.
+   *
+   * Микрофон на это время СТАВИТСЯ НА ПАУЗУ: иначе голос экзаменатора попадёт
+   * в ту же запись, а значит и в расшифровку, и его посчитают ответом ученика.
+   * Пауза, а не перезапуск: перезапуск ломает контейнер записи (см. useRecorder).
+   */
+  useEffect(() => {
+    if (!spoken || phase !== 'run') return
+    const text = steps[step]
+    if (!text) return
+    const ac = new AbortController()
+    let alive = true
+    setAsking(true)
+    pause()
+    void askAloud(text, ac.signal).then((ok) => {
+      if (!alive) return
+      // Не прозвучало — показываем текстом. Задание станет проще, чем на
+      // экзамене, но останется выполнимым; молчащий экран не оставляет шансов.
+      if (!ok) setShowQuestion(true)
+      resume()
+      setAsking(false)
+    })
+    return () => {
+      alive = false
+      ac.abort()
+      resume()
+    }
+  }, [pause, phase, resume, spoken, step, steps])
 
   const begin = useCallback(async () => {
     setFeedback(null)
@@ -251,8 +294,9 @@ export function TaskScreen({
     blobRef.current = null
     finishingRef.current = false
     setStep(0)
+    setShowQuestion(!spoken) // новая попытка — снова слушаем, а не читаем
     setPhase('intro')
-  }, [])
+  }, [spoken])
 
   /* Выход спрашиваем ТОЛЬКО когда есть что терять: на вводном экране и на
      разборе терять нечего, и лишнее окно там просто раздражает. */
@@ -378,10 +422,15 @@ export function TaskScreen({
 
         {phase === 'run' && (
           <div className="scroll-soft scroll-soft--onDark" style={scrollArea}>
-            <RecBadge recording={state === 'recording'} />
+            <RecBadge recording={state === 'recording' && !asking} />
             {stepCount > 1 && (
               <span className="statrow__label" style={{ marginTop: 0 }}>
                 Вопрос {step + 1} из {stepCount}
+              </span>
+            )}
+            {asking && (
+              <span className="statrow__label" style={{ marginTop: 0 }}>
+                Слушай вопрос — запись начнётся сразу после него
               </span>
             )}
 
@@ -391,7 +440,22 @@ export function TaskScreen({
             )}
             {!variant.readText && !variant.images && <Mascot />}
 
-            {question && <p style={questionStyle}>{question}</p>}
+            {/* Пункты плана обязаны быть перед глазами ВО ВРЕМЯ ответа, а не
+                только на подготовке: по ним человек и говорит, и по ним же его
+                оценивают. Раньше они пропадали вместе с экраном подготовки —
+                жалоба тестировщика («пропадают пункты, по которым нужно
+                рассказывать»). Показываем там, где нет пошаговых вопросов:
+                у монолога и чтения. У 40 и 41 шаг задаёт вопрос сам. */}
+            {!steps.length && task.kind !== 'reading' && (
+              <div className="card2 taskcard" style={{ width: '100%' }}>
+                <Brief text={variant.brief} />
+              </div>
+            )}
+
+            {/* У интервью вопрос на экране НЕ печатается: по формату его
+                воспринимают на слух. Текст появится только если озвучка
+                отказала (showQuestion). */}
+            {question && showQuestion && <p style={questionStyle}>{question}</p>}
           </div>
         )}
 

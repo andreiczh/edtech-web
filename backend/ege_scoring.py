@@ -325,7 +325,23 @@ def reading_diff(reference: str, transcript: str) -> dict:
             if i2 == len(ref):  # хвост эталона не прозвучал
                 tail_missing = i2 - i1
         elif tag == "replace":
-            swaps.append({"expected": " ".join(ref[i1:i2]), "heard": " ".join(got[j1:j2])})
+            # Пропуск, примкнувший к ошибке распознавания, difflib показывает
+            # как ОДНУ замену: «двадцать слов эталона -> два услышанных».
+            # Считать это оговоркой нельзя — по критериям пропущенная строка
+            # обнуляет задание, а «прочитано иначе» нет. Тестировщик поймал
+            # ровно это: «я пропустил предложение, а написало, что прочитано
+            # иначе» (05.08.2026).
+            #
+            # Порог 3 — чтобы не записывать в пропуски обычные подмены, где
+            # услышано на слово-два меньше («is shaking» -> «shakes»).
+            lost = (i2 - i1) - (j2 - j1)
+            if lost >= 3:
+                missing_runs.append(ref[i1:i2])
+                if i2 == len(ref):
+                    tail_missing = lost
+            else:
+                swaps.append({"expected": " ".join(ref[i1:i2]),
+                              "heard": " ".join(got[j1:j2])})
 
     longest_run = max((len(r) for r in missing_runs), default=0)
     missing_total = sum(len(r) for r in missing_runs)
@@ -353,6 +369,21 @@ def reading_diff(reference: str, transcript: str) -> dict:
 _GATE_MIN_WORDS = {"reading": 8, "dialogue": 6, "interview": 15, "monologue": 25}
 
 
+def _plural_words(n: int) -> str:
+    """«2 слова», а не «2 слов»: текст видит ученик, и корявость в нём читается
+    как небрежность всей проверки."""
+    tail = n % 100
+    if 11 <= tail <= 14:
+        form = "слов"
+    elif n % 10 == 1:
+        form = "слово"
+    elif n % 10 in (2, 3, 4):
+        form = "слова"
+    else:
+        form = "слов"
+    return f"{n} {form}"
+
+
 def sanity_gate(kind: str, transcript: str) -> str | None:
     """Причина отказа без вызова модели — или None, если ответ похож на ответ.
 
@@ -362,8 +393,8 @@ def sanity_gate(kind: str, transcript: str) -> str | None:
     words = _words(transcript)
     need = _GATE_MIN_WORDS.get(kind, 8)
     if len(words) < need:
-        return (f"ответ слишком короткий: {len(words)} слов, а для этого задания "
-                f"нужно хотя бы {need} — попробуй ответить развёрнуто")
+        return (f"ответ слишком короткий: {_plural_words(len(words))}, а для этого "
+                f"задания нужно хотя бы {need} — попробуй ответить развёрнуто")
     # Одна фраза по кругу: уникальных слов почти нет. Порог 0.25 не трогает
     # живую речь (у неё доля уникальных 0.5+ даже с повторами-паразитами).
     if len(words) >= 12 and len(set(words)) / len(words) < 0.25:
