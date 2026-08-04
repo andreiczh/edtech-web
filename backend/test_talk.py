@@ -115,6 +115,24 @@ check("запрет выдумывать поправки — в общем пр
 check("длина ответа задана коридором, а не одной границей",
       all("roughly" in p["prompt"] for p in personas.PERSONAS.values())
       and "CEILING" in personas.SYSTEM_PROMPT)
+check("правила живой речи с потолками — в промпте",
+      "contractions" in personas.SYSTEM_PROMPT
+      and "At most ONE per reply" in personas.SYSTEM_PROMPT
+      and "three dots for hesitation" in personas.SYSTEM_PROMPT)
+check("запрет markdown пережил правила живой речи",
+      personas.SYSTEM_PROMPT.count("no markdown") >= 2)
+
+# Голоса Mistral: имя не из закрытого списка отдаёт 404, то есть тишину.
+check("у каждой персоны эмоция из закрытого списка",
+      all(personas.emotion_of(p) in personas.EMOTIONS
+          for p in personas.PERSONAS.values()))
+check("эмоции персон различаются",
+      len({personas.emotion_of(p) for p in personas.PERSONAS.values()}) == 3)
+check("опечатка в реестре не оставляет без голоса",
+      personas.emotion_of({"emotion": "en_paul_нетакого"}) == personas.DEFAULT_EMOTION
+      and personas.emotion_of({}) == personas.DEFAULT_EMOTION)
+check("жёсткой персоне достался злой голос",
+      personas.emotion_of(personas.PERSONAS["critic"]) == "en_paul_angry")
 check("формат озвучки не потерян",
       "no markdown" in personas.SYSTEM_PROMPT
       and "one simple follow-up question" in personas.SYSTEM_PROMPT)
@@ -251,6 +269,51 @@ check("разбор берёт всю историю без сжатия по д
 # Цена промпта — та, из которой выведен глобальный лимит 25 реплик/мин.
 chars = sum(len(m["content"]) for m in hist)
 check("бюджет символов истории в расчётных рамках", chars <= 5000, f"({chars})")
+
+# ------------------------------------------------- нарезка реплики на озвучку
+print("\nНарезка реплики")
+
+REPLY = ('That sounds fun! I once saw a comedy where a parrot caused chaos in a '
+         'small town. You can say "I went", not "I go". What did you like most?')
+
+head, rest = main._take_head(REPLY)
+check("голова набирается целыми предложениями",
+      head.endswith(("!", ".", "?")), f"({head!r})")
+check("голова не короче расчётного минимума",
+      len(head) >= main._HEAD_MIN_CHARS, f"({len(head)})")
+check("голова и остаток вместе дают исходный текст",
+      f"{head} {rest}".split() == REPLY.split())
+check("остаток НЕ пуст — иначе сквозной интонации не будет", bool(rest.strip()))
+
+# Пока предложение не закончилось, резать нельзя: интонацию конца фразы синтез
+# берёт из знака препинания, а обрывок прозвучит как оборванная мысль.
+partial = "That sounds fun! I once saw a comedy where a parrot caused ch"
+h2, r2 = main._take_head(partial)
+check("недобор длины — ждём, а не режем по живому", h2 == "" and r2 == partial)
+
+long_first = ("I really do think that weekends are far too short for absolutely "
+              "everyone these days. Right?")
+h3, r3 = main._take_head(long_first)
+check("длинное первое предложение уходит одно",
+      "Right" not in h3 and r3 == "Right?", f"({h3!r})")
+
+check("текст без знаков конца не режется",
+      main._take_head("no punctuation here at all just words going on and on") == (
+          "", "no punctuation here at all just words going on and on"))
+
+short_ones = ("Oh, nice. Really? That sounds like a fun way to spend a rainy "
+              "Saturday. What happened next?")
+h4, r4 = main._take_head(short_ones)
+check("короткие фразы копятся в одну голову",
+      h4.startswith("Oh, nice. Really?") and len(h4) >= main._HEAD_MIN_CHARS
+      and r4 == "What happened next?", f"({h4!r})")
+
+# Реплика короче порога головы озвучивается ЦЕЛИКОМ в конце, одним куском.
+# Это не недоработка: у короткого ответа и модель отрабатывает быстро, и синтез
+# дёшев, а сквозная интонация тут важнее лишней доли секунды.
+whole_short = "Oh, nice. What did you watch?"
+check("короткая реплика уходит одним куском",
+      main._take_head(whole_short) == ("", whole_short))
 
 print()
 if _fails:

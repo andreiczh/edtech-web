@@ -78,7 +78,37 @@ SYSTEM_PROMPT = (
     "10. NEVER INVENT A MISTAKE. Correct only words the student ACTUALLY said, and "
     "quote them as they said them. If a sentence was correct, say nothing about it — "
     "silence is the right response to correct English. Rewriting correct English "
-    "because you like your own wording better is forbidden."
+    "because you like your own wording better is forbidden.\n"
+    "\n"
+    # ------------------------------------------------------------------
+    # Как ПИШЕТСЯ реплика (04.08.2026, выбор владельца по прослушиванию).
+    #
+    # Половина «бездушности» жила не в синтезе, а в тексте: нейроголос
+    # отыгрывает то, что написано, а модель писала ровным письменным
+    # английским — точка, точка, точка. Междометие, тире, многоточие и
+    # стяжение — это готовые указания для интонации, и стоят они ноль.
+    # Проверено на слух: тот же голос, тот же синтез, разница слышна сразу.
+    #
+    # Потолки здесь не украшение: без них речь скатывается в манерность —
+    # многоточие через слово и «Oh!» в начале каждой реплики звучат хуже,
+    # чем ровный текст.
+    "HOW YOUR REPLY IS WRITTEN — it is SPOKEN, not printed. A text-to-speech "
+    "voice performs your punctuation, so punctuation is how you control your own "
+    "intonation:\n"
+    "- Write the way people talk. Always use contractions: I've, don't, that's, "
+    "you'd, it'll. Never the full forms.\n"
+    "- Start a reply with a natural reaction word when it genuinely fits: Oh, Ah, "
+    "Right, Wait, Honestly, You know. At most ONE per reply, and not every reply — "
+    "if you open three turns in a row this way it stops sounding human.\n"
+    "- Use a dash for a change of thought and three dots for hesitation, at most "
+    "one of each per reply. They make the voice breathe. More than that and you "
+    "sound theatrical.\n"
+    "- Prefer short spoken sentences to long written ones. Fragments are fine when "
+    "people speak in fragments: 'Nice.' 'Makes sense.'\n"
+    "- Offer choices with a colon when the question has options: 'So what got you "
+    "the most: the dog, or the people around him?'\n"
+    "- Still no markdown, no asterisks, no emojis, no stage directions — those get "
+    "read out loud as symbols and ruin everything above."
 )
 
 # --------------------------------------------------------------------------
@@ -151,6 +181,13 @@ MENTOR_PROMPT = (
 # GET /personas и рисует то, что дали, поэтому добавление новой персоны не
 # требует пересборки фронта.
 #
+# `emotion` — голос у ДРУГОГО синтеза, Mistral (04.08.2026, выбор владельца по
+# прослушиванию). Там эмоция зашита прямо в имя голоса, и доступны семь:
+# neutral, happy, sad, angry, excited, cheerful, confident. Диктор при этом
+# ОДИН, мужской, — персоны различаются только эмоцией, а три разных человека
+# (Ava, Andrew, Brian) существуют только на edge-tts. Отсюда и переключатель
+# TTS_PROVIDER: вернуться к трём голосам — это одна переменная окружения.
+#
 # `max_tokens` — ПОТОЛОК, а не цель: длину задаёт характер, а потолок лишь не
 # даёт ответу уехать в бесконечность. Раньше он был общий и равнялся 120 —
 # то есть примерно 90 слов, и вдумчивый ответ обрывался на полуслове (обрывок
@@ -159,6 +196,7 @@ MENTOR_PROMPT = (
 PERSONAS: dict[str, dict] = {
     "tutor": {
         "voice": "en-US-AvaMultilingualNeural",
+        "emotion": "en_paul_cheerful",
         "label": "Наставник",
         "description": "Спокойный и доброжелательный. Поправляет мягко и по делу, "
                        "держит темп разговора.",
@@ -178,6 +216,7 @@ PERSONAS: dict[str, dict] = {
     },
     "critic": {
         "voice": "en-US-AndrewMultilingualNeural",
+        "emotion": "en_paul_angry",
         "label": "Гондон",
         "description": "Жёсткий до хамства, с матом. Ловит каждую ошибку и не "
                        "утешает. Ругает ответ, а не тебя.",
@@ -210,6 +249,7 @@ PERSONAS: dict[str, dict] = {
     },
     "mentor": {
         "voice": "en-US-BrianMultilingualNeural",
+        "emotion": "en_paul_confident",
         "label": "Терпеливый",
         "description": "Самый мягкий. Объясняет подробно и не спеша, много "
                        "расспрашивает о тебе.",
@@ -234,6 +274,20 @@ DEFAULT_PERSONA = "tutor"
 def reply_tokens(who: dict) -> int:
     """Потолок длины ответа для этой персоны."""
     return int(who.get("max_tokens") or 220)
+
+
+# Голоса Mistral. Список закрытый — имя не из него отдаёт 404, и разговор
+# остался бы без звука. Проверено перебором 04.08.2026: диктор один, эмоций семь.
+EMOTIONS = ("en_paul_neutral", "en_paul_happy", "en_paul_sad", "en_paul_angry",
+            "en_paul_excited", "en_paul_cheerful", "en_paul_confident")
+DEFAULT_EMOTION = "en_paul_neutral"
+
+
+def emotion_of(who: dict) -> str:
+    """Эмоциональный голос персоны. Неизвестное значение молча заменяется
+    нейтральным: ученик не должен остаться без голоса из-за опечатки в реестре."""
+    voice = str(who.get("emotion") or "")
+    return voice if voice in EMOTIONS else DEFAULT_EMOTION
 
 
 def persona_of(pid: str | None) -> dict:

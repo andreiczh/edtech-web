@@ -127,6 +127,7 @@ from personas import (  # noqa: E402 — после настройки окру�
     DEFAULT_PERSONA,
     PERSONAS,
     SYSTEM_PROMPT,
+    emotion_of,
     persona_of,
     reply_tokens,
 )
@@ -214,7 +215,11 @@ KEEP_AWAKE_URL = os.environ.get("KEEP_AWAKE_URL", "").strip()
 KEEP_AWAKE_FROM_HOUR_UTC = int(os.environ.get("KEEP_AWAKE_FROM_HOUR_UTC", "4"))
 KEEP_AWAKE_TO_HOUR_UTC = int(os.environ.get("KEEP_AWAKE_TO_HOUR_UTC", "20"))
 
-TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "edge").strip().lower()
+# Кто озвучивает. По умолчанию mistral (решение владельца 04.08.2026 по
+# прослушиванию: живая интонация оказалась важнее трёх разных тембров).
+# Откат к трём голосам — TTS_PROVIDER=edge, ничего больше менять не нужно.
+# Разбор компромисса — в synthesize().
+TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "mistral").strip().lower()
 TTS_REMOTE_MODEL = os.environ.get("TTS_REMOTE_MODEL", "voxtral-mini-tts-latest")
 TTS_REMOTE_VOICE = os.environ.get("TTS_REMOTE_VOICE", "en_paul_neutral")
 
@@ -2042,31 +2047,45 @@ async def synthesize_mistral(text: str, voice: str | None = None) -> bytes:
 _tts_degraded = False
 
 
-async def synthesize(text: str, voice: str | None = None) -> bytes:
-    """Синтез с запасным путём: edge-tts, при отказе — Mistral.
+async def synthesize(text: str, who: dict | None = None) -> bytes:
+    """Синтез голосом выбранной персоны.
 
-    Один отказ переключает на запасной путь до конца жизни процесса: если
-    edge-tts недоступен с этого IP (а такое подозревают на хостингах), он не
-    станет доступен через фразу, и платить таймаутом на каждой реплике незачем.
+    Провайдера задаёт `TTS_PROVIDER`, и это НЕ равнозначные варианты — у каждого
+    своя цена (замерено 04.08.2026):
 
-    `voice` — голос выбранной персоны. У запасного пути (Mistral) своего набора
-    голосов нет, там персона звучит одинаково: об этом честно сказано в
-    комментарии к TTS_REMOTE_VOICE.
+      mistral — эмоция зашита в голос (cheerful, angry, confident и ещё
+        четыре), интонация живее, и синтез берёт сразу весь кусок. Но диктор
+        ОДИН, мужской: персоны различаются только эмоцией. Медленнее и растёт
+        с длиной — 30 знаков 0.65 с, 230 знаков 2.02 с. Своё ведро лимитов:
+        12000 входных знаков в минуту, с токенами LLM не пересекается.
+
+      edge — три РАЗНЫХ голоса (Ava, Andrew, Brian) и почти постоянная
+        скорость: 0.46 с на короткой фразе, 0.59 с на длинной. Но эмоции нет
+        совсем: стили Microsoft бесплатная точка отвергает наглухо.
+
+    Выбор владельца по прослушиванию — mistral: живая интонация оказалась
+    важнее трёх тембров. Вернуться к трём голосам — одна переменная окружения.
+
+    Запасной путь остаётся прежним: отказ edge-tts переключает на Mistral до
+    конца жизни процесса. Один отказ означает, что edge-tts недоступен с этого
+    IP, — через фразу он доступен не станет, и платить таймаутом на каждой
+    реплике незачем.
     """
     global _tts_degraded
+    who = who or persona_of(None)
     if TTS_PROVIDER == "mistral" or _tts_degraded:
-        return await synthesize_mistral(text)
+        return await synthesize_mistral(text, emotion_of(who))
     try:
-        return await synthesize_edge(text, voice)
+        return await synthesize_edge(text, who.get("voice"))
     except Exception as e:  # noqa: BLE001
         print(f"[tts] edge-tts отказал ({type(e).__name__}: {str(e)[:100]}), "
-              f"перехожу на Mistral {TTS_REMOTE_VOICE} до перезапуска")
+              f"перехожу на Mistral до перезапуска")
         # Деградация TTS — событие: голоса персон пропали до перезапуска.
         notify_owner("tts:degraded",
                      f"edge-tts отказал ({type(e).__name__}) — озвучка ушла на "
-                     "запасной Mistral (один голос) до перезапуска процесса.")
+                     "запасной Mistral (один диктор) до перезапуска процесса.")
         _tts_degraded = True
-        return await synthesize_mistral(text)
+        return await synthesize_mistral(text, emotion_of(who))
 
 
 # Клиенты создаём ОДИН раз на процесс, а не на каждый запрос: иначе каждый вызов
@@ -2130,6 +2149,40 @@ def _split_sentence(buf: str) -> tuple[str, str]:
         return "", buf
     end = m.end()
     return buf[:end].strip(), buf[end:].lstrip()
+
+
+# Минимальная длина ПЕРВОГО озвучиваемого куска. Не эстетика — арифметика.
+#
+# Реплика режется на два куска: голова уходит в синтез сразу (чтобы звук пошёл
+# быстро), остальное — ОДНИМ куском (чтобы у голоса была сквозная интонация, а
+# не по нейтральной фразе за раз; ровно это и слышно в примере C).
+#
+# Голова обязана ЗВУЧАТЬ дольше, чем синтезируется хвост, иначе в середине
+# реплики появится дыра. Замер Mistral TTS 04.08.2026: синтез ≈ 0.5 с + 0.0065 с
+# на знак, звучание ≈ 0.047 с на знак. Для хвоста в 150-200 знаков синтез
+# занимает 1.5-1.8 с, значит голова должна звучать хотя бы столько же:
+# 1.8 / 0.047 ≈ 40 знаков. Берём 70 с запасом на медленную сеть.
+#
+# Сверху это ограничено скоростью самой модели (~200 знаков/с), то есть ожидание
+# 70 знаков стоит около 0.35 с к паузе до первого звука — на порядок меньше, чем
+# сам синтез.
+_HEAD_MIN_CHARS = 70
+
+
+def _take_head(buf: str) -> tuple[str, str]:
+    """Первый кусок для озвучки: целые предложения, пока не наберётся _HEAD_MIN_CHARS.
+
+    Возвращает ('', buf) пока набирать нечего — обрывать предложение на середине
+    нельзя, интонация конца фразы у синтеза берётся из знака препинания.
+    """
+    head, rest = "", buf
+    while len(head) < _HEAD_MIN_CHARS:
+        sentence, tail = _split_sentence(rest)
+        if not sentence:
+            return "", buf  # законченных предложений не хватило — ждём ещё
+        head = f"{head} {sentence}".strip() if head else sentence
+        rest = tail
+    return head, rest
 
 
 async def _keep_awake_loop():
@@ -2852,7 +2905,7 @@ async def talk_stream(audio: UploadFile = File(...),
         async def emit(sentence: str):
             nonlocal first_audio_at, emitted
             try:
-                wav = await synthesize(sentence, who["voice"])
+                wav = await synthesize(sentence, who)
             except Exception as e:  # noqa: BLE001
                 raise TtsFailed(str(e)) from e
             if first_audio_at is None:
@@ -2935,6 +2988,7 @@ async def talk_stream(audio: UploadFile = File(...),
                     stream=True,
                 )
                 stream_usage = None
+                head_done = False
                 async for chunk in stream:
                     # usage приезжает в последнем чанке стрима (если провайдер
                     # его шлёт) — запоминаем для счётчика расхода.
@@ -2945,13 +2999,15 @@ async def talk_stream(audio: UploadFile = File(...),
                         continue
                     buf += delta
                     reply_full += delta
-                    # выгружаем все законченные предложения из буфера
-                    while True:
-                        sentence, buf = _split_sentence(buf)
-                        if not sentence:
-                            break
-                        yield await emit(sentence)
-                # хвост (последнее предложение без завершающего пробела)
+                    if not head_done:
+                        head, rest = _take_head(buf)
+                        if head:
+                            buf = rest
+                            head_done = True
+                            yield await emit(head)
+                # ХВОСТ — одним куском, а не по предложениям: в этом вся суть
+                # правки (см. _take_head). Пока голова звучит, хвост успевает
+                # синтезироваться, и стык остаётся незаметным.
                 tail = buf.strip()
                 if tail:
                     yield await emit(tail)
