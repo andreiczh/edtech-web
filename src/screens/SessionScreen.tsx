@@ -207,6 +207,7 @@ function SessionSummary({
                             transcript={r.transcript}
                             reference={variant?.readText}
                             variantId={r.variantId}
+                            variant={variant}
                           />
                         ) : (
                           <p style={{ margin: 0 }}>{r.failure ?? 'Разбор не выполнен.'}</p>

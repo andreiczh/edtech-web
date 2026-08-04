@@ -500,6 +500,7 @@ export function TaskScreen({
                   reference={variant.readText}
                   audioUrl={audioUrl}
                   variantId={variant.id}
+                  variant={variant}
                 />
               )
             )}

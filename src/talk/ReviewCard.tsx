@@ -17,14 +17,21 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { TalkReview } from './review'
+import { Disagree } from '../components/Disagree'
+import type { DisputeContext } from '../ege2/dispute'
+import type { DialogTurn, TalkReview } from './review'
 
 export function ReviewCard({
   review,
+  history,
   onClose,
   onNewTopic,
 }: {
   review: TalkReview
+  /** Сам разговор — уходит вместе с жалобой на разбор: без него спор о
+      «выдуманной ошибке» пересмотреть нечем. На сервере разговор не хранится,
+      сюда он попадает только по нажатию «не согласен». */
+  history: DialogTurn[]
   onClose: () => void
   onNewTopic: () => void
 }) {
@@ -33,13 +40,30 @@ export function ReviewCard({
   useEffect(() => {
     closeRef.current?.focus()
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      // Escape внутри формы несогласия закрывает ТОЛЬКО её. Оба обработчика
+      // висят на window, и наш зарегистрирован раньше — без этой проверки один
+      // Escape сносил бы вместе с формой и весь разбор, вместе с набранным
+      // текстом жалобы.
+      if (e.key === 'Escape' && !document.querySelector('.dsg')) onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
   const { mistakes, good, phrases, stats } = review
+
+  /* Улика для спора — реплики САМОГО УЧЕНИКА: именно их разбор цитирует, и
+     именно по ним проверяется, была ли ошибка выдумана. */
+  const dispute: DisputeContext = {
+    kind: 'talk',
+    target: 'talk_review',
+    transcript: history
+      .filter((t) => t.role === 'user')
+      .map((t) => t.content)
+      .join('\n'),
+    feedback: review,
+    context: { turns: history, stats },
+  }
 
   return createPortal(
     <div className="modal-backdrop" onClick={onClose}>
@@ -95,6 +119,19 @@ export function ReviewCard({
                     <span className="review__was">{m.quote}</span>
                     <span className="review__fix">{m.correction}</span>
                     {m.why && <span className="review__why">{m.why}</span>}
+                    {/* Разбор беседы ошибается ровно теми же способами, что и
+                        разбор ЕГЭ, — и правится теми же данными. Поэтому
+                        кнопка стоит у каждой ошибки, а не только под всем
+                        разбором. */}
+                    <Disagree
+                      label="это не ошибка"
+                      ctx={{
+                        ...dispute,
+                        target: 'error',
+                        targetKey: m.quote.slice(0, 40),
+                        targetLabel: `«${m.quote}» → «${m.correction}»`,
+                      }}
+                    />
                   </li>
                 ))}
               </ul>
@@ -114,6 +151,11 @@ export function ReviewCard({
               </ul>
             </section>
           )}
+          <Disagree
+            block
+            label="Не согласен с разбором"
+            ctx={{ ...dispute, targetLabel: `Разбор беседы — ${stats.turns} реплик` }}
+          />
         </div>
 
         <footer className="review__foot">

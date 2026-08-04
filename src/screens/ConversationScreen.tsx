@@ -20,6 +20,7 @@
 import { useCallback, useState } from 'react'
 
 import { useSettings } from '../account/me'
+import { Disagree } from '../components/Disagree'
 import { MicButton } from '../components/MicButton'
 import { BottomBar } from '../design/ui'
 import { ReviewCard } from '../talk/ReviewCard'
@@ -98,6 +99,22 @@ export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
                   )}
                   {transcript && <span>распознано: «{transcript}»</span>}
                 </div>
+
+                {/* Жалоба на КОНКРЕТНУЮ реплику — прямо под ней и прямо сейчас.
+                    До разбора в конце беседы человек это забудет, а «ответил не
+                    на то» без самой пары реплик починить невозможно. Разговор
+                    на сервере не хранится: сюда его хвост попадает только по
+                    этому нажатию, о чём форма предупреждает. */}
+                <Disagree
+                  label="ответ невпопад?"
+                  ctx={{
+                    kind: 'talk',
+                    target: 'talk_reply',
+                    targetLabel: 'Реплика собеседника',
+                    transcript: `Ученик: ${transcript || '—'}\nСобеседник: ${reply}`,
+                    context: { turns: getHistory().slice(-6) },
+                  }}
+                />
               </>
             )}
           </div>
@@ -133,6 +150,7 @@ export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
       {review && (
         <ReviewCard
           review={review}
+          history={getHistory()}
           onClose={() => setReview(null)}
           onNewTopic={() => {
             setReview(null)

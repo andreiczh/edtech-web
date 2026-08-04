@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 
 import { httpErrorMessage } from '../backendError'
 import { Pill } from '../design/ui'
+import { REASONS } from '../ege2/dispute'
 import { BRIEF_39, BRIEF_41, ad, monologueBrief, type TaskKind } from '../ege2/tasks'
 
 const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
@@ -414,6 +415,484 @@ function OverviewCard({ adminKey }: { adminKey: string }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------- Обратная связь и споры об оценке */
+
+interface Dispute {
+  id: string
+  student_id: string
+  kind: string
+  variant: string | null
+  persona: string | null
+  target: string | null
+  target_key: string | null
+  target_label: string | null
+  reason: string | null
+  comment: string | null
+  said: string | null
+  score: number | null
+  max_score: number | null
+  claim_score: number | null
+  transcript: string | null
+  feedback: string | null
+  context: string | null
+  status: string
+  verdict: string | null
+  verdict_score: number | null
+  verdict_note: string | null
+  created_at: string
+  resolved_at: string | null
+}
+
+interface DisputeStats {
+  total: number
+  pending: number
+  by_kind: Record<string, number>
+  by_reason: Record<string, number>
+  by_target: Record<string, number>
+  by_verdict: Record<string, number>
+}
+
+const TARGET_RU: Record<string, string> = {
+  score: 'работа целиком',
+  item: 'вопрос / ответ',
+  criterion: 'критерий ФИПИ',
+  error: 'найденная ошибка',
+  talk_review: 'разбор беседы',
+  talk_reply: 'реплика собеседника',
+  app: 'приложение',
+}
+
+const KIND_ALL: Record<string, string> = {
+  ...KIND_RU,
+  talk: 'разговор',
+  app: 'приложение',
+}
+
+const VERDICT_RU: Record<string, string> = {
+  ours: 'наш балл верен',
+  student: 'прав ученик',
+  partial: 'частично прав',
+}
+
+/* Жалобы, поданные ДО появления формы, лежат в той же таблице с пустыми
+   полями. Их нельзя показывать так, будто человек выбрал «дело не в балле» или
+   «без причины» осознанно: это разные вещи, и по ним принимаются разные
+   решения. Поэтому пустое место называется пустым. */
+const reasonLabel = (code: string | null): string =>
+  REASONS.find((r) => r.code === code)?.label ??
+  (!code || code === '?' ? 'причина не указана (старая жалоба)' : code)
+
+const claimLabel = (claim: number | null): string =>
+  claim === null || claim === undefined
+    ? 'не указано'
+    : claim >= 0
+      ? String(claim)
+      : 'дело не в балле'
+
+/** Разобрать JSON, не роняя экран. Жалобы копятся годами, формат снимка
+    разбора будет меняться — старая запись обязана открываться и потом. */
+function parseSafe(raw: string | null): unknown {
+  if (!raw) return null
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+const dim: CSSProperties = { fontSize: 12, color: 'var(--card-ink-dim)' }
+const blockTitle: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: '0.06em',
+  color: 'var(--card-ink-dim)',
+  margin: '10px 0 2px',
+}
+const quoteBox: CSSProperties = {
+  margin: 0,
+  padding: '6px 8px',
+  borderRadius: 8,
+  background: 'rgba(0,0,0,0.05)',
+  fontSize: 13,
+  whiteSpace: 'pre-wrap',
+  maxHeight: 220,
+  overflowY: 'auto',
+}
+
+/** Обстановка спора: текст задания либо кусок беседы — что приложил экран. */
+function ContextView({ raw }: { raw: string | null }) {
+  const ctx = parseSafe(raw) as Record<string, unknown> | null
+  if (!ctx) return null
+  const turns = ctx.turns as Array<{ role: string; content: string }> | undefined
+  const steps = ctx.steps as string[] | undefined
+  const facts = ctx.photoFacts as string[] | undefined
+  return (
+    <>
+      <p style={blockTitle}>НА ФОНЕ ЧЕГО</p>
+      <div style={quoteBox}>
+        {typeof ctx.brief === 'string' && <div>{ctx.brief}</div>}
+        {typeof ctx.readText === 'string' && (
+          <div style={{ fontStyle: 'italic', marginTop: 6 }}>{ctx.readText}</div>
+        )}
+        {steps && steps.length > 0 && (
+          <ol style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+            {steps.map((s, i) => (
+              <li key={i}>{s}</li>
+            ))}
+          </ol>
+        )}
+        {facts && facts.length > 0 && (
+          <div style={{ marginTop: 6, ...dim }}>на фото: {facts.join(' | ')}</div>
+        )}
+        {turns && turns.length > 0 && (
+          <div style={{ display: 'grid', gap: 3 }}>
+            {turns.map((t, i) => (
+              <div key={i}>
+                <b>{t.role === 'user' ? 'ученик' : 'ИИ'}:</b> {t.content}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
+/** Что выдал разбор — то, с чем спорят. Показываем разобранным, а сырой JSON
+    оставляем по кнопке: ничего не прячем, но и не заставляем читать скобки. */
+function VerdictView({ raw }: { raw: string | null }) {
+  const [rawOpen, setRawOpen] = useState(false)
+  const fb = parseSafe(raw) as
+    | {
+        summary?: string
+        score?: number
+        max?: number
+        criteria?: Array<{ name?: string; score?: number; max?: number; comment?: string }>
+        errors?: Array<{ quote?: string; correction?: string; explanation?: string }>
+        mistakes?: Array<{ quote?: string; correction?: string; why?: string }>
+      }
+    | null
+  if (!raw) return null
+  return (
+    <>
+      <p style={blockTitle}>ЧТО ВЫДАЛ РАЗБОР</p>
+      {fb ? (
+        <div style={quoteBox}>
+          {fb.summary && <div>{fb.summary}</div>}
+          {(fb.criteria ?? []).map((c, i) => (
+            <div key={i}>
+              • {c.name}: <b>{c.score}</b> из {c.max}
+              {c.comment ? ` — ${c.comment}` : ''}
+            </div>
+          ))}
+          {[...(fb.errors ?? []), ...(fb.mistakes ?? [])].map((e, i) => (
+            <div key={`e${i}`}>
+              — «{e.quote}» → «{e.correction}»
+              {'explanation' in e && e.explanation ? ` (${e.explanation})` : ''}
+              {'why' in e && e.why ? ` (${e.why})` : ''}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p style={dim}>снимок разбора не разобрался — смотри сырые данные</p>
+      )}
+      <button type="button" className="dsg__link" onClick={() => setRawOpen(!rawOpen)}>
+        {rawOpen ? 'скрыть сырые данные' : 'сырые данные'}
+      </button>
+      {rawOpen && <pre style={{ ...quoteBox, fontSize: 11 }}>{raw}</pre>}
+    </>
+  )
+}
+
+/** Форма вердикта. Это и есть разметка золотого набора: строка «наш балл 3,
+    верный 5, потому что аспект 2 раскрыт» — готовый калибровочный случай. */
+function Resolve({
+  d,
+  adminKey,
+  onDone,
+}: {
+  d: Dispute
+  adminKey: string
+  onDone: () => void
+}) {
+  const [verdict, setVerdict] = useState(d.verdict ?? '')
+  const [score, setScore] = useState<number>(d.verdict_score ?? -1)
+  const [note, setNote] = useState(d.verdict_note ?? '')
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const max = d.max_score ?? 0
+
+  const save = (status: 'done' | 'skip') => {
+    setBusy(true)
+    setErr(null)
+    void api(`/admin/disputes/${d.id}`, adminKey, {
+      method: 'POST',
+      body: JSON.stringify({ status, verdict, verdict_score: score, verdict_note: note }),
+    })
+      .then(onDone)
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div style={{ marginTop: 10, borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: 8 }}>
+      <p style={blockTitle}>ТВОЙ ВЕРДИКТ</p>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+        {Object.entries(VERDICT_RU).map(([code, label]) => (
+          <button
+            key={code}
+            type="button"
+            className={`dsg__chip${verdict === code ? ' dsg__chip--on' : ''}`}
+            onClick={() => setVerdict(code)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {max > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+          <span style={{ ...dim, alignSelf: 'center' }}>верный балл:</span>
+          {Array.from({ length: max + 1 }, (_, n) => (
+            <button
+              key={n}
+              type="button"
+              className={`dsg__score${score === n ? ' dsg__chip--on' : ''}`}
+              onClick={() => setScore(n)}
+            >
+              {n}
+            </button>
+          ))}
+          <button
+            type="button"
+            className={`dsg__chip${score === -1 ? ' dsg__chip--on' : ''}`}
+            onClick={() => setScore(-1)}
+          >
+            не в балле
+          </button>
+        </div>
+      )}
+      <input
+        className="auth-input"
+        style={{ width: '100%', textAlign: 'left' }}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="почему так — эта строка и станет правилом для калибровки"
+      />
+      <div className="rowend" style={{ gap: 8, marginTop: 8 }}>
+        <Pill quiet disabled={busy} onClick={() => save('skip')}>
+          Отложить
+        </Pill>
+        <Pill disabled={busy || !verdict} onClick={() => save('done')}>
+          Разобрано
+        </Pill>
+      </div>
+      {err && <p style={{ color: '#b4485c', fontWeight: 700, margin: '6px 0 0' }}>{err}</p>}
+    </div>
+  )
+}
+
+/**
+ * Копилка обратной связи — очередь разбора, а не витрина.
+ *
+ * Зачем она в таком виде. Жалоба ученика это ЕДИНСТВЕННЫЙ источник размеченных
+ * работ, который растёт сам: шесть работ ФИПИ конечны, а споров будет столько,
+ * сколько ошибается проверка. Чтобы спор стал калибровочным случаем, не хватает
+ * ровно одного — вердикта человека, поэтому он ставится здесь в три нажатия,
+ * а не выносится в отдельный документ, который никто не заполнит.
+ *
+ * Сверху разрезы: по типу задания (что чинить первым), по причине (что именно
+ * чинить) и по вердиктам (какая доля жалоб оказалась справедливой — то есть
+ * настоящая частота ошибок проверки, а не жалоб на неё).
+ */
+function Disputes({ adminKey }: { adminKey: string }) {
+  const [list, setList] = useState<Dispute[]>([])
+  const [stats, setStats] = useState<DisputeStats | null>(null)
+  const [status, setStatus] = useState<'new' | 'all'>('new')
+  const [kind, setKind] = useState<string>('all')
+  const [open, setOpen] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const d = (await api(
+        `/admin/disputes${status === 'new' ? '?status=new' : ''}`,
+        adminKey,
+      )) as { disputes: Dispute[]; stats: DisputeStats }
+      setList(d.disputes ?? [])
+      setStats(d.stats ?? null)
+      setErr(null)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    }
+  }, [adminKey, status])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const shown = list.filter((d) => kind === 'all' || d.kind === kind)
+
+  const download = () => {
+    const blob = new Blob([JSON.stringify(list, null, 2)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `pingo-disputes-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  /* Названия берём из ТОГО ЖЕ каталога, что и форма ученика: свой словарь в
+     админке разъехался бы с формой при первой же правке причин. */
+  const REASON_RU = Object.fromEntries(REASONS.map((r) => [r.code, r.label]))
+
+  const chips = (title: string, data: Record<string, number>, ru: Record<string, string>) => {
+    const items = Object.entries(data).sort((a, b) => b[1] - a[1])
+    if (!items.length) return null
+    return (
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ ...dim, fontWeight: 800 }}>{title}</span>
+        {items.map(([k, n]) => (
+          <span
+            key={k}
+            style={{
+              fontSize: 12,
+              padding: '3px 9px',
+              borderRadius: 999,
+              background: 'rgba(0,0,0,0.06)',
+            }}
+          >
+            {ru[k] ?? (k === '?' ? 'не указано (старые жалобы)' : k)} · <b>{n}</b>
+          </span>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="card2" style={{ width: 'min(100%, 760px)' }}>
+      <div className="rowbetween" style={{ marginBottom: 4 }}>
+        <p style={{ margin: 0, fontWeight: 800 }}>
+          Обратная связь учеников
+          {stats && (
+            <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--card-ink-dim)' }}>
+              {' '}
+              — {stats.total} всего, {stats.pending} ждут разбора
+            </span>
+          )}
+        </p>
+        <span style={{ display: 'flex', gap: 6 }}>
+          <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)}>
+            <option value="new">ждут разбора</option>
+            <option value="all">все</option>
+          </select>
+          <select value={kind} onChange={(e) => setKind(e.target.value)}>
+            <option value="all">все разделы</option>
+            {Object.entries(KIND_ALL).map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </span>
+      </div>
+
+      <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--card-ink-dim)' }}>
+        Каждая разобранная жалоба — случай в калибровочном наборе: «наш балл N,
+        верный M, потому что…». Именно из них проверка учится не ошибаться дважды.
+      </p>
+
+      {stats && (
+        <div style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
+          {chips('РАЗДЕЛЫ', stats.by_kind, KIND_ALL)}
+          {chips('ПРИЧИНЫ', stats.by_reason, REASON_RU)}
+          {chips('ГДЕ ИМЕННО', stats.by_target, TARGET_RU)}
+          {chips('ВЕРДИКТЫ', stats.by_verdict, VERDICT_RU)}
+        </div>
+      )}
+
+      {err && <p style={{ color: '#b4485c', fontWeight: 700 }}>{err}</p>}
+      {shown.length === 0 && (
+        <p style={{ margin: 0 }}>
+          {status === 'new' ? 'Неразобранных жалоб нет.' : 'Жалоб пока нет.'}
+        </p>
+      )}
+
+      {shown.map((d) => {
+        const isOpen = open === d.id
+        const where = TARGET_RU[d.target ?? ''] ?? d.target ?? 'место не указано'
+        return (
+          <div key={d.id} style={{ borderTop: '1px solid rgba(0,0,0,0.08)', padding: '8px 0' }}>
+            <button
+              type="button"
+              onClick={() => setOpen(isOpen ? null : d.id)}
+              style={{ all: 'unset', cursor: 'pointer', display: 'block', width: '100%' }}
+            >
+              <div className="rowbetween">
+                <span style={{ fontWeight: 700, minWidth: 0 }}>
+                  {d.status === 'new' ? '🟡' : d.status === 'skip' ? '⏸' : '✅'}{' '}
+                  {KIND_ALL[d.kind] ?? d.kind} · {where}
+                  {d.max_score ? (
+                    <>
+                      {' '}
+                      · балл <b>{d.score}</b> → просят <b>{claimLabel(d.claim_score)}</b>
+                    </>
+                  ) : null}
+                </span>
+                <span style={{ ...dim, flexShrink: 0 }}>{d.created_at?.slice(0, 16).replace('T', ' ')}</span>
+              </div>
+              <div style={{ ...dim, marginTop: 2 }}>
+                {reasonLabel(d.reason)}
+                {d.target_label ? ` · ${d.target_label}` : ''}
+              </div>
+              {!isOpen && d.comment && (
+                <div style={{ fontSize: 13, marginTop: 2 }}>«{d.comment.slice(0, 110)}»</div>
+              )}
+            </button>
+
+            {isOpen && (
+              <div style={{ paddingTop: 4 }}>
+                <p style={blockTitle}>УЧЕНИК ПИШЕТ</p>
+                <p style={{ margin: 0, fontSize: 14 }}>{d.comment}</p>
+                {d.said && (
+                  <p style={{ margin: '4px 0 0', fontSize: 13 }}>
+                    <span style={dim}>сказал на самом деле: </span>«{d.said}»
+                  </p>
+                )}
+
+                {d.transcript && (
+                  <>
+                    <p style={blockTitle}>ЧТО РАСПОЗНАЛОСЬ</p>
+                    <p style={quoteBox}>{d.transcript}</p>
+                  </>
+                )}
+
+                <ContextView raw={d.context} />
+                <VerdictView raw={d.feedback} />
+
+                <p style={{ ...dim, marginTop: 8 }}>
+                  ученик {d.student_id?.slice(0, 8)} · вариант {d.variant || '—'} · собеседник{' '}
+                  {d.persona || '—'}
+                  {d.resolved_at ? ` · разобрано ${d.resolved_at.slice(0, 16).replace('T', ' ')}` : ''}
+                </p>
+
+                <Resolve d={d} adminKey={adminKey} onDone={load} />
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {list.length > 0 && (
+        <div className="rowend" style={{ marginTop: 10 }}>
+          <Pill quiet onClick={download}>
+            Скачать JSON
+          </Pill>
+        </div>
+      )}
     </div>
   )
 }
@@ -832,6 +1311,10 @@ export function AdminScreen({ onExit }: { onExit: () => void }) {
         style={{ overflowY: 'auto', justifyContent: 'safe center', padding: '8px 10px' }}
       >
         <OverviewCard adminKey={key} />
+
+        {/* Копилка стоит ВТОРОЙ сверху, сразу под сводкой: это рабочая очередь
+            владельца, а банк заданий и коды — обслуживание. */}
+        <Disputes adminKey={key} />
 
         <div className="card2" style={{ width: 'min(100%, 760px)' }}>
           <p style={{ margin: '0 0 10px', fontWeight: 800 }}>Добавить вариант</p>

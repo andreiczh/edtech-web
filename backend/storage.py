@@ -167,11 +167,14 @@ def ensure_schema() -> None:
         # на ученика: следуют за человеком между устройствами, как и память.
         "CREATE TABLE IF NOT EXISTS settings ("
         " student_id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL)",
-        # Копилка несогласий с оценкой. ЕДИНСТВЕННОЕ место, где хранится
-        # транскрипт речи, — и попадает он сюда только по ЯВНОМУ нажатию
-        # «не согласен с оценкой»: ученик сам отдаёт свой ответ на разбор.
-        # Общее решение «транскрипты не храним» остаётся в силе для всего
-        # остального. Зачем копилка: спорные разборы + вердикт человека = свой
+        # Копилка несогласий с ИИ. ЕДИНСТВЕННОЕ место, где хранится речь
+        # ученика, — и попадает она сюда только по ЯВНОМУ нажатию «не
+        # согласен»: человек сам отдаёт свой ответ на пересмотр, о чём форма
+        # прямо предупреждает. Кроме расшифровки сохраняется ОБСТАНОВКА
+        # (колонка context): текст задания, соседние реплики беседы, снимок
+        # разбора — без них спор через неделю нечитаем. Общее решение
+        # «транскрипты не храним» остаётся в силе для всего остального.
+        # Зачем копилка: спорные разборы + вердикт человека = свой
         # калибровочный набор, как шесть работ ФИПИ, только растущий.
         # Дневные счётчики голосовых запросов: лимит 300/день должен
         # переживать деплой (= каждый git push), иначе он декоративный.
@@ -195,17 +198,43 @@ def ensure_schema() -> None:
     ):
         _exec(ddl)
 
-    # Миграции существующих таблиц — отдельно от CREATE TABLE и каждая под
-    # своим try: ALTER TABLE ADD COLUMN падает, если колонка уже есть, а
-    # «уже есть» — это норма при каждом втором старте, а не авария.
+    # Миграции существующих таблиц — отдельно от CREATE TABLE.
     #
     # source='fipi' + source_id='F2934C' у задания: это и защита от дублей при
     # повторном импорте, и видимое происхождение — заимствованное задание
     # должно быть отличимо от своего.
-    for column in ("source TEXT", "source_id TEXT"):
+    _add_columns("tasks", ("source TEXT", "source_id TEXT"))
+    # Жалоба ученика: без этих полей у неё нет ни причины, ни обстановки —
+    # см. backend/disputes.py. Порядок колонок здесь = порядок в dispute_add.
+    _add_columns("disputes", (
+        "target TEXT", "target_key TEXT", "target_label TEXT", "reason TEXT",
+        "claim_score INTEGER", "said TEXT", "context TEXT",
+        "verdict TEXT", "verdict_score INTEGER", "verdict_note TEXT",
+        "resolved_at TEXT",
+    ))
+
+
+def _columns(table: str) -> set[str]:
+    """Имена колонок таблицы. Способ узнать их у движков разный — прячем."""
+    if _IS_PG:
+        rows = _exec("SELECT column_name FROM information_schema.columns"
+                     " WHERE table_name=?", (table,)).fetchall()
+        return {r[0] for r in rows}
+    return {r[1] for r in _exec(f"PRAGMA table_info({table})").fetchall()}  # noqa: S608
+
+
+def _add_columns(table: str, specs: tuple[str, ...]) -> None:
+    """Дописать недостающие колонки. Спрашиваем схему ОДНИМ запросом, а не
+    ловим исключение на каждой колонке: «уже есть» — норма при каждом старте,
+    а на Postgres каждая такая проверка стоила бы отдельного похода в Neon."""
+    have = _columns(table)
+    for spec in specs:
+        name = spec.split()[0]
+        if name in have:
+            continue
         try:
-            _exec(f"ALTER TABLE tasks ADD COLUMN {column}")
-        except Exception:  # noqa: BLE001 — колонка уже на месте
+            _exec(f"ALTER TABLE {table} ADD COLUMN {spec}")  # noqa: S608 — свои строки
+        except Exception:  # noqa: BLE001 — гонка двух процессов на старте
             pass
 
 
@@ -657,39 +686,85 @@ def _maybe_rebuild_global_digest(kind: str) -> None:
 
 # ------------------------------------------------ Копилка несогласий с оценкой
 
-def dispute_add(student_id: str, kind: str, variant: str, persona: str,
-                score: int, max_score: int, transcript: str,
-                feedback_json: str, comment: str) -> str:
-    """Несогласие с разбором — по явному нажатию ученика (см. DDL disputes)."""
+_DISPUTE_FIELDS = ("id", "student_id", "kind", "variant", "persona", "target",
+                   "target_key", "target_label", "reason", "comment", "said",
+                   "score", "max_score", "claim_score", "transcript", "feedback",
+                   "context", "status", "verdict", "verdict_score", "verdict_note",
+                   "created_at", "resolved_at")
+
+
+def dispute_add(student_id: str, data: dict) -> str:
+    """Несогласие с ИИ — по явному нажатию ученика (см. DDL disputes).
+
+    На вход идёт УЖЕ проверенный словарь из disputes.normalize: сюда жалоба
+    попадает только целиком собранной, и переписывать проверки в двух местах
+    не приходится.
+    """
     did = str(uuid.uuid4())
-    _exec("INSERT INTO disputes(id, student_id, kind, variant, persona, score,"
-          " max_score, transcript, feedback, comment, status, created_at)"
-          " VALUES(?,?,?,?,?,?,?,?,?,?,'new',?)",
-          (did, student_id, kind, variant, persona, int(score), int(max_score),
-           transcript, feedback_json, comment, _now()))
+    _exec("INSERT INTO disputes(id, student_id, kind, variant, persona, target,"
+          " target_key, target_label, reason, comment, said, score, max_score,"
+          " claim_score, transcript, feedback, context, status, created_at)"
+          " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'new',?)",
+          (did, student_id, data["kind"], data["variant"], data["persona"],
+           data["target"], data["target_key"], data["target_label"],
+           data["reason"], data["comment"], data["said"], int(data["score"]),
+           int(data["max_score"]), int(data["claim_score"]), data["transcript"],
+           data["feedback"], data["context"], _now()))
     return did
 
 
-def disputes_list(status: str | None = None, limit: int = 100) -> list[dict]:
-    """Для админки: свежие несогласия, при желании только неразобранные."""
+def disputes_list(status: str | None = None, limit: int = 200) -> list[dict]:
+    """Для админки: свежие жалобы ЦЕЛИКОМ, при желании только неразобранные.
+
+    Отдаём все поля без обрезки: админка — рабочий стол калибровки, а урезанная
+    жалоба ровно в том месте, где начинается суть, бесполезна. Экономить тут
+    нечего: это один запрос владельца, а не горячий путь ученика."""
     where = " WHERE status=?" if status else ""
     params: tuple = (status, int(limit)) if status else (int(limit),)
-    rows = _exec("SELECT id, student_id, kind, variant, persona, score, max_score,"
-                 " transcript, feedback, comment, status, created_at FROM disputes"
-                 f"{where} ORDER BY created_at DESC LIMIT ?", params).fetchall()
-    return [{"id": r[0], "student_id": r[1], "kind": r[2], "variant": r[3],
-             "persona": r[4], "score": r[5], "max_score": r[6], "transcript": r[7],
-             "feedback": r[8], "comment": r[9], "status": r[10], "created_at": r[11]}
-            for r in rows]
+    cols = ", ".join(_DISPUTE_FIELDS)
+    rows = _exec(f"SELECT {cols} FROM disputes{where}"  # noqa: S608 — свой список
+                 " ORDER BY created_at DESC LIMIT ?", params).fetchall()
+    return [dict(zip(_DISPUTE_FIELDS, row)) for row in rows]
 
 
 def disputes_stats() -> dict:
-    """Сводка для аналитики: сколько несогласий по типам заданий и персонам.
-    Много несогласий на одном типе = слабое место проверки, а не учеников."""
-    by_kind = _exec("SELECT kind, COUNT(*) FROM disputes GROUP BY kind").fetchall()
-    by_persona = _exec("SELECT persona, COUNT(*) FROM disputes GROUP BY persona").fetchall()
-    return {"by_kind": {r[0]: r[1] for r in by_kind},
-            "by_persona": {r[0] or "?": r[1] for r in by_persona}}
+    """Сводка: где система спорит с людьми чаще всего.
+
+    Считает БАЗА, а не админка: те же числа понадобятся в отчётах и тестах, а
+    два независимых подсчёта разошлись бы при первой же правке. Разрезы выбраны
+    по тому, какое РЕШЕНИЕ они подсказывают:
+      * по типу задания — какой разбор чинить первым;
+      * по причине — что именно чинить (распознавание, промпт, шкалу);
+      * по вердикту владельца — сколько жалоб оказались справедливыми, то есть
+        какова настоящая доля ошибок проверки, а не жалоб на неё.
+    """
+    def group(sql: str) -> dict:
+        return {(r[0] or "?"): int(r[1]) for r in _exec(sql).fetchall()}
+
+    total = int(_exec("SELECT COUNT(*) FROM disputes").fetchone()[0] or 0)
+    pending = int(_exec("SELECT COUNT(*) FROM disputes WHERE status='new'")
+                  .fetchone()[0] or 0)
+    return {
+        "total": total,
+        "pending": pending,
+        "by_kind": group("SELECT kind, COUNT(*) FROM disputes GROUP BY kind"),
+        "by_reason": group("SELECT reason, COUNT(*) FROM disputes GROUP BY reason"),
+        "by_target": group("SELECT target, COUNT(*) FROM disputes GROUP BY target"),
+        "by_persona": group("SELECT persona, COUNT(*) FROM disputes GROUP BY persona"),
+        "by_verdict": group("SELECT verdict, COUNT(*) FROM disputes"
+                            " WHERE verdict IS NOT NULL AND verdict<>'' GROUP BY verdict"),
+    }
+
+
+def dispute_resolve(did: str, status: str, verdict: str, verdict_score: int,
+                    verdict_note: str) -> bool:
+    """Вердикт владельца по жалобе. Это и есть разметка золотого набора:
+    строка «наш балл 3, верный 5, потому что аспект 2 раскрыт» — готовый
+    калибровочный случай. False — жалобы с таким id нет."""
+    cur = _exec("UPDATE disputes SET status=?, verdict=?, verdict_score=?,"
+                " verdict_note=?, resolved_at=? WHERE id=?",
+                (status, verdict, int(verdict_score), verdict_note, _now(), did))
+    return bool(getattr(cur, "rowcount", 0))
 
 
 # ---------------------------------------------------------------- Бэкап

@@ -51,6 +51,7 @@ from openai import AsyncOpenAI, OpenAI
 import audio_check
 import ege_prompts
 import ege_scoring
+import disputes
 import fipi_import
 import storage
 
@@ -1158,17 +1159,32 @@ async def me_nickname(request: Request, body: dict = Body(...),
     return {"id": x_device, "nickname": nickname}
 
 
-# --------------------------------------------- Копилка несогласий с оценкой
+# ------------------------------------------------- Копилка несогласий с ИИ
+
+@app.get("/feedback/catalog")
+async def feedback_catalog():
+    """Список причин для формы жалобы — ОДИН на фронт и на сервер.
+
+    Открыт без аккаунта: это словарь, а не данные. Разъехавшиеся списки дали бы
+    жалобы с кодом, который сервер молча выбросит, и потеря нашлась бы через
+    месяц по дыре в статистике."""
+    return disputes.catalog()
+
 
 @app.post("/task_dispute")
 async def task_dispute(request: Request, body: dict = Body(...),
                        x_device: str | None = Header(None),
                        x_admin_key: str | None = Header(None)):
-    """«Не согласен с оценкой» с экрана разбора.
+    """«Не согласен» — с экрана разбора, из разбора беседы и из разговора.
 
-    Единственный путь, которым транскрипт речи попадает в базу, — по явному
-    нажатию: ученик сам отдаёт свой ответ на пересмотр (см. DDL disputes).
-    Спорные разборы + вердикты человека = растущий калибровочный набор.
+    Единственный путь, которым речь ученика попадает в базу, — по явному
+    нажатию: человек сам отдаёт свой ответ на пересмотр (см. DDL disputes).
+    Вместе с ним сохраняется обстановка: текст задания, соседние реплики,
+    снимок разбора. Спорные разборы + вердикты владельца = растущий
+    калибровочный набор.
+
+    Проверка полноты живёт в disputes.normalize, а не здесь: её же гоняют
+    тесты, и обойти её через сырой запрос мимо формы нельзя.
     """
     await _require_account(x_device, x_admin_key)
     # Щедрый лимит: жалоба — редкое действие, а вот заскриптованный спам мог бы
@@ -1177,37 +1193,48 @@ async def task_dispute(request: Request, body: dict = Body(...),
         raise HTTPException(status_code=429, detail="Слишком часто — подожди минутку.")
     if not _storage_ok:
         raise HTTPException(status_code=503, detail="База недоступна — попробуй позже.")
-    kind = str(body.get("kind") or "")
-    if kind not in ("reading", "dialogue", "interview", "monologue"):
-        raise HTTPException(status_code=422, detail="Неизвестный тип задания.")
-    transcript = str(body.get("transcript") or "").strip()[:4000]
-    if not transcript:
-        raise HTTPException(status_code=422, detail="Пустая жалоба: нет расшифровки.")
-    try:
-        feedback_json = json.dumps(body.get("feedback") or {}, ensure_ascii=False)[:8000]
-        score = int(body.get("score") or 0)
-        max_score = int(body.get("max") or 0)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="Кривые поля жалобы.")
-    did = await asyncio.to_thread(
-        storage.dispute_add, x_device or "admin", kind,
-        str(body.get("variant") or "")[:64], str(body.get("persona") or "")[:32],
-        score, max_score, transcript, feedback_json,
-        str(body.get("comment") or "").strip()[:500],
-    )
+    data, err = disputes.normalize(body if isinstance(body, dict) else {})
+    if data is None:
+        raise HTTPException(status_code=422, detail=err)
+    did = await asyncio.to_thread(storage.dispute_add, x_device or "admin", data)
+    print(f"[dispute] {data['kind']}/{data['target']} — {data['reason']}"
+          f" (балл {data['score']}/{data['max_score']}, просят {data['claim_score']})")
     return {"ok": True, "id": did}
 
 
 @app.get("/admin/disputes")
 async def admin_disputes(status: str | None = None,
                          x_admin_key: str | None = Header(None)):
-    """Копилка для владельца: спорные разборы и сводка по типам/персонам."""
+    """Копилка для владельца: жалобы целиком и разрезы по типам и причинам."""
     _require_admin(x_admin_key)
     if not _storage_ok:
         raise HTTPException(status_code=503, detail="База недоступна.")
-    items = await asyncio.to_thread(storage.disputes_list, status, 100)
+    items = await asyncio.to_thread(storage.disputes_list, status, 200)
     stats = await asyncio.to_thread(storage.disputes_stats)
-    return {"stats": stats, "disputes": items}
+    return {"stats": stats, "disputes": items, "catalog": disputes.catalog(),
+            "verdicts": disputes.VERDICTS}
+
+
+@app.post("/admin/disputes/{did}")
+async def admin_dispute_resolve(did: str, body: dict = Body(...),
+                                x_admin_key: str | None = Header(None)):
+    """Вердикт владельца по жалобе — разметка золотого набора одной кнопкой.
+
+    Именно этой ручки не хватало, чтобы копилка стала калибровочным набором:
+    без вердикта человека спорный разбор остаётся просто жалобой.
+    """
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    data, err = disputes.resolution(body if isinstance(body, dict) else {})
+    if data is None:
+        raise HTTPException(status_code=422, detail=err)
+    ok = await asyncio.to_thread(
+        storage.dispute_resolve, did, data["status"], data["verdict"],
+        data["verdict_score"], data["verdict_note"])
+    if not ok:
+        raise HTTPException(status_code=404, detail="Жалобы с таким id нет.")
+    return {"ok": True, "id": did, **data}
 
 
 # ------------------------------------------------------------ Банк заданий

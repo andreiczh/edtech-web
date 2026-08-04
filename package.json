@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "node --experimental-strip-types --no-warnings src/ege2/selection.test.ts",
+    "test": "node --experimental-strip-types --no-warnings src/ege2/selection.test.ts && node --experimental-strip-types --no-warnings src/ege2/dispute.test.ts",
     "check": "npm run test && npm run build"
   },
   "dependencies": {

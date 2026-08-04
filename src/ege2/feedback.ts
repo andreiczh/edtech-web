@@ -11,6 +11,7 @@
 import { getSettings } from '../account/me'
 import { backendUnreachableMessage, httpErrorMessage } from '../backendError'
 import { identityId } from '../auth/auth'
+import type { DisputeContext, DisputeDraft } from './dispute'
 import type { TaskKind } from './tasks'
 
 const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
@@ -110,29 +111,57 @@ export async function requestTaskFeedback(
 }
 
 /**
- * «Не согласен с оценкой» — жалоба в копилку на сервере.
+ * «Не согласен» — заполненная жалоба в копилку на сервере.
  *
- * Вместе с жалобой уходит расшифровка ответа: это ЕДИНСТВЕННЫЙ случай, когда
- * транскрипт речи сохраняется, и происходит он по явному нажатию ученика —
- * человек сам отдаёт свой ответ на пересмотр. Из таких жалоб складывается
- * калибровочный набор, который делает проверку точнее для всех.
+ * Вместе с жалобой уходят улика (расшифровка ответа или спорные реплики) и
+ * обстановка (текст задания, соседние реплики, снимок разбора): это
+ * ЕДИНСТВЕННЫЙ случай, когда речь ученика сохраняется, и происходит он по
+ * явному нажатию — человек сам отдаёт свой ответ на пересмотр, о чём форма
+ * прямо предупреждает. Из таких жалоб складывается калибровочный набор,
+ * который делает проверку точнее для всех.
+ *
+ * Ошибку возвращаем ТЕКСТОМ, а не флагом: сервер проверяет полноту жалобы
+ * сам, и его «напиши, что ты сказал на самом деле» человеку надо показать —
+ * иначе форма молча не отправляется и выглядит сломанной.
  */
-export async function reportDispute(args: {
-  kind: TaskKind
-  variant?: string
-  score: number
-  max: number
-  transcript: string
-  feedback: TaskFeedback
-}): Promise<boolean> {
+export async function sendDispute(
+  ctx: DisputeContext,
+  draft: DisputeDraft,
+): Promise<{ ok: boolean; error?: string }> {
+  const body = {
+    kind: ctx.kind,
+    target: ctx.target,
+    target_key: ctx.targetKey ?? '',
+    target_label: ctx.targetLabel ?? '',
+    reason: draft.reason,
+    comment: draft.comment,
+    said: draft.said,
+    claim_score: draft.claimScore ?? -1,
+    score: ctx.score ?? 0,
+    max: ctx.max ?? 0,
+    variant: ctx.variant ?? '',
+    persona: getSettings().persona,
+    transcript: ctx.transcript ?? '',
+    feedback: ctx.feedback ?? null,
+    context: ctx.context ?? null,
+  }
+  let res: Response
   try {
-    const res = await fetch(`${BACKEND}/task_dispute`, {
+    res = await fetch(`${BACKEND}/task_dispute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Device': identityId() },
-      body: JSON.stringify({ ...args, persona: getSettings().persona }),
+      body: JSON.stringify(body),
     })
-    return res.ok
   } catch {
-    return false
+    return { ok: false, error: backendUnreachableMessage() }
   }
+  if (res.ok) return { ok: true }
+  let detail: string | null = null
+  try {
+    const data = (await res.json()) as { detail?: unknown }
+    detail = data?.detail ? String(data.detail) : null
+  } catch {
+    /* текст подставит httpErrorMessage по коду */
+  }
+  return { ok: false, error: httpErrorMessage(res.status, detail) }
 }

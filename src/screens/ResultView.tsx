@@ -19,8 +19,10 @@
  */
 import { useMemo, useState } from 'react'
 
-import { reportDispute, type Delivery, type TaskFeedback } from '../ege2/feedback'
-import { TASKS, type TaskId } from '../ege2/tasks'
+import { Disagree } from '../components/Disagree'
+import type { DisputeContext } from '../ege2/dispute'
+import { type Delivery, type TaskFeedback } from '../ege2/feedback'
+import { TASKS, type TaskId, type TaskVariant } from '../ege2/tasks'
 import { highlightPieces } from '../ege2/selection'
 
 /* Кольцо с баллом. Заполняется долей набранного — это первое, что ищет глаз. */
@@ -103,9 +105,11 @@ function DeliveryBlock({ d }: { d?: Delivery }) {
 function ReadingResult({
   feedback,
   reference,
+  dispute,
 }: {
   feedback: TaskFeedback
   reference: string
+  dispute: DisputeContext
 }) {
   const pieces = useMemo(
     () => highlightPieces(reference, feedback.errors ?? []),
@@ -190,6 +194,7 @@ function ReadingResult({
                 <span className="pair__right">{e.correction}</span>
               </div>
               {e.explanation && <p className="pair__why">{e.explanation}</p>}
+              <ErrorDisagree base={dispute} quote={e.quote} correction={e.correction} />
             </div>
           ))}
         </div>
@@ -198,14 +203,42 @@ function ReadingResult({
   )
 }
 
+/** Спор об ОДНОЙ найденной ошибке. Балла у неё своего нет — спрашивать «сколько
+    должно быть» здесь незачем, поэтому max не передаём. */
+function ErrorDisagree({
+  base,
+  quote,
+  correction,
+}: {
+  base: DisputeContext
+  quote: string
+  correction: string
+}) {
+  return (
+    <Disagree
+      label="это не ошибка"
+      ctx={{
+        ...base,
+        target: 'error',
+        targetKey: quote.slice(0, 40),
+        targetLabel: `«${quote}» → «${correction}»`,
+        score: undefined,
+        max: undefined,
+      }}
+    />
+  )
+}
+
 /* ------------------------------------------ №40 и №41: по одному вопросу */
 
 function ItemsResult({
   feedback,
   label,
+  dispute,
 }: {
   feedback: TaskFeedback
   label: 'ВОПРОС' | 'ОТВЕТ'
+  dispute: DisputeContext
 }) {
   const items = feedback.criteria ?? []
 
@@ -240,6 +273,19 @@ function ItemsResult({
                 </div>
               </div>
               {c.comment && <p className="pair__why">{c.comment}</p>}
+              {/* Спор привязан к КОНКРЕТНОМУ вопросу: «не согласен с работой»
+                  внизу экрана не сказал бы, о каком из пяти речь, а
+                  пересматривать надо именно его. */}
+              <Disagree
+                ctx={{
+                  ...dispute,
+                  target: 'item',
+                  targetKey: c.key || `q${i + 1}`,
+                  targetLabel: `${label} №${i + 1} — ${failed ? 'не засчитан' : 'засчитан'}`,
+                  score: c.score,
+                  max: c.max,
+                }}
+              />
             </div>
           </section>
         )
@@ -253,9 +299,11 @@ function ItemsResult({
 function MonologueResult({
   feedback,
   transcript,
+  dispute,
 }: {
   feedback: TaskFeedback
   transcript?: string
+  dispute: DisputeContext
 }) {
   const criteria = feedback.criteria ?? []
   return (
@@ -279,6 +327,19 @@ function MonologueResult({
                 </span>
               </div>
               {c.comment && <p className="crit__text">{c.comment}</p>}
+              {/* По критерию ФИПИ спорят чаще всего: именно он превращается в
+                  баллы. Ключ критерия уходит с жалобой — так видно, какой из
+                  трёх разбор понимает хуже других. */}
+              <Disagree
+                ctx={{
+                  ...dispute,
+                  target: 'criterion',
+                  targetKey: c.key || `K${i + 1}`,
+                  targetLabel: `${c.name} — ${c.score} из ${c.max}`,
+                  score: c.score,
+                  max: c.max,
+                }}
+              />
             </div>
           ))}
         </div>
@@ -296,6 +357,7 @@ function MonologueResult({
                 <span className="pair__right">{e.correction || '—'}</span>
               </div>
               {e.explanation && <p className="pair__why">{e.explanation}</p>}
+              <ErrorDisagree base={dispute} quote={e.quote} correction={e.correction} />
             </div>
           ))}
         </div>
@@ -306,51 +368,6 @@ function MonologueResult({
 
 /* ------------------------------------------------------------- сборка */
 
-/** «Не согласен с оценкой» — одна тихая строка под разбором, не мешает
-    чтению. Вместе с жалобой уходит расшифровка ответа (по явному нажатию —
-    единственный случай, когда транскрипт сохраняется). */
-function DisputeRow({
-  taskId,
-  feedback,
-  transcript,
-  variantId,
-}: {
-  taskId: TaskId
-  feedback: TaskFeedback
-  transcript?: string
-  variantId?: string
-}) {
-  const [state, setState] = useState<'idle' | 'sending' | 'done' | 'fail'>('idle')
-  if (!transcript) return null // без расшифровки жалоба бесполезна для разбора
-
-  if (state === 'done')
-    return <p className="dispute dispute--done">Отправлено — этот разбор пересмотрят.</p>
-
-  return (
-    <p className="dispute">
-      {state === 'fail' && 'Не ушло — попробуй ещё раз. '}
-      <button
-        type="button"
-        className="dispute__btn"
-        disabled={state === 'sending'}
-        onClick={() => {
-          setState('sending')
-          void reportDispute({
-            kind: TASKS[taskId].kind,
-            variant: variantId,
-            score: feedback.score,
-            max: feedback.max,
-            transcript,
-            feedback,
-          }).then((ok) => setState(ok ? 'done' : 'fail'))
-        }}
-      >
-        {state === 'sending' ? 'Отправляю…' : 'Не согласен с оценкой'}
-      </button>
-    </p>
-  )
-}
-
 export function ResultView({
   taskId,
   feedback,
@@ -358,6 +375,7 @@ export function ResultView({
   reference,
   audioUrl,
   variantId,
+  variant,
 }: {
   taskId: TaskId
   feedback: TaskFeedback
@@ -365,10 +383,35 @@ export function ResultView({
   reference?: string
   audioUrl?: string | null
   variantId?: string
+  /** Сам вариант — нужен, чтобы к жалобе приложить ТЕКСТ ЗАДАНИЯ. Без него
+      спор через неделю нечитаем: «балл занижен» невозможно пересмотреть, не
+      видя, о чём было задание. */
+  variant?: TaskVariant
 }) {
   const criteria = feedback.criteria ?? []
   // У №40 и №41 критерии — это сами вопросы, их место в шапке, а не в кольце.
   const perItem = taskId === 40 || taskId === 41
+
+  /* Общая часть жалобы для всех спорных мест этого разбора: улика, снимок
+     разбора и обстановка. Место спора каждая кнопка дописывает своё. */
+  const dispute: DisputeContext = {
+    kind: TASKS[taskId].kind,
+    target: 'score',
+    score: feedback.score,
+    max: feedback.max,
+    variant: variantId,
+    transcript: transcript || reference || '',
+    feedback,
+    context: {
+      task: taskId,
+      brief: variant?.brief,
+      readText: variant?.readText ?? reference,
+      steps: variant?.steps,
+      photoFacts: variant?.photoFacts,
+      imageCaption: variant?.imageCaption,
+      transcript,
+    },
+  }
 
   return (
     <div className="result">
@@ -406,17 +449,24 @@ export function ResultView({
       )}
 
       {taskId === 39 && reference && (
-        <ReadingResult feedback={feedback} reference={reference} />
+        <ReadingResult feedback={feedback} reference={reference} dispute={dispute} />
       )}
-      {taskId === 40 && <ItemsResult feedback={feedback} label="ВОПРОС" />}
-      {taskId === 41 && <ItemsResult feedback={feedback} label="ОТВЕТ" />}
-      {taskId === 42 && <MonologueResult feedback={feedback} transcript={transcript} />}
+      {taskId === 40 && (
+        <ItemsResult feedback={feedback} label="ВОПРОС" dispute={dispute} />
+      )}
+      {taskId === 41 && (
+        <ItemsResult feedback={feedback} label="ОТВЕТ" dispute={dispute} />
+      )}
+      {taskId === 42 && (
+        <MonologueResult feedback={feedback} transcript={transcript} dispute={dispute} />
+      )}
 
-      <DisputeRow
-        taskId={taskId}
-        feedback={feedback}
-        transcript={transcript}
-        variantId={variantId}
+      {/* Спор о работе целиком — отдельной строкой внизу, тихо: жалоба не
+          должна конкурировать с «Дальше» и «Ещё раз». */}
+      <Disagree
+        block
+        label="Не согласен с оценкой"
+        ctx={{ ...dispute, targetLabel: `Работа целиком — ${feedback.score} из ${feedback.max}` }}
       />
     </div>
   )

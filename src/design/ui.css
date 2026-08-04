@@ -1461,6 +1461,183 @@ body {
   color: var(--text);
 }
 
+/* Форма несогласия. Кнопка-флажок стоит В САМОМ спорном месте — у вопроса, у
+   критерия, у ошибки, — поэтому она обязана быть маленькой и не спорить за
+   внимание с разбором. Цвет берём приглушённый, увеличиваем только по наведению. */
+.dsg__link {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 2px 0 0;
+  margin: 2px 0 0;
+  font: inherit;
+  font-size: clamp(10px, 1.1vw, 12px);
+  color: var(--card-ink-dim, #7a7590);
+  opacity: 0.75;
+  cursor: pointer;
+  align-self: flex-start;
+}
+.dsg__link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+.dsg__link--done {
+  cursor: default;
+  opacity: 1;
+  font-weight: 700;
+}
+
+/* Сама модалка. Три части, как у разбора беседы: шапка и подвал стоят, ездит
+   только середина — иначе кнопка «Отправить» уползает под клавиатуру телефона
+   ровно в тот момент, когда человек дописал объяснение. */
+.dsg {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(560px, 94vw);
+  max-height: min(88vh, 720px);
+  padding: 16px 18px;
+  background: #f8f6fd;
+  color: #241f3d;
+  border-radius: 20px;
+}
+.dsg__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dsg__title {
+  margin: 0;
+  font-size: clamp(18px, 2.4vw, 22px);
+  font-weight: 800;
+}
+.dsg__where {
+  font-size: 13px;
+  color: #6b6588;
+}
+.dsg__scroll {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.dsg__block {
+  border: none;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.dsg__legend {
+  padding: 0;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #6b6588;
+}
+.dsg__now {
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.dsg__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.dsg__chip,
+.dsg__score {
+  appearance: none;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  padding: 7px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(60, 40, 120, 0.22);
+  background: rgba(255, 255, 255, 0.75);
+  color: #241f3d;
+  cursor: pointer;
+  text-align: left;
+}
+.dsg__score {
+  min-width: 38px;
+  text-align: center;
+  font-weight: 800;
+}
+.dsg__chip:hover,
+.dsg__score:hover {
+  border-color: rgba(60, 40, 120, 0.45);
+}
+.dsg__chip--on {
+  background: #574f8e;
+  border-color: #574f8e;
+  color: #fff;
+  font-weight: 700;
+}
+.dsg__input,
+.dsg__area {
+  width: 100%;
+  margin-top: 6px;
+  text-align: left;
+}
+.dsg__area {
+  resize: vertical;
+  min-height: 74px;
+}
+.dsg__notice {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #6b6588;
+}
+.dsg__error {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #b4485c;
+}
+.dsg__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-top: 1px solid rgba(60, 40, 120, 0.12);
+  padding-top: 10px;
+}
+/* Подсказка, чего не хватает. Кнопка не может быть просто серой и молчаливой:
+   человек, не понявший, почему форма не отправляется, уходит навсегда. */
+.dsg__problem {
+  font-size: 12px;
+  color: #6b6588;
+  min-width: 0;
+}
+.dsg__buttons {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.dsg__ghost {
+  background: rgba(0, 0, 0, 0.06);
+  color: #241f3d;
+}
+.dsg--thanks {
+  align-items: flex-start;
+  gap: 8px;
+}
+.dsg__thanks {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+}
+.dsg__thankswhy {
+  margin: 0;
+  font-size: 13px;
+  color: #6b6588;
+}
+
 /* Выбор собеседника: карточки-радиокнопки. Не SegmentedTabs — у каждой
    персоны есть описание характера, в узкий бегунок оно не влезает. */
 .personas {

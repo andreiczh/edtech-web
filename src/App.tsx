@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { syncSettingsFromServer, useCurrentPersona, useSettings } from './account/me'
 import { currentUser, identityId, type AuthUser } from './auth/auth'
+import { DisagreeModal } from './components/Disagree'
 import { TopBar, type TopTab } from './design/ui'
 import {
   pickDemoItems,
@@ -53,12 +54,14 @@ function initialRoute(): Route {
   return currentUser() ? { name: 'conversation' } : { name: 'welcome' }
 }
 
-/** Отзыв уходит владельцу продукта; адрес виден и так — это его публичная почта. */
-const FEEDBACK_MAILTO =
-  'mailto:andeich_daddy@icloud.com?subject=' + encodeURIComponent('SPEAKO — отзыв')
+/* Отзыв уходит В КОПИЛКУ на сервере, а не письмом (05.08.2026). Почтовая
+   ссылка на телефоне открывает пустой почтовый клиент, до которого доходят
+   единицы, и владелец получал ноль отзывов при живых учениках. Теперь та же
+   форма, что и у спора с проверкой, — и всё в одном месте админки. */
 
 export default function App() {
   const [route, setRoute] = useState<Route>(initialRoute)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   /* Тема (тёмная/светлая) — настройка кабинета, применяется атрибутом на
      корневом .app: CSS-переменные переопределяются одним селектором. */
   const { theme } = useSettings()
@@ -140,9 +143,7 @@ export default function App() {
     })
   }, [])
 
-  const onFeedback = useCallback(() => {
-    window.location.href = FEEDBACK_MAILTO
-  }, [])
+  const onFeedback = useCallback(() => setFeedbackOpen(true), [])
 
   // Экраны входа и админка — отдельные полноэкранные состояния вне каркаса.
   if (route.name === 'welcome') {
@@ -213,6 +214,14 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {feedbackOpen && (
+        <DisagreeModal
+          ctx={{ kind: 'app', target: 'app', targetLabel: 'Отзыв о приложении' }}
+          onClose={() => setFeedbackOpen(false)}
+          onSent={() => undefined}
+        />
+      )}
     </div>
   )
 }
