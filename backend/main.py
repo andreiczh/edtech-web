@@ -2002,17 +2002,41 @@ async def synthesize_edge(text: str, voice: str | None = None) -> bytes:
             os.unlink(path)
 
 
-async def synthesize_mistral(text: str) -> bytes:
-    """TTS через Mistral. Тот же ключ, что у STT и LLM."""
+async def synthesize_mistral(text: str, voice: str | None = None) -> bytes:
+    """TTS через Mistral. Тот же ключ, что у STT и LLM.
+
+    Ответ приходит НЕ аудио-байтами, а JSON `{"audio_data": "<base64 mp3>"}` —
+    в отличие от привычного OpenAI-совместимого `/audio/speech`. Проверено
+    04.08.2026: до этого мы отдавали браузеру сам JSON под видом mp3, и
+    запасной путь озвучки был мёртв целиком. Заметить это было нельзя, пока
+    edge-tts работает: путь включается только после его отказа, а тогда
+    `_tts_degraded` защёлкивается до перезапуска — то есть ученики остались бы
+    вообще без голоса, а в телеграме лежало бы благополучное «перешёл на
+    запасной». Ровно та же ловушка, что с `/talk_stream` и `/monologue`:
+    «собралось» не значит «работает».
+
+    Сырые байты на входе тоже принимаем — если провайдер однажды переедет на
+    обычный ответ, озвучка не сломается второй раз.
+    """
     r = await _stt_client().post(
         f"{LLM_BASE_URL.rstrip('/')}/audio/speech",
         headers={"Authorization": f"Bearer {_require('LLM_API_KEY')}"},
-        json={"model": TTS_REMOTE_MODEL, "input": text, "voice": TTS_REMOTE_VOICE},
+        json={"model": TTS_REMOTE_MODEL, "input": text,
+              "voice": voice or TTS_REMOTE_VOICE},
     )
     if r.status_code != 200:
         raise RuntimeError(f"Mistral TTS вернул {r.status_code}: {r.text[:200]}")
     _track_usage(tts_mistral_chars=len(text))
-    return r.content
+    body = r.content
+    if body[:1] != b"{":
+        return body
+    try:
+        audio = json.loads(body).get("audio_data")
+        if not audio:
+            raise ValueError("в ответе нет audio_data")
+        return base64.b64decode(audio)
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"Mistral TTS отдал непонятный ответ: {str(e)[:120]}") from e
 
 
 _tts_degraded = False
