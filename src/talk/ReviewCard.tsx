@@ -43,79 +43,87 @@ export function ReviewCard({
 
   return createPortal(
     <div className="modal-backdrop" onClick={onClose}>
+      {/* Три части, а не одна прокручиваемая простыня: шапка и кнопки стоят
+          на месте, ездит только середина. Раньше кнопки «прилипали» внутри
+          прокрутки и ложились поверх последней ошибки — текст читался
+          из-под них. */}
       <div
-        className="modal card2 glass review scroll-soft"
+        className="modal review"
         role="dialog"
         aria-modal="true"
         aria-labelledby="review-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="modal__title" id="review-title">
-          Разбор разговора
-        </h2>
-        <p className="review__stats">
-          {stats.turns} реплик · {stats.words} слов
-        </p>
+        <header className="review__head">
+          <h2 className="review__title" id="review-title">
+            Разбор разговора
+          </h2>
+          <span className="review__stats">
+            {stats.turns} реплик · {stats.words} слов
+          </span>
+        </header>
 
-        {review.summary && <p className="review__summary">{review.summary}</p>}
+        <div className="review__scroll scroll-soft">
+          {review.summary && <p className="review__summary">{review.summary}</p>}
 
-        {good.length > 0 && (
-          <section className="review__block">
-            <h3 className="review__h">Получилось</h3>
-            <ul className="review__good">
-              {good.map((g, i) => (
-                <li key={i}>«{g}»</li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        <section className="review__block">
-          <h3 className="review__h">
-            {mistakes.length ? 'Над чем поработать' : 'Ошибки'}
-          </h3>
-          {mistakes.length === 0 ? (
-            /* Пустой список — не повод для пустого места: без объяснения он
-               читается как «разбор не сработал», а не как «ошибок не нашлось». */
-            <p className="review__none">
-              Грубых ошибок в этот раз не нашлось. Дальше — длиннее фразы и
-              сложнее конструкции.
-            </p>
-          ) : (
-            <ul className="review__list">
-              {mistakes.map((m, i) => (
-                <li key={i} className="review__item">
-                  <span className="review__was">{m.quote}</span>
-                  <span className="review__fix">{m.correction}</span>
-                  {m.why && <span className="review__why">{m.why}</span>}
-                </li>
-              ))}
-            </ul>
+          {good.length > 0 && (
+            <section className="review__block">
+              <h3 className="review__h">Получилось</h3>
+              <ul className="review__good">
+                {good.map((g, i) => (
+                  <li key={i}>{g}</li>
+                ))}
+              </ul>
+            </section>
           )}
-        </section>
 
-        {phrases.length > 0 && (
           <section className="review__block">
-            <h3 className="review__h">Пригодится в следующий раз</h3>
-            <ul className="review__list">
-              {phrases.map((p, i) => (
-                <li key={i} className="review__item review__item--phrase">
-                  <span className="review__fix">{p.en}</span>
-                  {p.ru && <span className="review__why">{p.ru}</span>}
-                </li>
-              ))}
-            </ul>
+            <h3 className="review__h">
+              {mistakes.length ? 'Над чем поработать' : 'Ошибки'}
+            </h3>
+            {mistakes.length === 0 ? (
+              /* Пустой список — не повод для пустого места: без объяснения он
+                 читается как «разбор не сработал», а не как «ошибок не нашлось». */
+              <p className="review__none">
+                Грубых ошибок в этот раз не нашлось. Дальше — длиннее фразы и
+                сложнее конструкции.
+              </p>
+            ) : (
+              <ul className="review__list">
+                {mistakes.map((m, i) => (
+                  <li key={i} className="review__item">
+                    <span className="review__was">{m.quote}</span>
+                    <span className="review__fix">{m.correction}</span>
+                    {m.why && <span className="review__why">{m.why}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
-        )}
 
-        <div className="confirm__foot review__foot">
-          <button type="button" className="pill pressable" onClick={onNewTopic}>
+          {phrases.length > 0 && (
+            <section className="review__block">
+              <h3 className="review__h">Пригодится в следующий раз</h3>
+              <ul className="review__list">
+                {phrases.map((p, i) => (
+                  <li key={i} className="review__item review__item--phrase">
+                    <span className="review__fix">{p.en}</span>
+                    {p.ru && <span className="review__why">{p.ru}</span>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+
+        <footer className="review__foot">
+          <button type="button" className="pill pressable review__ghost" onClick={onNewTopic}>
             Новая тема
           </button>
           <button ref={closeRef} type="button" className="pill pressable" onClick={onClose}>
             Продолжить разговор
           </button>
-        </div>
+        </footer>
       </div>
     </div>,
     document.body,

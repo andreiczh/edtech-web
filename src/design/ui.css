@@ -1873,44 +1873,87 @@ body {
 
 /* --------------------------------------------------------- Разбор беседы
  *
- * Модалка шире стандартной (440px): здесь список исправлений, а не вопрос из
- * двух строк. Высота ограничена высотой экрана с прокруткой внутри — на
- * телефоне разбор из пяти ошибок иначе уезжает за край вместе с кнопками.
+ * Три части: шапка, прокручиваемое тело, панель кнопок. Прокручивается ТОЛЬКО
+ * тело — из-за этого и переделано (04.08.2026).
+ *
+ * Как было: вся карточка была одним прокручиваемым блоком, а кнопки внизу
+ * держались на position: sticky с градиентной подложкой. Подложка была задана
+ * фиксированным светлым цветом, а сама карточка — полупрозрачная (card2, 0.86)
+ * поверх цветного фона персоны. Цвета не совпадали никогда: под кнопками
+ * оставалось мутное пятно, сквозь которое просвечивала обрезанная строка
+ * последней ошибки.
+ *
+ * Лечится не подбором градиента, а конструкцией: кнопки вынесены ИЗ прокрутки,
+ * карточка стала непрозрачной. Полупрозрачность здесь и не нужна — под
+ * модалкой всё равно затемнение, а текста в ней много и он должен читаться.
  */
 .review {
-  width: min(600px, 100%);
-  max-height: min(82vh, 760px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  width: min(620px, 100%);
+  max-height: min(86vh, 820px);
+  padding: 0; /* отступы теперь у частей: тело должно ездить под самый край */
+  gap: 0;
+  overflow: hidden; /* иначе прокрутка тела срезает скругления углов */
+  display: flex;
+  flex-direction: column;
+  background: #f8f6fd;
+  color: var(--card-ink);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: var(--shadow-card);
 }
 
-.review .modal__title {
+.review__head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 20px clamp(18px, 3vw, 26px) 14px;
+  border-bottom: 1px solid rgba(122, 116, 166, 0.16);
+}
+
+.review__title {
+  margin: 0;
+  font-size: clamp(18px, 2.2vw, 22px);
+  font-weight: 750;
+  letter-spacing: -0.01em;
   color: var(--card-ink);
 }
 
 .review__stats {
-  margin: -6px 0 0;
   font-size: clamp(11px, 1.2vw, 13px);
   color: var(--card-ink-dim);
+  white-space: nowrap;
+}
+
+.review__scroll {
+  flex: 1;
+  min-height: 0; /* без этого flex-элемент не сжимается и прокрутки не будет */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px clamp(18px, 3vw, 26px) 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
 .review__summary {
   margin: 0;
   font-size: clamp(14px, 1.6vw, 16px);
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--card-ink);
 }
 
 .review__block {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .review__h {
   margin: 0;
-  font-size: clamp(11px, 1.2vw, 12px);
-  letter-spacing: 0.08em;
+  font-size: clamp(10px, 1.1vw, 11px);
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   font-weight: 800;
   color: var(--card-ink-dim);
@@ -1923,48 +1966,68 @@ body {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+}
+
+/* Список без плашек: разделители вместо коробок. Коробка внутри карточки
+   внутри модалки — три вложенных прямоугольника, от которых рябит в глазах. */
+.review__list > li + li,
+.review__good > li + li {
+  border-top: 1px solid rgba(122, 116, 166, 0.14);
 }
 
 .review__good li {
   font-size: clamp(13px, 1.5vw, 15px);
+  line-height: 1.5;
   color: var(--card-ink);
-  padding-left: 14px;
-  border-left: 3px solid rgba(90, 165, 130, 0.65);
+  padding: 8px 0 8px 14px;
+  position: relative;
+}
+/* Точка вместо кавычек: кавычки в цитате ученика уже есть и путались бы. */
+.review__good li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.95em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(74, 150, 118, 0.85);
 }
 
 .review__item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 9px 12px;
-  border-radius: 12px;
-  background: rgba(122, 116, 166, 0.08);
+  gap: 3px;
+  padding: 11px 0;
 }
 
 /* Сказанное — зачёркнуто и приглушено, исправление — крупное и тёмное.
    Ученик должен унести с собой ВЕРНЫЙ вариант, а не свой ошибочный. */
 .review__was {
-  font-size: clamp(12px, 1.4vw, 14px);
+  font-size: clamp(12px, 1.4vw, 13px);
+  line-height: 1.45;
   color: var(--card-ink-dim);
   text-decoration: line-through;
-  text-decoration-color: rgba(200, 90, 90, 0.6);
+  text-decoration-color: rgba(196, 92, 92, 0.75);
 }
 
 .review__fix {
   font-size: clamp(14px, 1.6vw, 16px);
   font-weight: 700;
+  line-height: 1.45;
   color: var(--card-ink);
 }
 
 .review__why {
   font-size: clamp(11px, 1.3vw, 13px);
+  line-height: 1.45;
   color: var(--card-ink-dim);
-  line-height: 1.4;
 }
 
-.review__item--phrase {
-  background: rgba(122, 116, 166, 0.05);
+/* У полезной фразы нет «было/стало» — только фраза и перевод, поэтому строки
+   идут в одну колонку без верхней приглушённой. */
+.review__item--phrase .review__fix {
+  font-weight: 650;
 }
 
 .review__none {
@@ -1974,18 +2037,35 @@ body {
   color: var(--card-ink-dim);
 }
 
-/* Кнопки разбора липнут к низу карточки при прокрутке: список длинный, и
-   искать «Продолжить разговор» в самом хвосте — лишняя работа. */
 .review__foot {
-  position: sticky;
-  bottom: -2px;
-  margin-top: 4px;
-  padding-top: 12px;
-  background: linear-gradient(
-    to bottom,
-    rgba(248, 246, 253, 0),
-    rgba(248, 246, 253, 0.92) 40%
-  );
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px clamp(18px, 3vw, 26px);
+  border-top: 1px solid rgba(122, 116, 166, 0.16);
+  background: #f2eefb;
+}
+
+/* Пилюли в проекте рассчитаны на ТЁМНЫЙ фон, а карточка разбора светлая:
+   обычный --pill (прозрачность 0.72) на ней высветляется до контраста 4.5:1,
+   то есть ровно на границе читаемости. Берём --pill-strong (0.9) — он для
+   этого и заведён, и даёт 8:1. */
+.review__foot .pill:not(.review__ghost) {
+  background: var(--pill-strong);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+/* «Новая тема» стирает беседу, «Продолжить» — нет. Второстепенное действие
+   выглядит второстепенно: контур вместо заливки. */
+.review__ghost {
+  background: transparent;
+  color: var(--card-ink);
+  border: 1px solid rgba(122, 116, 166, 0.4);
+}
+.review__ghost:hover {
+  background: rgba(122, 116, 166, 0.1);
 }
 
 .pair__label {
