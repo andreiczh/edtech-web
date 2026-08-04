@@ -12,9 +12,10 @@
  *  - если ответ длинный, прокручивается САМА карточка (max-height + overflow),
  *    иначе кнопка микрофона уезжала бы за нижнюю панель.
  *
- * Сверху (04.08.2026) — ТЕМА беседы. Ученик видит только её название и одну
- * строку подсказки; ступени разговора остаются на сервере, иначе человек
- * перестаёт разговаривать и начинает отвечать по списку.
+ * Темы разговора на экране НЕТ и не должно быть (решение владельца,
+ * 04.08.2026): человек говорит о чём хочет, а подстраивается система. Полоса с
+ * названием темы стояла здесь один день — она задавала рамку там, где рамка не
+ * нужна. Как система держит глубину разговора без темы — backend/dialogue.py.
  */
 import { useCallback, useState } from 'react'
 
@@ -37,19 +38,8 @@ const CAPTIONS: Record<ConversationState, string> = {
 const MIN_TURNS_FOR_REVIEW = 3
 
 export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
-  const {
-    state,
-    toggle,
-    transcript,
-    reply,
-    error,
-    latency,
-    topic,
-    turns,
-    newTopic,
-    endSession,
-    getHistory,
-  } = useConversation()
+  const { state, toggle, transcript, reply, error, latency, turns, endSession, getHistory } =
+    useConversation()
   /* Режим «чисто аудио» (настройка кабинета): карточка с текстом ответа не
      рисуется вовсе — только круги и голос, как в живом разговоре. Ошибки
      показываются ВСЕГДА: молчание вместо объяснения — худший из отказов. */
@@ -64,13 +54,13 @@ export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
     setReviewing(true)
     setReviewError(null)
     try {
-      setReview(await requestTalkReview(getHistory(), topic?.id ?? null))
+      setReview(await requestTalkReview(getHistory()))
     } catch (e) {
       setReviewError(e instanceof Error ? e.message : String(e))
     } finally {
       setReviewing(false)
     }
-  }, [getHistory, reviewing, topic])
+  }, [getHistory, reviewing])
 
   const canReview = turns >= MIN_TURNS_FOR_REVIEW
 
@@ -79,27 +69,6 @@ export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
   return (
     <div className="screenbody">
       <div className="screen__body">
-        {topic && (
-          <div className="topicbar">
-            <div className="topicbar__text">
-              <span className="topicbar__label">Тема разговора</span>
-              <b className="topicbar__title">{topic.title}</b>
-              <span className="topicbar__hint">{topic.hint}</span>
-            </div>
-            {/* Смена темы стирает беседу — она была про другое. Поэтому кнопка
-                недоступна, пока идёт запись или ответ: обрывать себя на
-                полуслове кнопкой в углу экрана человек не планировал. */}
-            <button
-              type="button"
-              className="pill pressable topicbar__swap"
-              onClick={newTopic}
-              disabled={state !== 'idle'}
-            >
-              Другая
-            </button>
-          </div>
-        )}
-
         {((showText && reply) || error || reviewError) && (
           <div className="card2 answer scroll-soft" aria-live="polite">
             {error || reviewError ? (

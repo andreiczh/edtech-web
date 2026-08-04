@@ -118,7 +118,7 @@ export function ReviewCard({
 
         <footer className="review__foot">
           <button type="button" className="pill pressable review__ghost" onClick={onNewTopic}>
-            Новая тема
+            Начать заново
           </button>
           <button ref={closeRef} type="button" className="pill pressable" onClick={onClose}>
             Продолжить разговор

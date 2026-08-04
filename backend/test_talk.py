@@ -1,15 +1,16 @@
-"""Проверки разговорного контура: банк сценариев и разбор беседы.
+"""Проверки разговорного контура: ход свободной беседы и разбор.
 
 Сети не требует, гоняется за секунду. Что здесь проверяется и почему именно
-это — в каждом блоке своя причина, все три уже ловили ошибку руками:
+это — у каждого блока своя причина, и каждая уже ловила ошибку руками:
 
-* банк тем — целостность и НЕПОВТОРЯЕМОСТЬ. Требование владельца было
-  сформулировано прямо: «в разных сессиях топики не повторялись». Проверяем
-  полный круг из всех сценариев подряд и поведение после круга;
-* план беседы — что ступень считается арифметикой сервера и растёт по ходу
-  разговора, а не стоит на месте (иначе беседа топталась бы на первом шаге);
+* ход беседы — что глубина считается арифметикой сервера и РАСТЁТ по ходу
+  разговора, а не стоит на месте (иначе беседа топчется на «что, где, когда»);
+* что в промпте нет ни списка тем, ни попытки навязать тему: тему выбирает
+  человек, это прямое требование владельца;
 * разбор — что выдумки НЕ проходят. Это единственная защита от разбора,
-  который приписывает ученику несказанное.
+  который приписывает ученику несказанное;
+* нарезка реплики на озвучку — там легко посадить тихий баг, который слышен
+  только ухом (дыра в середине фразы).
 
 Запуск:  .\.venv\Scripts\python.exe test_talk.py
 """
@@ -19,8 +20,8 @@ from __future__ import annotations
 import json
 import sys
 
+import dialogue
 import personas
-import scenarios
 import talk_review
 
 _fails: list[str] = []
@@ -34,72 +35,50 @@ def check(name: str, cond: bool, detail: str = "") -> None:
         _fails.append(name)
 
 
-# ------------------------------------------------------------- банк тем
-print("Банк сценариев")
+# --------------------------------------------------------- ход беседы
+print("Ход свободной беседы")
 
-ids = [s["id"] for s in scenarios.SCENARIOS]
-check("id уникальны", len(ids) == len(set(ids)))
-check("тем достаточно для месяца занятий", len(ids) >= 30, f"({len(ids)})")
+rungs = [dialogue.rung_index(n) for n in (0, 1, 2, 3, 4, 5, 6, 7, 20)]
+check("глубина растёт по ходу разговора и упирается в последнюю ступень",
+      rungs == [0, 0, 1, 1, 2, 2, 3, 3, 3], f"({rungs})")
+check("отрицательное число обменов не роняет и не уводит за край",
+      dialogue.rung_index(-5) == 0)
+check("ступеней ровно четыре — лестница целая", len(dialogue.RUNGS) == 4)
 
-fields_ok = True
-for s in scenarios.SCENARIOS:
-    for key in ("id", "title", "hint", "topic", "opener", "stages", "vocab"):
-        if not s.get(key):
-            fields_ok = False
-            print(f"       у {s.get('id')} пусто поле {key}")
-    if len(s.get("stages") or []) != 4:
-        fields_ok = False
-        print(f"       у {s.get('id')} ступеней {len(s.get('stages') or [])}, а не 4")
-    if len(s.get("vocab") or []) < 4:
-        fields_ok = False
-        print(f"       у {s.get('id')} мало лексики")
-check("все поля на месте, у каждой темы 4 ступени", fields_ok)
+first = dialogue.flow_block(0)
+deep = dialogue.flow_block(8)
+check("на первом обмене велено держаться фактов",
+      "Stay concrete" in first and "Stay concrete" not in deep)
+check("на глубине разрешено идти куда угодно",
+      "Go wherever this conversation has genuinely gone" in deep)
+check("номер обмена в подсказке человеческий, с единицы",
+      "exchange 1 of this conversation" in first
+      and "exchange 9 of this conversation" in deep)
+check("подсказка объявлена направлением, а не сценарием",
+      "not a script" in first)
 
-# Русские поля — то, что увидит ученик; английские едут в промпт. Перепутать
-# их легко, а заметно это станет только на экране.
-ru = all(any("а" <= c <= "я" for c in s["title"].lower()) for s in scenarios.SCENARIOS)
-en = all(not any("а" <= c <= "я" for c in s["topic"].lower()) for s in scenarios.SCENARIOS)
-check("title по-русски, topic по-английски", ru and en)
+# Главное требование владельца: тему выбирает ЧЕЛОВЕК. В промпте не должно
+# быть ни списка тем, ни попытки увести к «правильной».
+check("тема объявлена принадлежащей ученику",
+      "The student chooses the subject" in first)
+check("запрет навязывать и объявлять тему",
+      "never steer them back" in first and "never announce a topic" in first)
+check("смена темы учеником не комментируется",
+      "go with them and do not remark on it" in first)
+check("на «не знаю о чём говорить» — не встречный вопрос, а конкретика",
+      "do NOT ask them what" in first and "CONCRETE things" in first)
+check("есть правила подстройки под собеседника",
+      "Match their level" in first and "Match their energy" in first)
+check("велено возвращаться к тому, что человека зацепило",
+      "got animated about" in first)
 
-seen: list[str] = []
-repeat = None
-for _ in range(len(ids)):
-    got = scenarios.pick(seen)
-    if got["id"] in seen:
-        repeat = got["id"]
-        break
-    seen.append(got["id"])
-check("полный круг без единого повтора", repeat is None and len(seen) == len(ids),
-      f"(повтор {repeat})" if repeat else f"({len(seen)}/{len(ids)})")
-
-after = [scenarios.pick(seen)["id"] for _ in range(30)]
-check("после круга не выпадает ни одна из пяти последних",
-      all(a not in seen[-5:] for a in after))
-check("пустой список недавних не ломает выбор", bool(scenarios.pick([])["id"]))
-check("недавних больше, чем тем — всё равно выбирает", bool(scenarios.pick(ids)["id"]))
-
-# ------------------------------------------------------------- план беседы
-print("\nСкрытый план")
-
-sc = scenarios.by_id(ids[0])
-check("by_id находит тему", sc is not None and sc["id"] == ids[0])
-check("by_id на мусор отвечает None, а не падает", scenarios.by_id("нет-такой") is None)
-check("by_id на пустое — None", scenarios.by_id("") is None)
-
-first = scenarios.plan_block(sc, 0)
-check("на первом ходу есть зацепка для начала", sc["opener"] in first)
-check("план помечен как скрытый", "Never read it out" in first)
-check("тема попала в план", sc["topic"] in first)
-
-steps = [scenarios.plan_block(sc, n) for n in (0, 2, 4, 6, 12)]
-nums = [s.split("You are on step ")[1][0] for s in steps]
-check("ступень растёт по ходу разговора и упирается в последнюю",
-      nums == ["1", "2", "3", "4", "4"], f"({nums})")
-check("зацепка только на первом ходу", sc["opener"] not in steps[1])
-
-roles = [s for s in scenarios.SCENARIOS if s.get("role")]
-check("сценки есть и в них описана роль", len(roles) >= 3
-      and all(scenarios.plan_block(r, 0).count("Scene:") == 1 for r in roles))
+# Банк заготовленных тем убран целиком: если файл вернётся, тест напомнит,
+# что это было решение владельца, а не недосмотр.
+try:
+    import scenarios  # noqa: F401
+    check("банка заготовленных тем нет", False, "(scenarios.py вернулся)")
+except ImportError:
+    check("банка заготовленных тем нет", True)
 
 # ------------------------------------------------------------- персоны
 print("\nПерсоны")

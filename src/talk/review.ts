@@ -29,20 +29,13 @@ export interface TalkReview {
 
 export type DialogTurn = { role: 'user' | 'assistant'; content: string }
 
-export async function requestTalkReview(
-  history: DialogTurn[],
-  topicId: string | null,
-): Promise<TalkReview> {
+export async function requestTalkReview(history: DialogTurn[]): Promise<TalkReview> {
   let res: Response
   try {
     res = await fetch(`${BACKEND}/talk_review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Device': identityId() },
-      body: JSON.stringify({
-        history,
-        persona: getSettings().persona,
-        topic: topicId ?? '',
-      }),
+      body: JSON.stringify({ history, persona: getSettings().persona }),
     })
   } catch {
     throw new Error(backendUnreachableMessage())

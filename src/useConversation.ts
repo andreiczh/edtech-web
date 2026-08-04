@@ -3,7 +3,6 @@
 import { getSettings } from './account/me'
 import { backendUnreachableMessage, httpErrorMessage } from './backendError'
 import { identityId } from './auth/auth'
-import { clearTopic, currentTopic, fetchTopic, type Topic } from './talk/topic'
 import type { DialogTurn } from './talk/review'
 
 const DIALOG_KEY = 'pingo.dialog.v1'
@@ -59,16 +58,12 @@ export interface ConversationApi {
   reply: string // текст ответа ИИ (наполняется по мере стрима)
   error: string | null // текст последней ошибки (или null)
   latency: Record<string, number> | null // { stt, first_audio, total }
-  /** Тема беседы: название для ученика, план беседы остался на сервере. */
-  topic: Topic | null
-  /** Сменить тему — беседа начинается заново, поэтому история стирается. */
-  newTopic: () => void
   /** Сколько раз ученик говорил: по этому числу решается, есть ли что разбирать. */
   turns: number
   /** Вся история сессии — вход разбора. Не state: копировать массив на каждую
       реплику незачем, экрану достаточно счётчика выше. */
   getHistory: () => DialogTurn[]
-  /** Разговор разобран и закрыт: чистим историю и берём новую тему. */
+  /** Начать разговор с чистого листа: стереть историю этой беседы. */
   endSession: () => void
 }
 
@@ -82,15 +77,12 @@ export function useConversation(): ConversationApi {
   const [reply, setReply] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [latency, setLatency] = useState<Record<string, number> | null>(null)
-  const [topic, setTopic] = useState<Topic | null>(() => currentTopic())
   const [turns, setTurns] = useState(
     () => loadDialogHistory().filter((m) => m.role === 'user').length,
   )
 
   const stateRef = useRef(state)
   stateRef.current = state
-  const topicRef = useRef(topic)
-  topicRef.current = topic
 
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -308,9 +300,6 @@ export function useConversation(): ConversationApi {
         // В промпт уезжает ХВОСТ истории, а у себя мы держим всю сессию —
         // из неё собирается разбор в конце.
         fd.append('history', JSON.stringify(historyRef.current.slice(-SENT_TURNS)))
-        // Тема беседы: по её id сервер достаёт скрытый план. Пусто — разговор
-        // идёт без плана, как до сценариев.
-        fd.append('topic', topicRef.current?.id ?? '')
         // Собеседник: голос и (в будущем) характер. Читаем на каждый запрос,
         // а не при монтировании — сменил персону в настройках, и уже следующая
         // реплика звучит новым голосом, без перезахода в разговор.
@@ -474,9 +463,8 @@ export function useConversation(): ConversationApi {
     }
   }, [startRecording, stopRecording, stopSpeaking])
 
-  /** Стереть беседу и взять свежую тему. Одна операция на два случая: ученик
-      сам нажал «другая тема» и разговор закончился разбором. В обоих случаях
-      старая история собеседнику только мешала бы — она про другое. */
+  /** Стереть беседу и начать с чистого листа. Зовётся после разбора: разговор
+      закончен, и старая история новому собеседнику только мешала бы. */
   const resetConversation = useCallback(() => {
     stopSpeaking()
     historyRef.current = []
@@ -485,26 +473,7 @@ export function useConversation(): ConversationApi {
     setTranscript('')
     setReply('')
     setLatency(null)
-    clearTopic()
-    setTopic(null)
-    void fetchTopic().then(setTopic)
   }, [stopSpeaking])
-
-  /* Тема нужна ДО первой фразы: ученик должен видеть, о чём разговор, ещё
-     нажимая микрофон. Берём её один раз при входе на экран — если в этой
-     вкладке темы ещё нет. Сеть не ответила — молчим: разговор без темы
-     работает так же, как работал до сценариев, и блокировать его нельзя. */
-  useEffect(() => {
-    let alive = true
-    if (!currentTopic()) {
-      void fetchTopic().then((t) => {
-        if (alive && t) setTopic(t)
-      })
-    }
-    return () => {
-      alive = false
-    }
-  }, [])
 
   // Очистка при размонтировании.
   useEffect(() => {
@@ -522,9 +491,7 @@ export function useConversation(): ConversationApi {
     reply,
     error,
     latency,
-    topic,
     turns,
-    newTopic: resetConversation,
     endSession: resetConversation,
     getHistory: () => historyRef.current,
   }

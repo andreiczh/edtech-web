@@ -132,8 +132,9 @@ from personas import (  # noqa: E402 — после настройки окру�
     reply_tokens,
 )
 
-# Сценарии разговора — тоже чистые данные: банк тем со скрытым планом беседы.
-import scenarios  # noqa: E402
+# Ход свободной беседы: лестница глубины, считается арифметикой из длины
+# разговора. Банк заготовленных тем убран 04.08.2026 — тему выбирает человек.
+import dialogue  # noqa: E402
 
 # Разбор беседы: промпт, проверка цитат и форма ответа. Сети не касается.
 import talk_review  # noqa: E402
@@ -2841,7 +2842,6 @@ def _sanitize_history(raw: str, turns: int = _HISTORY_TURNS,
 async def talk_stream(audio: UploadFile = File(...),
                       history: str = Form("[]"),
                       persona: str = Form(""),
-                      topic: str = Form(""),
                       x_device: str | None = Header(None),
                       x_admin_key: str | None = Header(None)):
     await _require_account(x_device, x_admin_key)
@@ -2928,15 +2928,16 @@ async def talk_stream(audio: UploadFile = File(...),
         if past:
             print(f"[dialog] история: {len(past)} реплик")
 
-        # Скрытый план беседы. Ступень считается ЗДЕСЬ, из длины истории —
-        # без отдельного вопроса к модели «на каком мы шаге»: это был бы второй
-        # запрос на каждую реплику, то есть удвоение расхода ради арифметики.
-        # Идёт до блока памяти: план — рабочая инструкция, а память объявлена
-        # «вторичной ко всему выше» и не должна перебивать её собой.
-        plan = scenarios.by_id(topic)
-        if plan:
-            sys_prompt += "\n" + scenarios.plan_block(plan, len(past) // 2)
-            print(f"[dialog] тема: {plan['id']}, шаг {len(past) // 2 // scenarios.TURNS_PER_STAGE + 1}")
+        # Ход беседы: чья это тема, как читать собеседника и на какой глубине
+        # сейчас разговор. Глубина считается ЗДЕСЬ, из длины истории — без
+        # отдельного вопроса к модели «насколько мы углубились»: это был бы
+        # второй запрос на каждую реплику, то есть удвоение расхода ради
+        # арифметики. Идёт до блока памяти: это рабочая инструкция, а память
+        # объявлена «вторичной ко всему выше» и не должна перебивать её собой.
+        exchanges = len(past) // 2
+        sys_prompt += "\n" + dialogue.flow_block(exchanges)
+        print(f"[dialog] обмен {exchanges + 1}, "
+              f"ступень {dialogue.rung_index(exchanges) + 1}")
 
         if mem.get("user"):
             sys_prompt += (
@@ -3064,23 +3065,6 @@ async def talk_stream(audio: UploadFile = File(...),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
-
-
-@app.get("/talk_topic")
-async def talk_topic(recent: str = "",
-                     x_device: str | None = Header(None),
-                     x_admin_key: str | None = Header(None)):
-    """Тема для нового разговора. Ни одного вызова LLM — просто выбор из банка.
-
-    `recent` — список id, которые у ученика уже были (их помнит КЛИЕНТ, как и
-    историю диалога: серверу для этого не нужно ни таблицы, ни состояния).
-    Ученику уезжают только название и подсказка; сам план беседы остаётся на
-    сервере — увидев ступени, ученик перестал бы разговаривать и начал бы
-    отвечать по списку.
-    """
-    await _require_account(x_device, x_admin_key)
-    ids = [p.strip() for p in (recent or "").split(",") if p.strip()][-80:]
-    return scenarios.public(scenarios.pick(ids))
 
 
 @app.post("/talk_review")

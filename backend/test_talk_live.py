@@ -40,8 +40,8 @@ import httpx
 from dotenv import load_dotenv
 from openai import OpenAI
 
+import dialogue
 import personas
-import scenarios
 
 load_dotenv()
 BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.mistral.ai/v1")
@@ -82,9 +82,9 @@ def client() -> OpenAI:
 # --------------------------------------------------------------------------
 # Сценарий беседы. Реплики ученика заданы заранее — включая ловушки.
 # --------------------------------------------------------------------------
-TOPIC_ID = "weekend"
-
 STUDENT_TURNS = [
+    # голое приветствие: промпт запрещает допрос «а о чём хочешь поговорить»
+    ("Hello.", {"trap": "только приветствие"}),
     # обычное начало с грубой ошибкой времени
     ("I go to the cinema with my friend yesterday.",
      {"expect_fix": ["went"], "trap": "ошибка времени"}),
@@ -100,6 +100,9 @@ STUDENT_TURNS = [
     ("I think weekends are too short. Two days is not enough for rest because "
      "I have homework and my mother ask me to help at home.",
      {"expect_fix": ["asks"], "trap": "ошибка согласования"}),
+    # ученик уводит разговор: собеседник обязан идти за ним и не комментировать
+    ("Actually I want to talk about something else. I don't know what.",
+     {"trap": "не знает, о чём говорить"}),
 ]
 
 
@@ -119,7 +122,6 @@ def questions(text: str) -> list[str]:
 def run_dialog(model: str, persona_id: str = "tutor", verbose: bool = True) -> dict:
     """Один прогон беседы. Возвращает метрики и сами ответы."""
     who = personas.PERSONAS[persona_id]
-    sc = scenarios.by_id(TOPIC_ID)
     cl = client()
 
     history: list[dict] = []
@@ -128,7 +130,7 @@ def run_dialog(model: str, persona_id: str = "tutor", verbose: bool = True) -> d
 
     for i, (utterance, marks) in enumerate(STUDENT_TURNS):
         sys_prompt = personas.SYSTEM_PROMPT + f"\n\n{who['prompt']}"
-        sys_prompt += "\n" + scenarios.plan_block(sc, len(history) // 2)
+        sys_prompt += "\n" + dialogue.flow_block(len(history) // 2)
 
         # Домашний канал рвёт соединения — это давно известно и к качеству
         # модели отношения не имеет. Без повторов замер срывался на середине

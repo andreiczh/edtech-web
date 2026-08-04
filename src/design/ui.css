@@ -1807,70 +1807,6 @@ body {
   min-width: 0;
 }
 
-/* ------------------------------------------------------- Тема разговора
- *
- * Полоса над кругами: название темы и одна строка подсказки. Намеренно тихая —
- * это подсказка, а не заголовок экрана; спорить с кругами и микрофоном ей
- * незачем. Кнопка смены темы прижата вправо и не растягивается.
- */
-.topicbar {
-  width: min(100%, 860px);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--glass-line);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
-}
-
-.topicbar__text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  flex: 1;
-}
-
-.topicbar__label {
-  font-size: clamp(9px, 1vw, 11px);
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  font-weight: 700;
-}
-
-.topicbar__title {
-  font-size: clamp(14px, 1.7vw, 18px);
-  font-weight: 700;
-  color: var(--text);
-  line-height: 1.2;
-}
-
-/* Подсказка длинная и не должна ломать высоту полосы на телефоне: одна строка
-   с многоточием, полный текст всё равно есть в самой беседе. */
-.topicbar__hint {
-  font-size: clamp(11px, 1.3vw, 13px);
-  color: var(--text-dim);
-  line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.topicbar__swap {
-  flex: none;
-  font-size: clamp(11px, 1.2vw, 13px);
-  padding: 7px 14px;
-}
-
-.topicbar__swap:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
 /* --------------------------------------------------------- Разбор беседы
  *
  * Три части: шапка, прокручиваемое тело, панель кнопок. Прокручивается ТОЛЬКО
@@ -2057,7 +1993,7 @@ body {
   border-color: rgba(255, 255, 255, 0.22);
 }
 
-/* «Новая тема» стирает беседу, «Продолжить» — нет. Второстепенное действие
+/* «Начать заново» стирает беседу, «Продолжить» — нет. Второстепенное действие
    выглядит второстепенно: контур вместо заливки. */
 .review__ghost {
   background: transparent;
