@@ -9,8 +9,15 @@
  */
 
 :root {
-  /* Карточки: почти белое стекло на фиолетовом фоне */
+  /* Карточки: почти белое стекло. Оттенок ОБЯЗАН следовать за темой — см.
+     блоки :root[data-theme=...] ниже. Холодный лавандовый белый посреди
+     красного фона глаз читает как мятно-зелёный (одновременный контраст), и
+     экран выглядит собранным из двух разных приложений. Замечено владельцем
+     на итогах сессии с Гондоном, 05.08.2026. */
   --card: rgba(248, 246, 253, 0.94);
+  --card-solid: #f8f6fd; /* модалки: под ними фон не должен просвечивать */
+  /* То же стекло, но прозрачнее: под ним работает backdrop-filter (.card2). */
+  --card-glass: rgba(248, 246, 253, 0.86);
   --card-ink: #4a4480; /* текст на светлой карточке */
   --card-ink-dim: #7b76a6;
 
@@ -142,6 +149,11 @@ body {
   --thumb-1: rgba(88, 170, 136, 0.95);
   --thumb-2: rgba(62, 134, 105, 0.95);
   --seg-bg: rgba(22, 58, 46, 0.42);
+  --card: rgba(246, 252, 249, 0.94);
+  --card-solid: #f5fbf8;
+  --card-glass: rgba(246, 252, 249, 0.86);
+  --card-ink: #27503f;
+  --card-ink-dim: #5f8375;
 }
 :root[data-theme='red'],
 .app[data-theme='red'] {
@@ -153,6 +165,12 @@ body {
   --thumb-1: rgba(192, 106, 122, 0.95);
   --thumb-2: rgba(158, 78, 93, 0.95);
   --seg-bg: rgba(66, 30, 38, 0.42);
+  /* Тёплый белый и тёплые чернила: на красном фоне холодная карточка зеленеет. */
+  --card: rgba(253, 246, 247, 0.94);
+  --card-solid: #fdf6f7;
+  --card-glass: rgba(253, 246, 247, 0.86);
+  --card-ink: #5c2f37;
+  --card-ink-dim: #8f6870;
 }
 
 /* ------------------------------------------------- Кружки вокруг микрофона
@@ -512,7 +530,7 @@ body {
      размытие с подъёмом насыщенности, сверху внутренняя световая грань.
      0.86 — нижняя граница, при которой текст задания остаётся комфортным;
      прозрачнее — чернила var(--card-ink) начинают спорить с фоном. */
-  background: rgba(248, 246, 253, 0.86);
+  background: var(--card-glass);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   color: var(--card-ink);
@@ -1497,8 +1515,8 @@ body {
   width: min(560px, 94vw);
   max-height: min(88vh, 720px);
   padding: 16px 18px;
-  background: #f8f6fd;
-  color: #241f3d;
+  background: var(--card-solid);
+  color: var(--card-ink);
   border-radius: 20px;
 }
 .dsg__head {
@@ -1513,7 +1531,7 @@ body {
 }
 .dsg__where {
   font-size: 13px;
-  color: #6b6588;
+  color: var(--card-ink-dim);
 }
 .dsg__scroll {
   overflow-y: auto;
@@ -1534,7 +1552,7 @@ body {
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #6b6588;
+  color: var(--card-ink-dim);
 }
 .dsg__now {
   font-weight: 600;
@@ -1557,7 +1575,7 @@ body {
   border-radius: 999px;
   border: 1px solid rgba(60, 40, 120, 0.22);
   background: rgba(255, 255, 255, 0.75);
-  color: #241f3d;
+  color: var(--card-ink);
   cursor: pointer;
   text-align: left;
 }
@@ -1570,9 +1588,11 @@ body {
 .dsg__score:hover {
   border-color: rgba(60, 40, 120, 0.45);
 }
+/* Выбранная кнопка заливается цветом ТЕМЫ, а не фиксированным фиолетовым:
+   с Гондоном экран красный, и фиолетовое пятно в нём выглядит чужим. */
 .dsg__chip--on {
-  background: #574f8e;
-  border-color: #574f8e;
+  background: var(--sky-3);
+  border-color: var(--sky-3);
   color: #fff;
   font-weight: 700;
 }
@@ -1590,7 +1610,7 @@ body {
   margin: 0;
   font-size: 12px;
   line-height: 1.4;
-  color: #6b6588;
+  color: var(--card-ink-dim);
 }
 .dsg__error {
   margin: 0;
@@ -1611,7 +1631,7 @@ body {
    человек, не понявший, почему форма не отправляется, уходит навсегда. */
 .dsg__problem {
   font-size: 12px;
-  color: #6b6588;
+  color: var(--card-ink-dim);
   min-width: 0;
 }
 .dsg__buttons {
@@ -1621,7 +1641,7 @@ body {
 }
 .dsg__ghost {
   background: rgba(0, 0, 0, 0.06);
-  color: #241f3d;
+  color: var(--card-ink);
 }
 .dsg--thanks {
   align-items: flex-start;
@@ -1635,7 +1655,7 @@ body {
 .dsg__thankswhy {
   margin: 0;
   font-size: 13px;
-  color: #6b6588;
+  color: var(--card-ink-dim);
 }
 
 /* Выбор собеседника: карточки-радиокнопки. Не SegmentedTabs — у каждой
@@ -2033,7 +2053,7 @@ body {
   overflow: hidden; /* иначе прокрутка тела срезает скругления углов */
   display: flex;
   flex-direction: column;
-  background: #f8f6fd;
+  background: var(--card-solid);
   color: var(--card-ink);
   border: 1px solid rgba(255, 255, 255, 0.6);
   box-shadow: var(--shadow-card);

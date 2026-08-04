@@ -124,6 +124,29 @@ export async function requestTaskFeedback(
  * сам, и его «напиши, что ты сказал на самом деле» человеку надо показать —
  * иначе форма молча не отправляется и выглядит сломанной.
  */
+/**
+ * Техническая обстановка — то, что ученик не наберёт руками и не должен.
+ *
+ * «Не работает микрофон» без модели браузера и ширины экрана невозможно ни
+ * воспроизвести, ни сгруппировать: половина таких жалоб окажется про Safari на
+ * старом айфоне, и узнать это можно только отсюда. Личных данных здесь нет —
+ * то же самое видит любой сайт, который человек открывает.
+ */
+function clientInfo(): Record<string, unknown> {
+  try {
+    return {
+      ua: navigator.userAgent.slice(0, 240),
+      screen: `${window.innerWidth}x${window.innerHeight}@${window.devicePixelRatio || 1}`,
+      lang: navigator.language,
+      online: navigator.onLine,
+      theme: document.documentElement.getAttribute('data-theme') ?? '',
+      at: new Date().toISOString(),
+    }
+  } catch {
+    return {}
+  }
+}
+
 export async function sendDispute(
   ctx: DisputeContext,
   draft: DisputeDraft,
@@ -143,7 +166,7 @@ export async function sendDispute(
     persona: getSettings().persona,
     transcript: ctx.transcript ?? '',
     feedback: ctx.feedback ?? null,
-    context: ctx.context ?? null,
+    context: { ...(ctx.context ?? {}), client: clientInfo() },
   }
   let res: Response
   try {

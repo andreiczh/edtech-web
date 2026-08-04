@@ -26,6 +26,7 @@ import { createPortal } from 'react-dom'
 
 import {
   EMPTY_DRAFT,
+  PLACES,
   formProblem,
   reasonsFor,
   type DisputeContext,
@@ -41,7 +42,7 @@ function whatGoes(ctx: DisputeContext): string {
     case 'talk_review':
       return 'Вместе с жалобой уйдут разговор и его разбор — иначе пересмотреть спор нечем.'
     case 'app':
-      return ''
+      return 'К отзыву приложатся модель браузера и размер экрана — без них «не работает» невозможно повторить.'
     default:
       return 'Вместе с жалобой уйдут расшифровка твоего ответа, текст задания и сам разбор — иначе пересмотреть оценку нечем.'
   }
@@ -74,7 +75,10 @@ export function DisagreeModal({
   const reasons = reasonsFor(ctx.target)
   const max = ctx.max ?? 0
   const needScore = max > 0
-  const problem = formProblem(draft, needScore)
+  // Экран спрашиваем только в общем отзыве: у спора об оценке место известно
+  // из контекста, а отзыв приходит «из ниоткуда».
+  const needPlace = ctx.target === 'app'
+  const problem = formProblem(draft, { score: needScore, place: needPlace })
   const hint = reasons.find((r) => r.code === draft.reason)?.hint ?? 'Что именно не так'
   const notice = whatGoes(ctx)
 
@@ -82,7 +86,13 @@ export function DisagreeModal({
     if (problem || sending) return
     setSending(true)
     setError(null)
-    void sendDispute(ctx, draft).then((res) => {
+    // Выбранный экран уезжает тем же полем, что и место спора у оценки: в
+    // админке всё группируется одинаково, отдельной колонки не нужно.
+    const place = PLACES.find((p) => p.code === draft.place)
+    const full: DisputeContext = place
+      ? { ...ctx, targetKey: place.code, targetLabel: `Отзыв · ${place.label}` }
+      : ctx
+    void sendDispute(full, draft).then((res) => {
       setSending(false)
       if (res.ok) {
         setSent(true)
@@ -151,6 +161,25 @@ export function DisagreeModal({
               ))}
             </div>
           </fieldset>
+
+          {needPlace && (
+            <fieldset className="dsg__block">
+              <legend className="dsg__legend">Где это случилось</legend>
+              <div className="dsg__chips">
+                {PLACES.map((p) => (
+                  <button
+                    key={p.code}
+                    type="button"
+                    className={`dsg__chip${draft.place === p.code ? ' dsg__chip--on' : ''}`}
+                    aria-pressed={draft.place === p.code}
+                    onClick={() => setDraft({ ...draft, place: p.code })}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          )}
 
           {needScore && (
             <fieldset className="dsg__block">

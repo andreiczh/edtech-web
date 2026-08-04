@@ -113,6 +113,39 @@ export const REASONS: ReasonOption[] = [
     targets: ['talk_reply', 'talk_review'],
     hint: 'Какая фраза собеседника звучит неправильно',
   },
+  /* Причины отзыва о приложении. Их пять, а не «сломалось / другое»: общий
+     отзыв — единственный канал для всего, что не спор об оценке, и по двум
+     вариантам невозможно понять, чинить микрофон, задание или объяснения. */
+  {
+    code: 'mic',
+    label: 'Микрофон или запись не работают',
+    targets: ['app'],
+    hint: 'Что было видно на экране: разрешение, ошибка, пустая запись',
+  },
+  {
+    code: 'task_broken',
+    label: 'Ошибка в самом задании: текст, картинка, вопрос',
+    targets: ['score', 'item', 'criterion', 'app'],
+    hint: 'Что именно не так с заданием',
+  },
+  {
+    code: 'confusing',
+    label: 'Непонятно или неудобно пользоваться',
+    targets: ['app'],
+    hint: 'Где ты застрял и чего ожидал вместо этого',
+  },
+  {
+    code: 'slow',
+    label: 'Долго думает, тормозит',
+    targets: ['app', 'talk_reply'],
+    hint: 'Где именно ждёшь и сколько примерно',
+  },
+  {
+    code: 'idea',
+    label: 'Идея или пожелание',
+    targets: ['app'],
+    hint: 'Что стоит добавить или изменить',
+  },
   {
     code: 'bug',
     label: 'Что-то сломалось',
@@ -131,6 +164,19 @@ export function reasonsFor(target: DisputeTarget): ReasonOption[] {
   return REASONS.filter((r) => r.targets.includes(target))
 }
 
+/** Где случилось — для общего отзыва. У спора об оценке место известно из
+    экрана, а отзыв приходит «из ниоткуда»: без этого вопроса «не работает»
+    невозможно ни воспроизвести, ни сгруппировать. */
+export const PLACES: Array<{ code: string; label: string }> = [
+  { code: 'conversation', label: 'Разговор' },
+  { code: 'task39', label: 'Задание 39 — чтение' },
+  { code: 'task40', label: 'Задание 40 — вопросы' },
+  { code: 'task41', label: 'Задание 41 — интервью' },
+  { code: 'task42', label: 'Задание 42 — монолог' },
+  { code: 'profile', label: 'Кабинет, статистика' },
+  { code: 'other', label: 'Везде / другое' },
+]
+
 export interface DisputeDraft {
   reason: string
   comment: string
@@ -138,9 +184,17 @@ export interface DisputeDraft {
   said: string
   /** Балл, который должен был стоять. -1 — «дело не в балле», null — не выбрано. */
   claimScore: number | null
+  /** Экран, где случилось. Спрашивается только в общем отзыве. */
+  place: string
 }
 
-export const EMPTY_DRAFT: DisputeDraft = { reason: '', comment: '', said: '', claimScore: null }
+export const EMPTY_DRAFT: DisputeDraft = {
+  reason: '',
+  comment: '',
+  said: '',
+  claimScore: null,
+  place: '',
+}
 
 /**
  * Что мешает отправить жалобу — одной фразой, либо null, если всё на месте.
@@ -148,9 +202,13 @@ export const EMPTY_DRAFT: DisputeDraft = { reason: '', comment: '', said: '', cl
  * Одна функция и на блокировку кнопки, и на подсказку под ней: разъехавшись,
  * они дали бы неотправляемую форму без объяснения причины — худший вид тупика.
  */
-export function formProblem(draft: DisputeDraft, needScore: boolean): string | null {
+export function formProblem(
+  draft: DisputeDraft,
+  need: { score?: boolean; place?: boolean } = {},
+): string | null {
   if (!draft.reason) return 'Выбери, что не так'
-  if (needScore && draft.claimScore === null) return 'Отметь, каким должен быть балл'
+  if (need.place && !draft.place) return 'Отметь, где это случилось'
+  if (need.score && draft.claimScore === null) return 'Отметь, каким должен быть балл'
   if (draft.reason === 'misheard' && draft.said.trim().length < 2)
     return 'Напиши, что ты сказал на самом деле'
   const comment = draft.comment.trim()

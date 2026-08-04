@@ -55,6 +55,12 @@ REASONS: dict[str, tuple[str, tuple[str, ...]]] = {
     "shallow":     ("Пусто и скучно, без встречного вопроса", ("talk_reply",)),
     "tone":        ("Ведёт себя не как выбранный характер",   ("talk_reply",)),
     "bad_english": ("Сам говорит с ошибками",            ("talk_reply", "talk_review")),
+    # --- отзыв о приложении: всё, что не спор об оценке
+    "mic":         ("Микрофон или запись не работают",         ("app",)),
+    "task_broken": ("Ошибка в самом задании",  ("score", "item", "criterion", "app")),
+    "confusing":   ("Непонятно или неудобно пользоваться",     ("app",)),
+    "slow":        ("Долго думает, тормозит",   ("app", "talk_reply")),
+    "idea":        ("Идея или пожелание",                      ("app",)),
     # --- общее
     "bug":   ("Что-то сломалось",
               ("score", "item", "criterion", "error", "talk_review", "talk_reply", "app")),

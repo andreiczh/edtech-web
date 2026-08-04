@@ -46,7 +46,12 @@ export function SessionScreen({
   const [results, setResults] = useState<VariantResult[]>([])
 
   const handleDone = useCallback((r: VariantResult) => {
-    markVariantSolved(r.variantId)
+    // Вариант считается пройденным ТОЛЬКО когда разбор состоялся. Раньше
+    // отметка ставилась всегда — и вариант, на котором не сработал микрофон,
+    // навсегда исчезал из будущих сессий, хотя человек его не решал
+    // (05.08.2026: тестировщик молча прошёл серию, все пять записей оказались
+    // пустыми, и пять вариантов из банка выбыли ни за что).
+    if (r.feedback) markVariantSolved(r.variantId)
     if (r.feedback) {
       saveTaskFeedback(r.taskId, {
         when: new Date().toISOString(),
@@ -163,11 +168,22 @@ function SessionSummary({
                 <div className="statrow__label">DAY STREAK</div>
               </div>
               <div>
+                {/* Ноль баллов и ОТСУТСТВИЕ баллов — разные вещи. «0/—» после
+                    серии, где ничего не записалось, читается как «ты всё
+                    провалил», хотя проверять было нечего. */}
                 <div className="statrow__value">
-                  {score}
-                  <span className="statrow__unit">/{max || '—'}</span>
+                  {graded.length ? (
+                    <>
+                      {score}
+                      <span className="statrow__unit">/{max}</span>
+                    </>
+                  ) : (
+                    '—'
+                  )}
                 </div>
-                <div className="statrow__label">БАЛЛЫ ЗА ВАРИАНТ</div>
+                <div className="statrow__label">
+                  {graded.length ? 'БАЛЛЫ ЗА ВАРИАНТ' : 'РАЗБОРОВ НЕ БЫЛО'}
+                </div>
               </div>
               <div>
                 <div className="statrow__value">{fmt(speech)}</div>
@@ -223,7 +239,16 @@ function SessionSummary({
 
         {tab === 'mistakes' && (
           <div className="card2" style={BLOCK}>
-            {mistakes.length === 0 ? (
+            {graded.length === 0 ? (
+              /* Ни один ответ не разобрался — хвалить не за что. Раньше здесь
+                 стояло «Отличный вариант!» на пустой серии: система поздравляла
+                 человека с работой, которой не было (жалоба владельца
+                 05.08.2026). Похвала без основания обесценивает и настоящую. */
+              <p style={{ margin: 0 }}>
+                Разбирать было нечего: ни один ответ не записался. Проверь микрофон и
+                разрешение на запись в браузере — и пройди вариант заново.
+              </p>
+            ) : mistakes.length === 0 ? (
               <p style={{ margin: 0 }}>
                 Разбор не нашёл ошибок, которые стоило бы вынести отдельно. Отличный вариант!
               </p>
