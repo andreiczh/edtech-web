@@ -449,6 +449,56 @@ def check_items() -> list[str]:
     return bad
 
 
+def check_recheck_pick() -> list[str]:
+    """Отбор спорных аспектов и слияние второго взгляда.
+
+    Второй проход по умолчанию выключен (замер не подтвердил выигрыш, см.
+    main.MONOLOGUE_RECHECK), но код живой и включается переменной — значит он
+    обязан оставаться исправным. Иначе в день, когда золотой набор вырастет и
+    его захотят включить, окажется, что он тихо сгнил.
+    """
+    bad = []
+    said = "I like chess with my grandfather and we play every Sunday at home."
+
+    full = {"n": 1, "evidence": "I like chess with my grandfather",
+            "described_first": True, "described_second": True,
+            "difference_stated": True, "difference_generalised": True,
+            "linked_to_topic": True, "factual_error": False}
+    part = {"n": 2, "evidence": "we play every Sunday", "named_first": True,
+            "named_second": False, "specific_first": True, "specific_second": True}
+    fake = {"n": 3, "evidence": "I went skiing in the Alps last winter",
+            "named_first": True, "named_second": True,
+            "specific_first": True, "specific_second": True}
+    empty = {"n": 4, "evidence": "", "opinion_explicit": True,
+             "choice_stated": True, "justified": True}
+
+    picked = sc.doubtful_aspects({"aspects": [full, part, fake, empty]}, said)
+    if 1 in picked:
+        bad.append("на пересмотр ушёл аспект, раскрытый полностью и с цитатой")
+    for n, why in ((2, "неполно раскрытый"), (3, "с выдуманной цитатой"),
+                   (4, "без улик, но с признаками")):
+        if n not in picked:
+            bad.append(f"на пересмотр НЕ ушёл аспект {n} ({why})")
+    if len(picked) > 3:
+        bad.append("на пересмотр ушло больше трёх аспектов — это второй первый проход")
+
+    obs = {"aspects": [dict(full), dict(part)]}
+    changed = sc.merge_aspect_recheck(
+        obs, [{"n": 2, "named_second": True, "evidence": "playing chess at home"}])
+    if changed != 1:
+        bad.append(f"слияние насчитало правок {changed}, а изменился один признак")
+    if not obs["aspects"][1].get("named_second"):
+        bad.append("пересмотренный признак не доехал до наблюдений")
+    if obs["aspects"][0].get("evidence") != full["evidence"]:
+        bad.append("второй взгляд затронул аспект, о котором его не спрашивали")
+
+    # Мусор от модели не должен ронять разбор и не должен ничего менять.
+    if sc.merge_aspect_recheck(obs, "не список") != 0:
+        bad.append("слияние приняло не-список")
+    print(f"{'ok  ' if not bad else 'FAIL'} отбор спорных аспектов и слияние")
+    return bad
+
+
 def main() -> int:
     print("Сверка шкалы с методичкой ФИПИ 2026\n")
     bad: list[str] = []
@@ -459,6 +509,7 @@ def main() -> int:
     bad += check_reading()
     bad += check_quotes()
     bad += check_aspects()
+    bad += check_recheck_pick()
     bad += check_items()
     print()
     bad += check_monologues()

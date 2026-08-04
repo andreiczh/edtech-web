@@ -277,13 +277,30 @@ def ask(client: OpenAI, prompt: str, transcript: str, max_tokens: int) -> dict:
     return ege_prompts.loads_forgiving(completion.choices[0].message.content or "") or {}
 
 
-def run_monologues(client: OpenAI) -> tuple[int, int, list[str]]:
-    print("ЗАДАНИЕ 4 — монолог по фотографиям (максимум 10)\n")
+def recheck_aspects(client: OpenAI, case: dict, obs: dict) -> int:
+    """Второй взгляд на спорные аспекты — ТОТ ЖЕ отбор и тот же промпт, что в
+    бою (main._recheck_aspects). Здесь он повторён из-за разницы клиентов
+    (синхронный против асинхронного), но вся логика взята из общих функций:
+    разъехаться замер с продом не может."""
+    numbers = ege_scoring.doubtful_aspects(obs, case["script"])
+    if not numbers:
+        return 0
+    first = {int(c.get("n") or 0): c for c in (obs.get("aspects") or [])
+             if isinstance(c, dict)}
+    data = ask(client, ege_prompts.aspect_recheck_prompt(
+        numbers, case["brief"], case["facts"], first), case["script"], 700)
+    return ege_scoring.merge_aspect_recheck(obs, data.get("aspects"))
+
+
+def run_monologues(client: OpenAI, recheck: bool) -> tuple[int, int, list[str]]:
+    print(f"ЗАДАНИЕ 4 — монолог по фотографиям (максимум 10)"
+          f"{' + второй взгляд на спорные аспекты' if recheck else ''}\n")
     exact = close = 0
     notes = []
     for case in MONOLOGUES:
         obs = ask(client, ege_prompts.monologue_prompt(case["brief"], case["facts"]),
                   case["script"], 2000)
+        changed = recheck_aspects(client, case, obs) if recheck else 0
         aspects = ege_scoring.aspect_verdicts(obs.get("aspects") or [])
         # Балл считаем ТЕМ ЖЕ кодом, что и на проде (05.08.2026). Раньше здесь
         # была своя копия подсчёта — она звала score_monologue напрямую, минуя
@@ -307,7 +324,8 @@ def run_monologues(client: OpenAI) -> tuple[int, int, list[str]]:
               f"{sum(marks)}/10 | эксперты {want[0]}/{want[1]}/{want[2]} = {sum(want)}/10 "
               f"(разница {delta})")
         print(f"     аспекты {[a.get('verdict') for a in aspects]}, фраз "
-              f"{obs.get('phrases')}, ошибок: язык {len(lang)}, логика {len(logic)}")
+              f"{obs.get('phrases')}, ошибок: язык {len(lang)}, логика {len(logic)}"
+              + (f", второй взгляд изменил признаков: {changed}" if recheck else ""))
         if delta > 1:
             notes.append(f"{case['name']}: разошлись на {delta} балла")
     return exact, close, notes
@@ -351,9 +369,15 @@ def main() -> int:
     # прогону — значит гоняться за шумом; поэтому по умолчанию их три, а решает
     # СРЕДНЕЕ. Цена: 8 вызовов на прогон.
     runs = 3
+    # --recheck / --no-recheck: тот самый второй взгляд на спорные аспекты.
+    # Ключ нужен ради ЧЕСТНОГО сравнения: обе ветки гоняются одной командой на
+    # одних и тех же работах, иначе «стало лучше» останется вопросом веры.
+    recheck = True
     for i, arg in enumerate(sys.argv):
         if arg == "--runs" and i + 1 < len(sys.argv):
             runs = max(1, int(sys.argv[i + 1]))
+        if arg == "--no-recheck":
+            recheck = False
     client = OpenAI(base_url=BASE_URL, api_key=os.environ["LLM_API_KEY"], timeout=90)
     print(f"Сверка живого разбора с экспертами ФИПИ. Модель: {MODEL}, "
           f"прогонов: {runs}\n")
@@ -362,7 +386,7 @@ def main() -> int:
     for r in range(runs):
         if runs > 1:
             print(f"\n{'─' * 70}\nПРОГОН {r + 1} из {runs}\n{'─' * 70}")
-        exact, close, n1 = run_monologues(client)
+        exact, close, n1 = run_monologues(client, recheck)
         agree, n2 = run_interviews(client)
         exacts.append(exact)
         closes.append(close)

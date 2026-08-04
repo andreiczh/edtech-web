@@ -2772,6 +2772,73 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
     return observations
 
 
+# Второй взгляд на спорные аспекты монолога. ПО УМОЛЧАНИЮ ВЫКЛЮЧЕН — так решил
+# замер, а не вкус (05.08.2026, шесть работ ФИПИ, по три прогона на ветку):
+#
+#   в пределах ±1 балла   3.0/6  ->  3.7/6
+#   точное совпадение     2.0/6  ->  1.3/6
+#   средняя ошибка       11.0    -> 10.67 балла  <- решающее число
+#
+# Средняя ошибка не изменилась: второй проход не судит точнее, он судит ДОБРЕЕ.
+# Одна и та же правка (аспект 1 «неполно» -> «раскрыт») спасла работу, которой
+# эксперты дали 4, и испортила ту, которой дали 0. Платить за это лишним вызовом
+# и парой секунд ожидания ученика незачем.
+#
+# Код оставлен и покрыт тестами намеренно: включается одной переменной, и
+# вернуться к нему стоит, когда золотой набор вырастет с шести работ до
+# нескольких десятков (копилка жалоб, docs/DECISIONS.md §6.7). На шести работах
+# разница в 0.3 балла средней ошибки — это шум, а не вывод.
+MONOLOGUE_RECHECK = os.environ.get("MONOLOGUE_RECHECK", "0").strip() not in ("0", "false", "no")
+
+
+async def _recheck_aspects(kind: str, observations: dict, ctx: dict,
+                           transcript: str, persona: str, client) -> dict:
+    """Спорные аспекты монолога — на повторную, точечную проверку.
+
+    Отличие от `_recheck_disputed` не в механике, а в том, ЧТО спорно. У
+    диалога спорен вердикт по вопросу; здесь — аспект, который первый проход
+    зачёл наполовину или подтвердил цитатой, которой в речи нет (отбор —
+    ege_scoring.doubtful_aspects).
+
+    Цена: один вызов на работу и только когда спорное есть. Любой сбой
+    оставляет вердикты первого прохода — хуже не становится.
+    """
+    if kind != "monologue" or not MONOLOGUE_RECHECK:
+        return observations
+    numbers = ege_scoring.doubtful_aspects(observations, transcript)
+    if not numbers:
+        return observations
+    first = {}
+    for c in (observations.get("aspects") or []):
+        if isinstance(c, dict):
+            try:
+                first[int(c.get("n") or 0)] = c
+            except (TypeError, ValueError):
+                continue
+    prompt = ege_prompts.aspect_recheck_prompt(
+        numbers, str(ctx.get("brief") or ""), ctx.get("facts") or [], first, persona)
+    try:
+        completion = await asyncio.to_thread(
+            lambda: client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[{"role": "system", "content": prompt},
+                          {"role": "user", "content": transcript}],
+                response_format={"type": "json_object"},
+                temperature=0.0,
+                max_tokens=700,
+            )
+        )
+        _track_llm(completion)
+        data = _loads_forgiving((completion.choices[0].message.content or "").strip()) or {}
+    except Exception as e:  # noqa: BLE001
+        print(f"[recheck] второй взгляд на аспекты не удался ({type(e).__name__}) — "
+              f"остаются вердикты первого прохода")
+        return observations
+    changed = ege_scoring.merge_aspect_recheck(observations, data.get("aspects"))
+    print(f"[recheck] аспекты {numbers}: изменено признаков {changed}")
+    return observations
+
+
 async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                               device: str | None, variant: str,
                               duration_sec: int, session_done: bool = False,
@@ -2907,6 +2974,10 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     # обычной работы задержка не растёт вовсе.
     observations = await _recheck_disputed(kind, observations, ctx,
                                            transcript_text, persona, client)
+    # У монолога спорны не вердикты по вопросам, а аспекты — свой отбор и свой
+    # промпт, но та же цена: один вызов и только когда есть что пересматривать.
+    observations = await _recheck_aspects(kind, observations, ctx,
+                                          transcript_text, persona, client)
 
     # Балл считает шкала ФИПИ, а не модель, — см. ege_scoring.py.
     feedback = _score_feedback(kind, observations, ctx)

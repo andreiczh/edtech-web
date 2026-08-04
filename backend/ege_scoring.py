@@ -151,6 +151,98 @@ def aspect_verdicts(checks: list[dict]) -> list[dict]:
     return out
 
 
+# Сколько аспектов максимум уходит на второй взгляд. Четвёртый не добавляем
+# намеренно: пересмотр ВСЕГО ответа — это просто второй первый проход, а нам
+# нужен сфокусированный взгляд на спорное.
+_MAX_RECHECK_ASPECTS = 3
+
+
+def doubtful_aspects(observations: dict, transcript: str) -> list[int]:
+    """Номера аспектов, которые стоит пересмотреть вторым взглядом.
+
+    Спорным считается ровно то, где балл РЕАЛЬНО может качнуться:
+
+      * вердикт «неполно» — именно на этой границе шкала переключает балл, а
+        первый проход выставляет её неустойчиво (замер 05.08.2026: три прогона
+        на неизменном коде дали 5, 2 и 3 попадания из шести — вердикты по
+        аспектам гуляют между запусками сильнее любой нашей правки);
+      * улик нет, а признаки стоят «да» — аспект зачтён по памяти о работе, а
+        не по словам ученика. Промпт это запрещает прямо, и когда запрет
+        нарушен, вердикт не на чем держаться;
+      * улика не находится в расшифровке — процитировано несказанное.
+
+    Аспект, раскрытый полностью и подтверждённый цитатой, не трогаем: второй
+    взгляд на бесспорное только добавит шума.
+    """
+    verdicts = {a["n"]: a["verdict"] for a in aspect_verdicts(
+        observations.get("aspects") or [])}
+    by_n: dict[int, dict] = {}
+    for c in (observations.get("aspects") or []):
+        if isinstance(c, dict):
+            try:
+                by_n[int(c.get("n") or 0)] = c
+            except (TypeError, ValueError):
+                continue
+
+    out: list[tuple[int, int]] = []  # (вес, номер) — важное вперёд
+    for n in (1, 2, 3, 4):
+        c = by_n.get(n)
+        if c is None:
+            continue
+        evidence = str(c.get("evidence") or "").strip()
+        flags_on = any(v is True for k, v in c.items()
+                       if k not in ("factual_error", "unintelligible"))
+        weight = 0
+        if evidence and quote_is_fabricated(evidence, transcript):
+            weight = 3
+        elif not evidence and flags_on:
+            weight = 3
+        elif verdicts.get(n) == PARTIAL:
+            weight = 2
+        if weight:
+            out.append((weight, n))
+    out.sort(key=lambda p: (-p[0], p[1]))
+    return sorted(n for _w, n in out[:_MAX_RECHECK_ASPECTS])
+
+
+def merge_aspect_recheck(observations: dict, verdicts: object) -> int:
+    """Вложить пересмотренные признаки обратно. Возвращает число изменённых.
+
+    Меняем ТОЛЬКО признаки тех аспектов, которые отправляли на пересмотр, и
+    только те ключи, что модель вернула: второй проход не должен подчистить
+    заодно то, о чём его не спрашивали.
+    """
+    if not isinstance(verdicts, list):
+        return 0
+    by_n: dict[int, dict] = {}
+    for c in (observations.get("aspects") or []):
+        if isinstance(c, dict):
+            try:
+                by_n[int(c.get("n") or 0)] = c
+            except (TypeError, ValueError):
+                continue
+    changed = 0
+    for v in verdicts:
+        if not isinstance(v, dict):
+            continue
+        try:
+            n = int(v.get("n") or 0)
+        except (TypeError, ValueError):
+            continue
+        target = by_n.get(n)
+        if target is None:
+            continue
+        for key, value in v.items():
+            if key == "n":
+                continue
+            if isinstance(value, bool) and bool(target.get(key)) != value:
+                changed += 1
+            if key in ("evidence", "comment") or isinstance(value, bool) \
+                    or key.endswith("_verb_form"):
+                target[key] = value
+    return changed
+
+
 def volume_cap(phrases: int) -> int:
     """Потолок балла по РКЗ, который даёт объём высказывания.
 

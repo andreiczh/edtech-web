@@ -106,6 +106,81 @@ def recheck_prompt(kind: str, items: list[dict], task_text: str,
     )
 
 
+# Что именно спрашиваем по каждому аспекту на втором проходе. Ключи те же, что
+# в первом: слияние идёт по ним, и расхождение здесь молча потеряло бы правку.
+_ASPECT_FIELDS = {
+    1: ('"described_first": true, "described_second": true, '
+        '"difference_stated": true, "difference_generalised": true, '
+        '"linked_to_topic": true, "factual_error": false'),
+    2: ('"named_first": true, "named_second": true, '
+        '"specific_first": true, "specific_second": true'),
+    3: ('"named_first": true, "named_second": true, '
+        '"specific_first": true, "specific_second": true'),
+    4: ('"opinion_explicit": true, "choice_stated": true, "justified": true, '
+        '"plan_verb_form": "<the form the plan uses>", '
+        '"student_verb_form": "<the form the student used>"'),
+}
+
+_ASPECT_NAMES = {
+    1: "explain the choice of the photos: describe both and state the difference",
+    2: "mention the advantages (1-2)",
+    3: "mention the disadvantages (1-2)",
+    4: "express your own opinion: which option you prefer and why",
+}
+
+
+def aspect_recheck_prompt(numbers: list[int], brief: str,
+                          photo_facts: list[str] | None,
+                          first_pass: dict[int, dict],
+                          persona: str | None = None) -> str:
+    """Второй взгляд на СПОРНЫЕ аспекты монолога.
+
+    Почему это отдельный запрос, а не «подумай ещё раз» в первом. Первый проход
+    отвечает сразу на четыре аспекта, объём высказывания, логику и весь список
+    языковых ошибок — внимание размазано, и именно вердикты по аспектам гуляют
+    между запусками сильнее всего. Здесь модель видит один-три вопроса и
+    расшифровку, больше ничего.
+
+    Первый вердикт показываем НАРОЧНО: старший эксперт должен видеть, с чем он
+    спорит. Но просим не «подтвердить», а найти слова ученика заново — иначе
+    второй проход превращается в согласие с первым.
+    """
+    facts = ""
+    if photo_facts:
+        facts = ("\nWhat is actually on the photos (you cannot see them):\n"
+                 + "\n".join(f"- photo {i + 1}: {f}" for i, f in enumerate(photo_facts))
+                 + "\n")
+    listed = []
+    for n in numbers:
+        prev = first_pass.get(n) or {}
+        ev = str(prev.get("evidence") or "").strip()
+        listed.append(
+            f"- aspect {n} ({_ASPECT_NAMES.get(n, '')})\n"
+            f"  first examiner's evidence: {ev or '(none found)'}"
+        )
+    fields = ",\n  ".join(f'{{"n": {n}, "evidence": "<the student\'s exact words>", '
+                          f'{_ASPECT_FIELDS[n]}}}' for n in numbers)
+    return (
+        "You are the SENIOR examiner called in for a second opinion on the Russian "
+        "EGE oral exam, Task 4 (a voice message about two photos). A first examiner "
+        "has already judged the work; only the aspects below are re-examined.\n\n"
+        f"The student's task was:\n{brief}\n{facts}\n"
+        f"{_MONOLOGUE_RULES}\n\n"
+        f"{_RU}\n\n"
+        f"Aspects to re-examine:\n" + "\n".join(listed) + "\n\n"
+        "Work from the transcript, not from the first examiner's opinion: FIND the "
+        "student's own words for each aspect yourself and copy them out. If there "
+        "are no such words, evidence is an empty string and every flag is false. "
+        "Do not soften and do not toughen out of politeness — decide.\n"
+        "Remember the two traps examiners mark down for: an advantage or a "
+        "disadvantage named for only ONE of the two types, and filler that would "
+        "fit any activity («it's fun», «it's interesting», «the best way to rest»).\n"
+        + strictness_block(persona) +
+        "\nReturn ONLY this JSON:\n"
+        '{"aspects": [\n  ' + fields + "\n]}"
+    )
+
+
 def loads_forgiving(raw: str) -> dict | None:
     """JSON от модели, даже если ответ обрезали на лимите токенов.
 

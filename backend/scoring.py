@@ -53,8 +53,11 @@ def _feedback_prompt(kind: str, payload: dict, transcript: str,
     brief = str(payload.get("brief") or "") or FALLBACK_MONOLOGUE_BRIEF
     facts = [str(f) for f in (payload.get("photoFacts") or [])]
     # Транскрипт нужен при подсчёте: по нему проверяется, что каждая языковая
-    # ошибка опирается на реально сказанные слова.
-    return ege_prompts.monologue_prompt(brief, facts) + extra, {"transcript": transcript}
+    # ошибка опирается на реально сказанные слова. Текст задания и описания фото
+    # — для второго взгляда на спорные аспекты: он должен видеть то же, что и
+    # первый, иначе будет судить вслепую.
+    return ege_prompts.monologue_prompt(brief, facts) + extra, {
+        "transcript": transcript, "brief": brief, "facts": facts}
 
 
 _loads_forgiving = ege_prompts.loads_forgiving
