@@ -39,7 +39,10 @@ def _feedback_prompt(kind: str, payload: dict, transcript: str,
     if kind == "reading":
         ref = str(payload.get("referenceText") or "")
         diff = ege_scoring.reading_diff(ref, transcript)
-        return ege_prompts.reading_prompt(ref, diff) + extra, {"diff": diff}
+        # Эталон кладём в контекст: по нему проверяется, что «ошибка» указывает
+        # на реально написанное слово, а не на выдуманное.
+        return ege_prompts.reading_prompt(ref, diff) + extra, {"diff": diff,
+                                                              "reference": ref}
     if kind == "dialogue":
         points = [str(p) for p in (payload.get("points") or [])]
         ad = str(payload.get("ad") or "")
@@ -49,7 +52,9 @@ def _feedback_prompt(kind: str, payload: dict, transcript: str,
         return ege_prompts.interview_prompt(questions) + extra, {"questions": questions}
     brief = str(payload.get("brief") or "") or FALLBACK_MONOLOGUE_BRIEF
     facts = [str(f) for f in (payload.get("photoFacts") or [])]
-    return ege_prompts.monologue_prompt(brief, facts) + extra, {}
+    # Транскрипт нужен при подсчёте: по нему проверяется, что каждая языковая
+    # ошибка опирается на реально сказанные слова.
+    return ege_prompts.monologue_prompt(brief, facts) + extra, {"transcript": transcript}
 
 
 _loads_forgiving = ege_prompts.loads_forgiving
@@ -82,18 +87,36 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
     summary = str(obs.get("summary") or "").strip()
 
     if kind == "reading":
+        # Ошибка чтения обязана указывать на слово ИЗ ЭТАЛОНА. Слова, которого
+        # в тексте нет, ученик не мог прочитать неверно — такую «ошибку»
+        # снимаем до подсчёта (05.08.2026, жалоба «находит ошибки там, где их
+        # нет»). Сверяем с эталоном, а не с расшифровкой: expected — это то,
+        # что было НАПИСАНО.
+        reference = str(ctx.get("reference") or "")
         misread = [m for m in (obs.get("misread") or [])
-                   if isinstance(m, dict) and m.get("real")]
+                   if isinstance(m, dict) and m.get("real")
+                   and not (reference and ege_scoring.quote_is_fabricated(
+                       str(m.get("expected") or ""), reference))]
         # Фонетически ДАЛЁКИЕ подмены засчитывает КОД, модель их простить не
         # может (05.08.2026). Распознавание ошибается в сторону похожего
         # звучания; «teachers -> doctors» означает, что другое слово
         # прозвучало. До этого модель списывала на шум вообще всё: три явные
         # подмены получали 1/1 и пустой разбор.
         covered = {str(m.get("expected") or "").strip().lower() for m in misread}
-        for s in ctx["diff"].get("swaps") or []:
+        swaps = ctx["diff"].get("swaps") or []
+        for s in swaps:
             if s.get("distant") and s["expected"].strip().lower() not in covered:
                 misread.append({"expected": s["expected"], "heard": s["heard"],
                                 "explanation": "прочитано другое слово"})
+                covered.add(s["expected"].strip().lower())
+        # Систематически искажённые окончания — тоже решение КОДА: одиночное
+        # распознавание глотает честно, но два и больше в одной записи оно не
+        # производит. Правило было только в промпте, и модель его не исполняла.
+        for s in ege_scoring.ending_pattern(swaps):
+            if s["expected"].strip().lower() not in covered:
+                misread.append({"expected": s["expected"], "heard": s["heard"],
+                                "explanation": "форма слова прочитана неверно"})
+                covered.add(s["expected"].strip().lower())
         # Считаем СЛОВА, а не пункты списка: по критериям каждое пропущенное
         # или перевранное слово — грубая ошибка, а одна подмена может накрыть
         # два слова сразу («stronger teachers» -> «strange doctors»).
@@ -130,6 +153,14 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
             ok = bool(it.get("accepted"))
             heard = str(it.get("heard") or "").strip()
             correction = str(it.get("model") or "").strip()
+            # Цитата, которой нет в расшифровке, до экрана НЕ доезжает: на
+            # незачёте это было бы ложное обвинение, на зачёте — балл за
+            # несказанное. Пометку ставит ege_scoring.flag_suspicious ещё до
+            # второго прохода, так что такой пункт уже пересмотрен старшим
+            # экспертом (05.08.2026).
+            unverified = bool(it.get("quote_missing"))
+            if unverified:
+                heard = ""
             criterion = {
                 "key": f"q{i + 1}", "name": f"{label} {i + 1}",
                 "score": 1 if ok else 0, "max": 1,
@@ -146,7 +177,13 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
                 # сопоставлял вопрос с ошибкой по порядковому номеру среди
                 # незачтённых, и один лишний элемент в errors (например, из
                 # _errors_from ниже) тихо сдвигал пару "вопрос-ошибка".
-                criterion["quote"] = heard or ("вопрос не задан" if is_dialogue else "ответ не зачтён")
+                # Подпись говорит ровно то, что известно. «Вопрос не задан» —
+                # утверждение о факте, и оно уместно только когда проверка
+                # цитаты прошла: при выдуманной цитате мы не знаем, звучал
+                # вопрос или нет, и врать в эту сторону тоже нельзя.
+                criterion["quote"] = heard or (
+                    "не удалось сопоставить с записью" if unverified
+                    else "вопрос не задан" if is_dialogue else "ответ не зачтён")
                 criterion["correction"] = correction
                 errors.append({
                     "cat": "missing" if not heard else "order",
@@ -161,8 +198,19 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
 
     # monologue: модель отвечает признаками «да/нет», вердикты выводит шкала
     aspects = ege_scoring.aspect_verdicts(obs.get("aspects") or [])
-    logic = [e for e in (obs.get("logic_errors") or []) if isinstance(e, dict)]
-    lang = [e for e in (obs.get("lang_errors") or []) if isinstance(e, dict)]
+    # Ошибки без опоры в речи ученика вон ДО подсчёта (05.08.2026): их число
+    # напрямую решает баллы за организацию и за язык, а проверить их ученику
+    # нечем. Выдуманная цитата и цитата, которой нет вовсе, несправедливы
+    # одинаково — нет улики, нет наказания.
+    #
+    # Логическим ошибкам цитата не обязательна: «нет связки между частями» —
+    # это про отсутствие слов, цитировать там нечего. Языковым — обязательна,
+    # у них всегда есть конкретная фраза, и схема промпта её требует.
+    transcript = str(ctx.get("transcript") or "")
+    logic = ege_scoring.drop_unsupported(
+        obs.get("logic_errors") or [], transcript, need_quote=False)
+    lang = ege_scoring.drop_unsupported(
+        obs.get("lang_errors") or [], transcript, need_quote=True)
     grave = sum(1 for e in lang if e.get("grave"))
     try:
         phrases = int(obs.get("phrases") or 0)

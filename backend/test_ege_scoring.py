@@ -230,7 +230,123 @@ def check_reading() -> list[str]:
     if any(x.get("distant") for x in d["swaps"]):
         bad.append("короткое it->at ошибочно помечено далёкой подменой")
 
+    # 10. Систематика окончаний: одна потеря прощается, две и больше — нет.
+    # Эталон свой, короткий: в общем REF слова повторяются, и одна замена
+    # превращалась бы в две (на этом тест меня и поймал).
+    ends = ("The teacher helps the pupils and makes the lesson clear. "
+            "Everyone listens and learns something new today.")
+    one = sc.reading_diff(ends, ends.replace("helps", "help"))
+    if sc.ending_pattern(one["swaps"]):
+        bad.append(f"одиночное искажение окончания записано в систему: {one['swaps']}")
+    many = sc.reading_diff(
+        ends, ends.replace("helps", "help").replace("makes", "make")
+                  .replace("listens", "listen"))
+    pattern = sc.ending_pattern(many["swaps"])
+    if len(pattern) < 2:
+        bad.append(f"систематика окончаний не поймана: {many['swaps']}")
+    # ...и три искажённые формы обязаны обнулить задание по критериям.
+    if sc.score_reading(many, len(pattern))[0] != 0:
+        bad.append("три искажённые формы не обнулили балл")
+    if not sc._endings_only("helps", "help") or not sc._endings_only("happen", "happens"):
+        bad.append("пара, отличающаяся только окончанием, не распознана")
+    for a, b in (("teachers", "doctors"), ("tree", "three"), ("a", "as"),
+                 ("tall plant", "tall plants")):
+        if sc._endings_only(a, b):
+            bad.append(f"«{a}»/«{b}» ошибочно принято за разницу в окончании")
+
     print(f"{'OK  ' if not bad else 'FAIL'} чтение вслух: пропуски, хвост, пропущенная строка")
+    return bad
+
+
+def check_quotes() -> list[str]:
+    """Сверка цитат: приписано ли ученику несказанное (05.08.2026).
+
+    Ошибка здесь стоит балла ЕГЭ, поэтому проверяются обе стороны: и что
+    выдумка ловится, и что честная цитата НЕ объявляется выдумкой.
+    """
+    bad = []
+    said = ("Hello, I am calling about your advertisement. Is there a course "
+            "for beginners? How much does the whole course cost? Do I need "
+            "special clothes for the lessons?")
+
+    # 1. Настоящая цитата подтверждается — даже причёсанная моделью.
+    for good in ("Is there a course for beginners?",
+                 "How much does the whole course cost",
+                 "is there a course for beginners",          # регистр
+                 "Do I need special clothes for the lessons"):
+        if sc.quote_is_fabricated(good, said):
+            bad.append(f"настоящая цитата объявлена выдумкой: «{good}»")
+    # Модель вправе почистить мусор распознавания — это не выдумка.
+    if sc.quote_is_fabricated("How much does the course cost", said):
+        bad.append("причёсанная цитата объявлена выдумкой")
+
+    # 2. Выдумка ловится.
+    for fake in ("What time do the lessons start?",
+                 "Could you tell me about the teachers and their experience?"):
+        if not sc.quote_is_fabricated(fake, said):
+            bad.append(f"выдуманная цитата прошла как настоящая: «{fake}»")
+
+    # 3. Пустая цитата — это «не прозвучало», а не выдумка.
+    if sc.quote_is_fabricated("", said) or sc.quote_is_fabricated("   ", said):
+        bad.append("пустая цитата ошибочно считается выдумкой")
+
+    # 4. Короткие цитаты ищутся целиком: «половина» у них ничего не значит.
+    if sc.quote_is_fabricated("special clothes", said):
+        bad.append("короткая настоящая цитата объявлена выдумкой")
+    if not sc.quote_is_fabricated("swimming pool", said):
+        bad.append("короткая выдумка прошла как настоящая")
+
+    # 5. Пометки на пунктах: выдумка и зачтённый обрывок уходят на пересмотр.
+    obs = {"questions": [
+        {"accepted": True, "heard": "Is there a course for beginners?", "reason": "ок"},
+        {"accepted": True, "heard": "What time do the lessons start?", "reason": "ок"},
+        {"accepted": True, "heard": "clothes?", "reason": "ок"},
+        {"accepted": False, "heard": "", "reason": "не задан"},
+    ]}
+    notes = sc.flag_suspicious("dialogue", obs, said)
+    q = obs["questions"]
+    if q[0].get("borderline"):
+        bad.append("честный пункт зря отправлен на пересмотр")
+    if not (q[1].get("quote_missing") and q[1].get("borderline")):
+        bad.append("выдуманная цитата не помечена")
+    if not (q[2].get("too_short") and q[2].get("borderline")):
+        bad.append("зачтённый обрывок не помечен")
+    if q[3].get("borderline"):
+        bad.append("незаданный вопрос с пустой цитатой зря помечен")
+    if len(notes) != 2:
+        bad.append(f"пометок {len(notes)}, а ожидалось 2: {notes}")
+
+    # 6. У интервью порог длины выше: полный ответ — 2-3 предложения.
+    # Расшифровка своя: у интервью она содержит ответы, а не вопросы.
+    answered = ("Yes I do. I usually spend my weekend with my family and we go "
+                "to the park together, because I really enjoy fresh air.")
+    obs_i = {"answers": [
+        {"accepted": True, "heard": "Yes I do", "reason": "ок"},
+        {"accepted": True,
+         "heard": "I usually spend my weekend with my family and we go to the "
+                  "park together", "reason": "ок"},
+    ]}
+    sc.flag_suspicious("interview", obs_i, answered)
+    if not obs_i["answers"][0].get("too_short"):
+        bad.append("интервью: ответ из трёх слов не помечен коротким")
+    if obs_i["answers"][1].get("too_short"):
+        bad.append("интервью: развёрнутый ответ зря помечен коротким")
+
+    # 7. Ошибки без опоры в речи — вон до подсчёта балла.
+    errs = [
+        {"quote": "course for beginners", "correction": "x"},   # настоящая
+        {"quote": "yesterday I go to school", "correction": "x"},  # выдумка
+        {"quote": "", "correction": "x"},                        # без улики
+    ]
+    kept = sc.drop_unsupported(errs, said, need_quote=True)
+    if len(kept) != 1 or kept[0]["quote"] != "course for beginners":
+        bad.append(f"отсев ошибок без улик сработал неверно: {kept}")
+    # Логической ошибке цитата не обязательна: «нет связки» цитировать нечем.
+    kept_logic = sc.drop_unsupported(errs, said, need_quote=False)
+    if len(kept_logic) != 2:
+        bad.append(f"логические ошибки отсеяны слишком жадно: {kept_logic}")
+
+    print(f"{'OK  ' if not bad else 'FAIL'} сверка цитат: выдумки, обрывки, ошибки без улик")
     return bad
 
 
@@ -341,6 +457,7 @@ def main() -> int:
     bad += check_organization()
     bad += check_language()
     bad += check_reading()
+    bad += check_quotes()
     bad += check_aspects()
     bad += check_items()
     print()

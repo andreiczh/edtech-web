@@ -63,6 +63,45 @@ check(fb["criteria"][3]["quote"] == "You have clothes?",
 # Перечитать собственную формулировку было негде — а именно она и учит.
 check(fb["criteria"][0].get("quote") == "Is there a course?",
       "диалог: у ЗАЧТЁННОГО вопроса тоже видна своя формулировка")
+
+# Выдуманная цитата до экрана не доезжает: на незачёте это ложное обвинение,
+# на зачёте — балл за несказанное (05.08.2026).
+fb_fake = scoring._score_feedback(
+    "dialogue",
+    {"summary": "s", "questions": [
+        {"accepted": False, "heard": "What time do you open?",
+         "quote_missing": True, "reason": "нет такого вопроса"},
+    ]},
+    {"points": ["a"]})
+shown = fb_fake["criteria"][0].get("quote") or ""
+check("What time" not in shown,
+      "диалог: выдуманная цитата на экран не попадает")
+check("не удалось сопоставить" in shown,
+      "диалог: вместо выдумки честная подпись, а не «вопрос не задан»")
+check(all("What time" not in (e.get("quote") or "") for e in fb_fake["errors"]),
+      "диалог: выдуманная цитата не утекла и в список ошибок")
+
+# Монолог: языковая ошибка без опоры в речи балл не снижает.
+MONO_SAID = ("Hi Max, I have found two photos for our project. The first photo "
+             "show a girl who is reading a book in the park.")
+mono_obs = {
+    "summary": "s",
+    "aspects": [], "phrases": 12,
+    "opening_with_address": True, "closing": True,
+    "logic_errors": [],
+    "lang_errors": [
+        {"cat": "gram", "quote": "The first photo show a girl", "grave": True},
+        {"cat": "gram", "quote": "yesterday I go to the cinema", "grave": True},
+        {"cat": "lex", "quote": "", "grave": True},
+    ],
+}
+fb_mono = scoring._score_feedback("monologue", mono_obs, {"transcript": MONO_SAID})
+fb_mono_blind = scoring._score_feedback("monologue", mono_obs, {})
+check(fb_mono["score"] >= fb_mono_blind["score"],
+      "монолог: отсев ошибок без улик не может УХУДШИТЬ балл ученика")
+kept = [e["quote"] for e in fb_mono["errors"] if e.get("quote")]
+check(all("yesterday" not in q for q in kept),
+      "монолог: выдуманная языковая ошибка не попала в разбор")
 check(all(c["comment"] for c in fb["criteria"]),
       "диалог: обоснование есть у каждого критерия")
 

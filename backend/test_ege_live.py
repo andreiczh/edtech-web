@@ -26,6 +26,7 @@ from openai import OpenAI
 
 import ege_prompts
 import ege_scoring
+import scoring
 
 load_dotenv()
 MODEL = os.environ.get("LLM_MODEL", "mistral-small-latest")
@@ -259,13 +260,18 @@ INTERVIEWS = [
 ]
 
 
+# Температура разбора. Ставится ОДНОЙ переменной, чтобы замер и бой не
+# разъезжались: цифра здесь обязана совпадать с main.py и _recheck_disputed.
+GRADE_TEMPERATURE = float(os.environ.get("GRADE_TEMPERATURE", "0"))
+
+
 def ask(client: OpenAI, prompt: str, transcript: str, max_tokens: int) -> dict:
     completion = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "system", "content": prompt},
                   {"role": "user", "content": transcript}],
         response_format={"type": "json_object"},
-        temperature=0.2,
+        temperature=GRADE_TEMPERATURE,
         max_tokens=max_tokens,
     )
     return ege_prompts.loads_forgiving(completion.choices[0].message.content or "") or {}
@@ -279,14 +285,19 @@ def run_monologues(client: OpenAI) -> tuple[int, int, list[str]]:
         obs = ask(client, ege_prompts.monologue_prompt(case["brief"], case["facts"]),
                   case["script"], 2000)
         aspects = ege_scoring.aspect_verdicts(obs.get("aspects") or [])
-        lang = [e for e in (obs.get("lang_errors") or []) if isinstance(e, dict)]
-        logic = [e for e in (obs.get("logic_errors") or []) if isinstance(e, dict)]
-        got = ege_scoring.score_monologue(
-            aspects, int(obs.get("phrases") or 0),
-            bool(obs.get("opening_with_address")), bool(obs.get("closing")),
-            len(logic), len(lang), sum(1 for e in lang if e.get("grave")),
-        )
-        marks = tuple(c["score"] for c in got["criteria"])
+        # Балл считаем ТЕМ ЖЕ кодом, что и на проде (05.08.2026). Раньше здесь
+        # была своя копия подсчёта — она звала score_monologue напрямую, минуя
+        # scoring.py. Калибровка мерила путь, которого в бою нет: отсев ошибок
+        # без улик, санитизация и всё, что живёт в _score_feedback, в замер не
+        # попадали. Такой замер может показывать благополучие там, где прод
+        # ошибается, — и наоборот.
+        fb = scoring._score_feedback("monologue", obs,
+                                     {"transcript": case["script"]})
+        lang = ege_scoring.drop_unsupported(
+            obs.get("lang_errors") or [], case["script"], need_quote=True)
+        logic = ege_scoring.drop_unsupported(
+            obs.get("logic_errors") or [], case["script"], need_quote=False)
+        marks = tuple(c["score"] for c in fb["criteria"])
         want = case["expected"]
         delta = abs(sum(marks) - sum(want))
         exact += marks == want
@@ -309,8 +320,14 @@ def run_interviews(client: OpenAI) -> tuple[int, list[str]]:
     for case in INTERVIEWS:
         obs = ask(client, ege_prompts.interview_prompt(INTERVIEW_QUESTIONS),
                   case["script"], 900)
-        answers = [a for a in (obs.get("answers") or []) if isinstance(a, dict)][:5]
-        marks = [1 if a.get("accepted") else 0 for a in answers]
+        # Как на проде: сначала механическая сверка улик (она метит выдуманные
+        # цитаты и зачтённые обрывки), потом общий подсчёт. Второго прохода
+        # здесь нет — он живёт в main.py и стоит лишних вызовов; это
+        # единственное, чем замер отличается от боевого пути.
+        ege_scoring.flag_suspicious("interview", obs, case["script"])
+        fb = scoring._score_feedback("interview", obs,
+                                     {"questions": INTERVIEW_QUESTIONS})
+        marks = [c["score"] for c in fb["criteria"]][:5]
         marks += [0] * (5 - len(marks))
         want = case["expected_marks"]
         agree = sum(1 for a, b in zip(marks, want) if a == b)
@@ -327,22 +344,51 @@ def main() -> int:
     if not os.environ.get("LLM_API_KEY"):
         print("Нет LLM_API_KEY в backend/.env — живую сверку запустить нельзя.")
         return 2
+    # ОДИН прогон этой сверки ничего не доказывает. Замер 05.08.2026: три
+    # прогона подряд на неизменном коде дали «в пределах ±1» 5, 2 и 3 из шести.
+    # Модель отвечает при temperature 0.2, и вердикты по аспектам гуляют между
+    # запусками сильнее, чем любая наша правка. Судить о регрессе по одному
+    # прогону — значит гоняться за шумом; поэтому по умолчанию их три, а решает
+    # СРЕДНЕЕ. Цена: 8 вызовов на прогон.
+    runs = 3
+    for i, arg in enumerate(sys.argv):
+        if arg == "--runs" and i + 1 < len(sys.argv):
+            runs = max(1, int(sys.argv[i + 1]))
     client = OpenAI(base_url=BASE_URL, api_key=os.environ["LLM_API_KEY"], timeout=90)
-    print(f"Сверка живого разбора с экспертами ФИПИ. Модель: {MODEL}\n")
+    print(f"Сверка живого разбора с экспертами ФИПИ. Модель: {MODEL}, "
+          f"прогонов: {runs}\n")
 
-    exact, close, notes = run_monologues(client)
-    agree, notes2 = run_interviews(client)
-    notes += notes2
+    exacts, closes, agrees, notes = [], [], [], []
+    for r in range(runs):
+        if runs > 1:
+            print(f"\n{'─' * 70}\nПРОГОН {r + 1} из {runs}\n{'─' * 70}")
+        exact, close, n1 = run_monologues(client)
+        agree, n2 = run_interviews(client)
+        exacts.append(exact)
+        closes.append(close)
+        agrees.append(agree)
+        notes += n1 + n2
 
-    print(f"\nМонолог: точное совпадение {exact}/{len(MONOLOGUES)}, "
-          f"в пределах ±1 балла {close}/{len(MONOLOGUES)}")
-    print(f"Интервью: совпало {agree}/10 вердиктов по отдельным ответам")
+    def avg(xs: list[int]) -> float:
+        return sum(xs) / len(xs)
+
+    total = len(MONOLOGUES)
+    print(f"\n{'═' * 70}")
+    print(f"Монолог: точное совпадение {avg(exacts):.1f}/{total} "
+          f"(по прогонам {exacts}), в пределах ±1 балла {avg(closes):.1f}/{total} "
+          f"(по прогонам {closes})")
+    print(f"Интервью: совпало {avg(agrees):.1f}/10 вердиктов (по прогонам {agrees})")
+    if runs > 1:
+        print(f"Разброс между прогонами: монолог ±1 балл "
+              f"{min(closes)}-{max(closes)}, интервью {min(agrees)}-{max(agrees)}. "
+              "Правка, меняющая меньше этого, — не улучшение, а шум.")
     if notes:
         print("\nРасхождения, на которые стоит смотреть:")
-        for n in notes:
+        for n in sorted(set(notes)):
             print("  -", n)
-    # Порог намеренно мягкий: требуем не идеала, а отсутствия перекоса.
-    ok = close >= len(MONOLOGUES) - 1 and agree >= 8
+    # Порог намеренно мягкий: требуем не идеала, а отсутствия перекоса. Судим
+    # по среднему — одиночный неудачный прогон не должен объявлять регресс.
+    ok = avg(closes) >= total - 1.5 and avg(agrees) >= 8
     print("\n" + ("ИТОГ: разбор держится рядом с экспертами." if ok
                   else "ИТОГ: расхождение великовато, промпты надо править."))
     return 0 if ok else 1

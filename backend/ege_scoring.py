@@ -308,6 +308,24 @@ def _words(text: str) -> list[str]:
 _DISTANT_SIMILARITY = 0.7
 
 
+def _endings_only(exp: str, heard: str) -> bool:
+    """Отличаются ли два слова ТОЛЬКО хвостовым -s/-es/-ed.
+
+    Одиночная такая пара — законный промах распознавания: оно глотает
+    окончания. Но две и больше в одной записи распознавание не производит,
+    это уже манера чтеца (см. _ENDING_PATTERN_AT).
+    """
+    a, b = exp.strip().lower(), heard.strip().lower()
+    if not a or not b or " " in a or " " in b or a == b:
+        return False
+    short, long_ = (a, b) if len(a) < len(b) else (b, a)
+    # Корень короче трёх букв — это служебное слово («a» против «as»), и
+    # разница в нём не про окончание, а про другое слово целиком.
+    if len(short) < 3:
+        return False
+    return long_.startswith(short) and long_[len(short):] in ("s", "es", "d", "ed")
+
+
 def _swap_entry(exp_words: list[str], heard_words: list[str]) -> dict:
     exp, heard = " ".join(exp_words), " ".join(heard_words)
     sim = difflib.SequenceMatcher(a=exp, b=heard, autojunk=False).ratio()
@@ -316,8 +334,23 @@ def _swap_entry(exp_words: list[str], heard_words: list[str]) -> dict:
     # далёкой подменой не считается, пусть решает модель.
     distant = (sim < _DISTANT_SIMILARITY and len(exp) >= 4 and bool(heard)
                and not any(ch.isdigit() for ch in exp + heard))
-    return {"expected": exp, "heard": heard,
-            "similarity": round(sim, 2), "distant": distant}
+    return {"expected": exp, "heard": heard, "similarity": round(sim, 2),
+            "distant": distant, "ending_only": _endings_only(exp, heard)}
+
+
+# Со скольких искажённых окончаний это перестаёт быть шумом распознавания.
+# Два — потому что одно распознавание глотает регулярно, а два подряд в одной
+# короткой записи означают, что чтец систематически меняет формы слов.
+# Правило было ТОЛЬКО в промпте — и модель его не исполняла: живой прогон
+# 05.08.2026 дважды подряд простил три искажённые формы и поставил 1/1.
+# Механическое правило должен исполнять код, а не уговоры.
+_ENDING_PATTERN_AT = 2
+
+
+def ending_pattern(swaps: list[dict]) -> list[dict]:
+    """Подмены-окончания, если их набралось на систему. Иначе пусто."""
+    marked = [s for s in swaps if s.get("ending_only")]
+    return marked if len(marked) >= _ENDING_PATTERN_AT else []
 
 
 def reading_diff(reference: str, transcript: str) -> dict:
@@ -388,6 +421,115 @@ def reading_diff(reference: str, transcript: str) -> dict:
 # короче 15 слов, монолог на 12-15 фраз — короче 25. Настоящая попытка,
 # даже слабая, проходит с запасом; отсеивается только «пара абстрактных слов».
 _GATE_MIN_WORDS = {"reading": 8, "dialogue": 6, "interview": 15, "monologue": 25}
+
+
+# --------------------------------------------------------------------------
+# Сверка цитат: сказал ли ученик то, что ему приписывают
+# --------------------------------------------------------------------------
+#
+# Зачем (05.08.2026). Жалоба тестировщика «иногда находит ошибки там, где их
+# нет» — это не про строгость, а про ВЫДУМАННЫЕ улики. Модель может честно
+# ошибиться в суждении, но не имеет права цитировать несказанное: на цитате
+# держится и балл, и доверие ученика к разбору.
+#
+# В разборе разговора такая сверка уже работает (talk_review.verify) и ловит
+# выдумки штучно. Здесь то же самое, но для оцениваемых заданий, где цена
+# ошибки — балл ЕГЭ.
+#
+# Проверка НАРОЧНО щадящая: модель имеет право почистить цитату от мусора
+# распознавания («the the course» -> «the course»), и это не выдумка. Поэтому
+# ищем не точное вхождение, а самый длинный НЕПРЕРЫВНЫЙ кусок совпадения:
+# настоящая цитата даёт длинную серию, выдуманная — обрывки.
+
+# Доля цитаты, которую обязан подтвердить источник. Половина — с большим
+# запасом в пользу модели: ложное обвинение в выдумке стоит лишнего второго
+# прохода и стёртой цитаты на экране, а пропущенная выдумка — только того же,
+# что и сегодня.
+_QUOTE_SUPPORT = 0.5
+
+
+def quote_support(quote: str, source: str) -> float:
+    """Какая доля слов цитаты подтверждается непрерывным куском источника."""
+    q, s = _words(quote), _words(source)
+    if not q:
+        return 1.0  # пустую цитату проверять не на чем
+    if not s:
+        return 0.0
+    match = difflib.SequenceMatcher(a=q, b=s, autojunk=False).find_longest_match(
+        0, len(q), 0, len(s))
+    return match.size / len(q)
+
+
+def quote_is_fabricated(quote: str, source: str) -> bool:
+    """Приписана ли ученику фраза, которой он не говорил.
+
+    Пустая цитата выдумкой НЕ считается: у незаданного вопроса её и не может
+    быть, это законный случай «не прозвучало».
+    """
+    q = _words(quote)
+    if not q:
+        return False
+    if len(q) <= 2:
+        # У цитаты в одно-два слова «половина» ничего не значит — ищем целиком.
+        return f" {' '.join(q)} " not in f" {' '.join(_words(source))} "
+    return quote_support(quote, source) < _QUOTE_SUPPORT
+
+
+# Подозрительно короткий ЗАЧТЁННЫЙ ответ. Не приговор — повод для второго
+# взгляда: тестировщик поймал, что оборванная на середине фраза засчитывалась.
+#
+# №40: прямой вопрос короче трёх слов не бывает («How much is it?» — четыре).
+# №41: задание требует полного ответа в 2-3 предложения; восемь слов — это
+# заведомо не он, но порог намеренно вдвое ниже правдоподобного, чтобы не
+# трогать короткие, но настоящие ответы.
+_MIN_ACCEPTED_WORDS = {"dialogue": 3, "interview": 8}
+
+
+def flag_suspicious(kind: str, observations: dict, transcript: str) -> list[str]:
+    """Пометить пункты, которым нельзя верить на слово. Возвращает список причин.
+
+    Ничего не решает и баллов не трогает: только ставит `borderline`, чтобы
+    пункт ушёл на второй проход, и `quote_missing`, чтобы выдуманная цитата не
+    доехала до экрана.
+    """
+    if kind not in ("dialogue", "interview"):
+        return []
+    key = "questions" if kind == "dialogue" else "answers"
+    items = [it for it in (observations.get(key) or []) if isinstance(it, dict)]
+    need = _MIN_ACCEPTED_WORDS.get(kind, 3)
+    notes = []
+    for i, it in enumerate(items):
+        heard = str(it.get("heard") or "").strip()
+        if quote_is_fabricated(heard, transcript):
+            it["quote_missing"] = True
+            it["borderline"] = True
+            notes.append(f"№{i + 1}: цитаты нет в расшифровке")
+            continue
+        if it.get("accepted") and heard and len(_words(heard)) < need:
+            it["too_short"] = True
+            it["borderline"] = True
+            notes.append(f"№{i + 1}: зачтён ответ из {len(_words(heard))} слов")
+    return notes
+
+
+def drop_unsupported(errors: list, transcript: str, need_quote: bool = True) -> list:
+    """Ошибки без опоры в речи ученика — вон, ДО подсчёта балла.
+
+    Их две породы, и обе несправедливы одинаково: выдуманная цитата и цитата,
+    которой нет вовсе. И то и другое занижает балл за язык, а проверить ученику
+    нечем. Нет улики — нет наказания.
+    """
+    kept = []
+    for e in errors:
+        if not isinstance(e, dict):
+            continue
+        quote = str(e.get("quote") or "").strip()
+        if need_quote and not quote:
+            continue
+        if quote and quote_is_fabricated(quote, transcript):
+            continue
+        kept.append(e)
+    return kept
 
 
 def _plural_words(n: int) -> str:

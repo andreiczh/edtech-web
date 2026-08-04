@@ -2558,9 +2558,13 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
                             transcript: str, persona: str, client) -> dict:
     """Спорные вердикты диалога/интервью — на повторную, точечную проверку.
 
-    Спорным считается пункт, который первый проход сам пометил borderline,
-    и незачёт без внятной причины (обоснованность — требование формата: пустое
-    обоснование не аргумент, а подозрение на произвол).
+    Что считается спорным (список расширен 05.08.2026):
+      * пункт, который первый проход сам пометил borderline;
+      * вердикт БЕЗ внятного обоснования — и незачёт, и зачёт. Раньше
+        проверялся только незачёт, но незаслуженный балл так же неправомерен,
+        как незаслуженный ноль, а «правомерное оценивание» — про обе стороны;
+      * цитата, которой нет в расшифровке, и подозрительно короткий зачтённый
+        ответ — их метит ege_scoring.flag_suspicious до этого вызова.
 
     Ограничения по скорости — сознательные (требование владельца: не замедлять):
     один дополнительный вызов на работу, максимум 3 пункта, только 40/41.
@@ -2574,13 +2578,31 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
 
     disputed = []
     for i, it in enumerate(items):
+        if i >= len(points):
+            continue
         reason = str(it.get("reason") or "").strip()
-        fishy = bool(it.get("borderline")) or (not it.get("accepted") and len(reason) < 8)
-        if fishy and i < len(points):
-            disputed.append({"n": i + 1, "point": points[i],
+        # Вес спорности: чем выше, тем нужнее второй взгляд. Нужен, потому что
+        # пересматриваем максимум три пункта — и выбирать надо худшие.
+        weight = 0
+        if it.get("quote_missing"):
+            weight = 3  # процитировано несказанное — самое опасное
+        elif it.get("too_short"):
+            weight = 2  # балл за обрывок фразы
+        elif it.get("borderline"):
+            weight = 2
+        elif len(reason) < 8:
+            weight = 1  # вердикт без обоснования, в любую сторону
+        if weight:
+            disputed.append({"n": i + 1, "point": points[i], "weight": weight,
                              "accepted": bool(it.get("accepted")), "reason": reason})
-    if not disputed or len(disputed) > 3:
+    if not disputed:
         return observations
+    # Раньше здесь стоял выход «спорных больше трёх — не проверяем вовсе»: чем
+    # хуже была работа, тем меньше её проверяли. Теперь берём три САМЫХ спорных,
+    # порядок пунктов сохраняем — цена та же, один вызов.
+    if len(disputed) > 3:
+        disputed = sorted(disputed, key=lambda d: -d["weight"])[:3]
+        disputed.sort(key=lambda d: d["n"])
 
     task_text = "\n".join(f"{i + 1}. {p}" for i, p in enumerate(points))
     prompt = ege_prompts.recheck_prompt(kind, disputed, task_text, transcript, persona)
@@ -2590,7 +2612,7 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
                 model=LLM_MODEL,
                 messages=[{"role": "system", "content": prompt}],
                 response_format={"type": "json_object"},
-                temperature=0.1,
+                temperature=0.0,  # см. объяснение у первого прохода
                 max_tokens=400,
             )
         )
@@ -2721,7 +2743,14 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                     {"role": "user", "content": transcript_text},
                 ],
                 response_format={"type": "json_object"},
-                temperature=0.2,
+                # Ноль, а не 0.2 (05.08.2026). Выигрыш здесь не в точности —
+                # средняя сходимость с экспертами почти не меняется, — а в
+                # ВОСПРОИЗВОДИМОСТИ: один и тот же ответ обязан получать один и
+                # тот же балл. Замер на шести работах ФИПИ по три прогона:
+                # при 0.2 разброс «в пределах ±1» был 2-4 из шести, при нуле
+                # сузился до 3-4. Проверяющий, который сегодня ставит 4, а
+                # завтра 6 за ту же работу, несправедлив независимо от среднего.
+                temperature=0.0,
                 # Монологу нужно место: четыре аспекта плюс полный список ошибок,
                 # по числу которых считается балл за язык.
                 max_tokens=2000 if kind == "monologue" else 900,
@@ -2735,6 +2764,14 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     observations = _loads_forgiving(raw)
     if observations is None:
         raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
+
+    # Механическая сверка улик ДО второго прохода: приписана ли ученику фраза,
+    # которой он не говорил, и не засчитан ли обрывок вместо ответа. Ничего не
+    # решает — только помечает пункты, чтобы старший эксперт посмотрел именно
+    # на них. Без сети и без вызова модели (05.08.2026).
+    suspicious = ege_scoring.flag_suspicious(kind, observations, transcript_text)
+    if suspicious:
+        print(f"[verify] улики не сошлись — {'; '.join(suspicious)}")
 
     # Второй взгляд на спорные пункты — аналог третьей проверки из методички.
     # Запускается ТОЛЬКО когда первый проход сам сомневается, поэтому у
