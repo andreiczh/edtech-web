@@ -345,6 +345,24 @@ def transcribe(data: bytes, model: str | None = None) -> str:
 
 _stt_http: httpx.AsyncClient | None = None
 
+# Сколько живёт ПРОСТАИВАЮЩЕЕ соединение в пуле.
+#
+# Умолчание httpx — 5 секунд, и это тихо съедало весь прогрев. В разговоре между
+# репликами проходит 10-60 с (человек слушает ответ и думает), значит к моменту
+# следующей реплики пул пуст, и каждый запрос заново платит TCP + TLS. Прогрев
+# на старте (см. _warmup) грел соединение, которое умирало через пять секунд и
+# до первого же ученика не доживало.
+#
+# 300 с покрывают паузу между репликами с запасом. Дальше соединение всё равно
+# закроет уже СЕРВЕР Mistral — поэтому его мало держать, его надо трогать:
+# см. _keep_pools_warm.
+_KEEPALIVE = httpx.Limits(max_keepalive_connections=8, max_connections=32,
+                          keepalive_expiry=300.0)
+# Как часто дёргать соединение, чтобы оно не закрылось со стороны сервера или
+# NAT. 50 с — меньше типичного idle-таймаута (60 с) и в 3500 раз реже, чем
+# лимит запросов; /models не тарифицируется и токенов не тратит.
+_POOL_PING_EVERY = 50.0
+
 
 def _stt_client() -> httpx.AsyncClient:
     """Отдельный HTTP-клиент для загрузки аудио в Mistral.
@@ -367,7 +385,8 @@ def _stt_client() -> httpx.AsyncClient:
         # STT_TIMEOUT, не вышло — локальная модель разберёт за 1.5-3 с.
         # На Render это не мешает: там загрузка занимает ~0.4 с.
         _stt_http = httpx.AsyncClient(
-            timeout=float(os.environ.get("STT_TIMEOUT", "12")), trust_env=False
+            timeout=float(os.environ.get("STT_TIMEOUT", "12")), trust_env=False,
+            limits=_KEEPALIVE,
         )
     return _stt_http
 
@@ -2127,6 +2146,7 @@ async def synthesize(text: str, who: dict | None = None) -> bytes:
 # превращает сбой в многоминутное зависание, которое выглядит как «всё сломалось».
 _llm: OpenAI | None = None
 _async_llm: AsyncOpenAI | None = None
+_llm_http: httpx.AsyncClient | None = None
 _LLM_TIMEOUT = 30.0
 _LLM_RETRIES = 1
 
@@ -2140,26 +2160,107 @@ def llm_client() -> OpenAI:
             http_client=httpx.Client(
                 transport=httpx.HTTPTransport(local_address=_LOCAL_IP),
                 timeout=_LLM_TIMEOUT, trust_env=False,
+                limits=_KEEPALIVE,
             ),
         )
     return _llm
 
 
+def llm_http_client() -> httpx.AsyncClient:
+    """HTTP-пул под стриминг LLM. Держим ССЫЛКУ на него отдельно от SDK: пул
+    надо не только настроить, но и периодически трогать (_keep_pools_warm),
+    а достучаться до внутреннего клиента SDK нельзя, не полагаясь на его
+    приватные поля."""
+    global _llm_http
+    if _llm_http is None:
+        # Свой транспорт нужен ради local_address: см. OUTBOUND_LOCAL_IP выше.
+        # trust_env=False — чтобы системный прокси VPN не подхватился обратно.
+        _llm_http = httpx.AsyncClient(
+            transport=httpx.AsyncHTTPTransport(local_address=_LOCAL_IP),
+            timeout=_LLM_TIMEOUT, trust_env=False, limits=_KEEPALIVE,
+        )
+    return _llm_http
+
+
 def async_llm_client() -> AsyncOpenAI:
     # Асинхронный клиент — для стриминга токенов (/talk_stream).
-    # Свой транспорт нужен ради local_address: см. OUTBOUND_LOCAL_IP выше.
-    # trust_env=False — чтобы системный прокси VPN не подхватился обратно.
     global _async_llm
     if _async_llm is None:
         _async_llm = AsyncOpenAI(
             base_url=LLM_BASE_URL, api_key=_require("LLM_API_KEY"),
             timeout=_LLM_TIMEOUT, max_retries=_LLM_RETRIES,
-            http_client=httpx.AsyncClient(
-                transport=httpx.AsyncHTTPTransport(local_address=_LOCAL_IP),
-                timeout=_LLM_TIMEOUT, trust_env=False,
-            ),
+            http_client=llm_http_client(),
         )
     return _async_llm
+
+
+async def _ping_pool(client: httpx.AsyncClient) -> bool:
+    """Дёрнуть соединение, чтобы оно осталось живым. /models не тарифицируется
+    и токенов не тратит — это самый дешёвый способ сказать «я ещё здесь»."""
+    try:
+        r = await client.get(
+            f"{LLM_BASE_URL.rstrip('/')}/models",
+            headers={"Authorization": f"Bearer {os.environ.get('LLM_API_KEY', '')}"},
+            timeout=8.0,
+        )
+        return r.status_code < 500
+    except Exception:  # noqa: BLE001 — прогрев не обязан удаваться
+        return False
+
+
+async def _check_llm_route() -> bool:
+    """Проверить, что выбранный маршрут к модели ЖИВОЙ, и откатиться, если нет.
+
+    Зачем. `OUTBOUND_LOCAL_IP` уводит запросы мимо VPN, и когда-то это было
+    вчетверо быстрее. Но маршрут задаётся один раз в .env, а сеть меняется: с
+    другим туннелем (или без него) прямой путь начинает резаться DPI —
+    рукопожатие проходит за 34 мс, а сам запрос умирает по таймауту. Замерено
+    05.08.2026 на этой машине: STT и TTS напрямую отваливались с ReadTimeout,
+    хотя адрес в .env был совершенно правильный.
+
+    Проверка `_usable_local_ip` этого не ловит: она спрашивает «существует ли
+    адрес», а не «доходят ли по нему запросы». Без ответа на второй вопрос
+    сервер тихо работает вчетверо медленнее, и понять это можно только замером.
+    """
+    global _llm_http, _async_llm
+    if await _ping_pool(llm_http_client()):
+        return True
+    if not _LOCAL_IP:
+        return False
+    print(f"[startup] маршрут мимо VPN (OUTBOUND_LOCAL_IP={_LOCAL_IP}) не отвечает — "
+          f"перехожу на обычный маршрут")
+    try:
+        await _llm_http.aclose()  # type: ignore[union-attr]
+    except Exception:  # noqa: BLE001
+        pass
+    _llm_http = httpx.AsyncClient(timeout=_LLM_TIMEOUT, trust_env=False, limits=_KEEPALIVE)
+    _async_llm = None  # пересоберётся на новом пуле при первом обращении
+    return await _ping_pool(_llm_http)
+
+
+async def _keep_pools_warm() -> None:
+    """Держать соединения с Mistral живыми, пока сервер работает.
+
+    Зачем фоновая задача, а не только прогрев на старте: соединение закрывает
+    не наш пул, а вторая сторона (idle-таймаут сервера, NAT). Прогретое на
+    старте соединение до первого ученика не доживает, и пауза перед его первым
+    ответом складывается из трёх рукопожатий подряд — распознавание, модель,
+    озвучка. Цена задачи: два GET в минуту без токенов; выигрыш — рукопожатия
+    уходят из горячего пути КАЖДОЙ реплики, и качество при этом не трогается
+    вовсе.
+    """
+    alive = True
+    while True:
+        await asyncio.sleep(_POOL_PING_EVERY)
+        ok = await _ping_pool(_stt_client())
+        if _llm_http is not None:
+            ok = await _ping_pool(_llm_http) and ok
+        # Печатаем только СМЕНУ состояния: строка раз в минуту в логе — шум,
+        # в котором тонет всё остальное.
+        if ok != alive:
+            alive = ok
+            print("[warm] соединения с Mistral " + ("снова живы" if ok else
+                  "не отвечают на прогрев — первая реплика будет медленнее"))
 
 
 class TtsFailed(Exception):
@@ -2261,16 +2362,17 @@ async def _warmup():
         # запроса после старта заняли 7.9 и 15.1 с, дальше стабильно 0.43-0.54 с.
         # Разница — TLS-хендшейк и разогрев маршрута; платить за него должен старт
         # сервера, а не первая реплика ученика.
-        try:
-            t = time.time()
-            await _stt_client().get(
-                f"{LLM_BASE_URL.rstrip('/')}/models",
-                headers={"Authorization": f"Bearer {os.environ.get('LLM_API_KEY', '')}"},
-            )
-            print(f"[startup] соединение с Mistral прогрето за {time.time() - t:.1f}с")
-        except Exception as e:  # noqa: BLE001
-            print(f"[startup] прогрев не удался ({type(e).__name__}) — не страшно, "
-                  f"первая реплика просто будет медленнее")
+        t = time.time()
+        # Греем ОБА пула: распознавание с озвучкой ходят одним клиентом, модель —
+        # другим (у него свой маршрут). Раньше грелся только первый, и первый же
+        # запрос к модели всё равно платил рукопожатие.
+        ok = await _ping_pool(_stt_client())
+        if os.environ.get("LLM_API_KEY"):
+            ok = await _check_llm_route() and ok
+        print(f"[startup] соединения с Mistral прогреты за {time.time() - t:.1f}с"
+              if ok else "[startup] прогрев не удался — первая реплика будет медленнее")
+        # И держим их тёплыми: прогрев со сроком жизни в пять секунд бесполезен.
+        asyncio.create_task(_keep_pools_warm())
     else:
         for name in dict.fromkeys([WHISPER_MODEL, WHISPER_MODEL_FAST]):
             print(f"[startup] Загружаю faster-whisper:{name} (первый раз качает модель, подожди)...")
@@ -3002,12 +3104,17 @@ async def talk_stream(audio: UploadFile = File(...),
 
         async def emit(sentence: str):
             nonlocal first_audio_at, emitted
+            t_tts = time.time()
             try:
                 wav = await synthesize(sentence, who)
             except Exception as e:  # noqa: BLE001
                 raise TtsFailed(str(e)) from e
             if first_audio_at is None:
                 first_audio_at = time.time()
+                # Синтез ПЕРВОГО куска — самая крупная доля паузы (замер
+                # 05.08.2026: ~1.3 из 2.9 с). Меряем отдельно: без разложения
+                # по этапам любое «ускорение» будет угадыванием.
+                _track_latency("conv_tts", first_audio_at - t_tts)
             emitted = True
             return json.dumps({"text": sentence, "audio_b64": base64.b64encode(wav).decode()}) + "\n"
 
@@ -3097,6 +3204,7 @@ async def talk_stream(audio: UploadFile = File(...),
                 )
                 stream_usage = None
                 head_done = False
+                t_ask = time.time()
                 async for chunk in stream:
                     # usage приезжает в последнем чанке стрима (если провайдер
                     # его шлёт) — запоминаем для счётчика расхода.
@@ -3105,6 +3213,11 @@ async def talk_stream(audio: UploadFile = File(...),
                     delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
                     if not delta:
                         continue
+                    if not reply_full:
+                        # Ожидание первого токена: сеть + очередь + префилл
+                        # промпта. Отделено от генерации намеренно — лечатся
+                        # они разным, и путать их значит чинить не то.
+                        _track_latency("conv_ttft", time.time() - t_ask)
                     buf += delta
                     reply_full += delta
                     if not head_done:

@@ -977,7 +977,10 @@ def overview(month: str, msk_today: str) -> dict:
     # Скорости: sum/n по каждому этапу. n=0 -> None, фронт покажет «нет данных»
     # вместо нуля — ноль читался бы как «мгновенно», а это неправда.
     latency = {}
-    for stage in ("conv_stt", "conv_answer", "task_stt", "task_llm", "talk_review"):
+    # conv_ttft и conv_tts — РАЗЛОЖЕНИЕ паузы до звука на слагаемые. Без них
+    # видно только итог, и любое «ускорение» приходится делать вслепую.
+    for stage in ("conv_stt", "conv_ttft", "conv_tts", "conv_answer",
+                  "task_stt", "task_llm", "talk_review"):
         ms = usage.get(f"lat_{stage}_ms", 0)
         n = usage.get(f"lat_{stage}_n", 0)
         latency[stage] = {"avg_sec": round(ms / n / 1000, 2), "n": n} if n else None
