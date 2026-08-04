@@ -111,6 +111,28 @@ fb_rf = scoring._score_feedback(
 check(fb_rf["score"] == 1,
       "чтение: расхождения, отвергнутые моделью, балл не снижают")
 
+# Фонетически ДАЛЁКИЕ подмены модель простить не может: их засчитывает код
+# (05.08.2026 — модель списывала на шум teachers->doctors и ставила 1/1).
+diff_far = ege_scoring.reading_diff(
+    ref, ref.replace("tall", "small").replace("trunk", "doctor")
+           .replace("branches", "wonderful"))
+fb_far = scoring._score_feedback(
+    "reading", {"summary": "s", "misread": []}, {"diff": diff_far})
+check(fb_far["score"] == 0,
+      "чтение: три далёкие подмены обнуляют балл, даже если модель промолчала")
+check(len(fb_far["errors"]) >= 2,
+      "чтение: далёкие подмены попали в разбор без участия модели")
+
+# Подмена, накрывшая ДВА слова, стоит двух ошибок, а не одной: по критериям
+# каждое перевранное слово — грубая ошибка.
+diff_two = ege_scoring.reading_diff(ref, ref.replace("trunk and", "wonderful person"))
+fb_two = scoring._score_feedback(
+    "reading",
+    {"summary": "s", "misread": [{"real": True, "expected": "wood", "heard": "food"}]},
+    {"diff": diff_two})
+check(fb_two["score"] == 0,
+      "чтение: двухсловная далёкая подмена плюс оговорка = три слова = ноль")
+
 # ------------------------------------------------------------- санитизация
 
 dirty = [

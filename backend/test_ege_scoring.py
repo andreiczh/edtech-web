@@ -216,6 +216,20 @@ def check_reading() -> list[str]:
     if sc.score_reading(d, 0)[0] != 1:
         bad.append("подмена пары слов не должна обнулять ответ")
 
+    # 9. Фонетическая дистанция подмен (05.08.2026): далёкую засчитывает код.
+    d = sc.reading_diff(REF, REF.replace("branches", "doctors"))
+    s = next((x for x in d["swaps"] if "branches" in x["expected"]), None)
+    if not (s and s.get("distant")):
+        bad.append(f"branches->doctors не помечено далёкой подменой: {s}")
+    d = sc.reading_diff(REF, REF.replace("branches", "branch"))
+    s = next((x for x in d["swaps"] if "branch" in x["expected"]), None)
+    if s and s.get("distant"):
+        bad.append("потеря окончания ошибочно помечена далёкой подменой")
+    # Короткие слова и цифры далёкими не считаются — это честный шум STT.
+    d = sc.reading_diff("It is a tree", "At is a tree")
+    if any(x.get("distant") for x in d["swaps"]):
+        bad.append("короткое it->at ошибочно помечено далёкой подменой")
+
     print(f"{'OK  ' if not bad else 'FAIL'} чтение вслух: пропуски, хвост, пропущенная строка")
     return bad
 

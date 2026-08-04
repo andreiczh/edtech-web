@@ -84,7 +84,22 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
     if kind == "reading":
         misread = [m for m in (obs.get("misread") or [])
                    if isinstance(m, dict) and m.get("real")]
-        score, note = ege_scoring.score_reading(ctx["diff"], len(misread))
+        # Фонетически ДАЛЁКИЕ подмены засчитывает КОД, модель их простить не
+        # может (05.08.2026). Распознавание ошибается в сторону похожего
+        # звучания; «teachers -> doctors» означает, что другое слово
+        # прозвучало. До этого модель списывала на шум вообще всё: три явные
+        # подмены получали 1/1 и пустой разбор.
+        covered = {str(m.get("expected") or "").strip().lower() for m in misread}
+        for s in ctx["diff"].get("swaps") or []:
+            if s.get("distant") and s["expected"].strip().lower() not in covered:
+                misread.append({"expected": s["expected"], "heard": s["heard"],
+                                "explanation": "прочитано другое слово"})
+        # Считаем СЛОВА, а не пункты списка: по критериям каждое пропущенное
+        # или перевранное слово — грубая ошибка, а одна подмена может накрыть
+        # два слова сразу («stronger teachers» -> «strange doctors»).
+        misread_words = sum(
+            max(1, len(str(m.get("expected") or "").split())) for m in misread)
+        score, note = ege_scoring.score_reading(ctx["diff"], misread_words)
         errors = [{
             "cat": "missing" if not str(m.get("heard") or "").strip() else "lex",
             "quote": str(m.get("heard") or "").strip() or "пропущено",

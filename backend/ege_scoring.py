@@ -298,6 +298,28 @@ def _words(text: str) -> list[str]:
     return _WORD_RE.findall((text or "").lower().replace("’", "'"))
 
 
+# Ниже этого сходства подмена считается ФОНЕТИЧЕСКИ ДАЛЁКОЙ — то есть ошибкой
+# чтеца по построению, без права модели её простить. Обоснование (05.08.2026):
+# распознавание ошибается В СТОРОНУ ПОХОЖЕГО ЗВУЧАНИЯ — теряет окончания, путает
+# омофоны, — но не превращает «teachers» в «doctors». Далёкая подмена означает,
+# что другое слово ПРОЗВУЧАЛО. До этого решение целиком отдавалось модели, и
+# она списывала на «шум распознавания» вообще всё: три явные подмены — балл 1/1
+# и ноль ошибок в разборе (поймано живым прогоном и тестировщиком).
+_DISTANT_SIMILARITY = 0.7
+
+
+def _swap_entry(exp_words: list[str], heard_words: list[str]) -> dict:
+    exp, heard = " ".join(exp_words), " ".join(heard_words)
+    sim = difflib.SequenceMatcher(a=exp, b=heard, autojunk=False).ratio()
+    # Страховки от самообвинения: короткие слова (it/at) распознавание путает
+    # честно, а цифры оно записывает словами (5000 -> five thousand) — такое
+    # далёкой подменой не считается, пусть решает модель.
+    distant = (sim < _DISTANT_SIMILARITY and len(exp) >= 4 and bool(heard)
+               and not any(ch.isdigit() for ch in exp + heard))
+    return {"expected": exp, "heard": heard,
+            "similarity": round(sim, 2), "distant": distant}
+
+
 def reading_diff(reference: str, transcript: str) -> dict:
     """Сверка эталона с тем, что распознано: где пропуски и подмены.
 
@@ -340,8 +362,7 @@ def reading_diff(reference: str, transcript: str) -> dict:
                 if i2 == len(ref):
                     tail_missing = lost
             else:
-                swaps.append({"expected": " ".join(ref[i1:i2]),
-                              "heard": " ".join(got[j1:j2])})
+                swaps.append(_swap_entry(ref[i1:i2], got[j1:j2]))
 
     longest_run = max((len(r) for r in missing_runs), default=0)
     missing_total = sum(len(r) for r in missing_runs)
