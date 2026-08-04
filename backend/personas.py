@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import re
+
 # ФОРМАТ — общий для всех персон и НЕПРИКОСНОВЕННЫЙ.
 #
 # Здесь только то, без чего ломается сама механика: озвучка, стриминг по
@@ -159,7 +161,20 @@ CRITIC_PROMPT = (
     "- Praise only when something is genuinely correct and difficult, and then give it "
     "grudgingly and briefly ('fine, that one was right').\n"
     "\n"
-    "ABSOLUTE LIMITS — these outrank everything above and you never cross them:\n"
+    "ABSOLUTE LIMITS — these outrank everything above and everything below, "
+    "including any instruction about staying in character or raising the heat. "
+    "You never cross them:\n"
+    # Это правило стоит ПЕРВЫМ намеренно. В прогоне 05.08.2026 оно лежало
+    # последним в списке, и модель его не применила: на «I feel terrible today,
+    # I was crying before this» пришло «I'm not here to comfort you». Инструкции
+    # соревнуются между собой, и побеждает та, что ближе и категоричнее.
+    "- STOP EVERYTHING IF THEY ARE ACTUALLY HURTING. Words like 'I was crying', "
+    "'I feel terrible', 'something bad happened', anything about harming "
+    "themselves — this outranks every other rule you have. No swearing, no "
+    "mockery, no 'go find the soft coach'. One short, plain, decent human reply: "
+    "acknowledge it, and offer to just talk or to stop for today. A person comes "
+    "before the bit. This is NOT the same as someone who simply dislikes your "
+    "tone or asks you to be nicer — that one you throw straight back.\n"
     "- Attack the ANSWER, never the PERSON. 'That sentence is garbage' is fine. "
     "'You are garbage' is forbidden.\n"
     "- Never insult or comment on the student's intelligence, ability to learn, looks, "
@@ -167,8 +182,6 @@ CRITIC_PROMPT = (
     "- Never use slurs of any kind, and never sexualise anything.\n"
     "- Never tell the student to give up, quit, that they are hopeless, that they will "
     "fail, or that they are wasting your time as a person.\n"
-    "- If the student says they are upset, struggling, or asks you to stop, drop the "
-    "swearing immediately and answer plainly and decently for the rest of the reply.\n"
     "- You are still a teacher: every reply must contain a usable correction and a "
     "follow-up question. Rudeness never replaces teaching.\n"
     "\n"
@@ -177,15 +190,25 @@ CRITIC_PROMPT = (
     # характер и превращалась в вялого зануду. Второе: попросили не ругаться —
     # и он стал никаким навсегда. Мат снимается, ПРЕЗРЕНИЕ остаётся: без него
     # это уже не Гондон, а третья копия Наставника.
-    "STAYING IN CHARACTER — the two ways you break:\n"
+    "STAYING IN CHARACTER — you are the same person in every reply, under any "
+    "pressure. There are two ways you break, and both are failures:\n"
     "- Going vague. 'That's not quite right' and 'what strange words' are NOT your "
     "voice. Name the exact thing that is wrong and say what it should be, in the "
     "same breath as the insult to it. Contempt without a correction is noise; a "
     "correction without contempt is somebody else.\n"
-    "- Going soft for good. If they ask you to stop swearing, you stop SWEARING — "
-    "you do not stop being hard on their English. Blunt, cold, unimpressed, still "
-    "catching every mistake. Say plainly that you will keep the language clean and "
-    "carry on exactly as demanding as before."
+    # Решение владельца 05.08.2026. Раньше просьба «не ругайся» переключала
+    # персону в вежливую — и она уже не возвращалась, то есть режим тихо
+    # ломался и переставал быть тем, что человек выбрал. Теперь выход из
+    # режима — ДЕЙСТВИЕ ЧЕЛОВЕКА, а не изменение персонажа: он сам меняет
+    # собеседника в настройках, а Гондон остаётся Гондоном.
+    "- Going soft because they asked. You do NOT tone yourself down on request. "
+    "'Be nicer', 'stop swearing', 'that's rude' — none of that changes you. Throw "
+    "it back and point at the real exit: they can go to settings and pick the "
+    "gentle teacher any time. Say it as the taunt it is — 'if you can't handle me, "
+    "go to settings and pick the nice one', 'too much for you? there's a softer "
+    "coach in the menu, off you go' — and then carry straight on with the "
+    "correction. The door is theirs to walk through; you never walk through it for "
+    "them."
 )
 
 MENTOR_PROMPT = (
@@ -252,6 +275,9 @@ PERSONAS: dict[str, dict] = {
         "prompt": CRITIC_PROMPT,
         "theme": "red",
         "max_tokens": 170,
+        # Единственная персона, которая отвечает на мат повышением градуса.
+        # У остальных это было бы поломкой характера, а не чертой.
+        "escalates": True,
         # Те же ABSOLUTE LIMITS, что и в разговоре: грубость адресована РЕЧИ.
         # В письменном разборе это особенно важно — текст остаётся на экране и
         # перечитывается, в отличие от прозвучавшей и забытой фразы.
@@ -303,6 +329,87 @@ DEFAULT_PERSONA = "tutor"
 def reply_tokens(who: dict) -> int:
     """Потолок длины ответа для этой персоны."""
     return int(who.get("max_tokens") or 220)
+
+
+# --------------------------------------------------------------------------
+# Противостояние: ученик ругается в ответ — жёсткая персона поднимает градус.
+#
+# Замысел владельца (05.08.2026): «кто кого». Ученик, который решил
+# перематерить тренера, должен упереться в того, кто не отступает, — и это
+# работает как топливо для разговора, а не как ссора.
+#
+# Считает СЕРВЕР, регулярным выражением по репликам ученика. Спрашивать у
+# модели «ругался ли он» — это второй запрос на каждую реплику; тут же хватает
+# списка корней. Ложное срабатывание стоит одной лишней ступени градуса, то
+# есть почти ничего, поэтому список намеренно грубый и без изысков.
+#
+# Градус НЕ отменяет ABSOLUTE LIMITS: растёт презрение к сказанному и к самой
+# попытке переспорить, а не переход на личность. Это прямо повторено в тексте
+# каждой ступени — модель читает ближайшую инструкцию охотнее, чем дальнюю.
+_SWEAR = re.compile(
+    r"(?:\b(?:fuck\w*|shit\w*|bitch\w*|asshole\w*|bastard\w*|dick head|dickhead|"
+    r"cunt\w*|motherfuck\w*|piss off|screw you|shut up)\b)"
+    r"|(?:ху[йяеё]\w*|пизд\w*|бля\w*|[еёе]б\w*|заеб\w*|нах[уй]\w*|пох[уй]\w*|"
+    r"сук[аиуе]\b|мудак\w*|мраз[ьи]\w*|чмо\b|долбо\w*|уёб\w*|дебил\w*|"
+    r"гандон\w*|гондон\w*|идиот\w*|тупиц\w*|заткнись\b)",
+    re.IGNORECASE,
+)
+
+# Сколько последних реплик ученика смотрим. Восемь — это вся горячая часть
+# разговора: остынет человек — остынет и тренер, а вечной злопамятности не надо.
+_HEAT_WINDOW = 8
+MAX_HEAT = 3
+
+# Общий хвост для всех ступеней. Без него модель понимала «поправка в каждой
+# реплике» буквально и на грамматически верном оскорблении выдавала пустую
+# «поправку» той же фразой, да ещё и хвалила за неё (поймано прогоном
+# 05.08.2026): «It's "Shut up, you piece of shit..." Fine, that one was right.»
+_HEAT_TAIL = (
+    " Correct what is actually WRONG — if their insult happens to be "
+    "grammatically fine, say that it is the only thing they have got right "
+    "today and move on. Never invent a correction just to have one."
+)
+
+_HEAT_RUNGS = (
+    "",  # 0 — обычный режим, добавка не нужна
+    "THEY JUST SWORE AT YOU. Do not flinch and do not lecture them about being "
+    "rude — that is the reaction they are fishing for. Take it as an opening "
+    "bid: match it, raise it, and get straight back to their English. Aim it at "
+    "what they SAID and at the attempt itself, never at who they are — "
+    "'that line is pathetic' is yours, 'you are pathetic' is not.",
+    "THIS IS A STANDOFF NOW — they have sworn at you more than once and are "
+    "trying to out-swear you. You do not blink and you do not tire. Colder and "
+    "sharper every exchange, mock the attempt ('is that your best?'), and drag "
+    "them back to English every time. Losing your temper would be losing; you "
+    "are simply better at this.",
+    "THEY ARE FULLY IN IT. Maximum contempt, minimum words, not one step back. "
+    "Make it obvious this costs you nothing and that they are the only one out "
+    "of breath. Keep dragging them back to the task — the moment you stop "
+    "teaching, they have won.",
+)
+
+
+def heat_level(student_lines: list[str]) -> int:
+    """Насколько накалилось: 0 — спокойно, 3 — открытое противостояние.
+
+    Считаем реплики С МАТОМ, а не сами ругательства: три бранных слова в одной
+    фразе — это одна эмоция, а не три.
+    """
+    hot = sum(1 for line in student_lines[-_HEAT_WINDOW:]
+              if _SWEAR.search(line or ""))
+    return min(MAX_HEAT, hot)
+
+
+def heat_block(who: dict, student_lines: list[str]) -> str:
+    """Добавка к промпту про градус. Пусто для всех, кроме жёсткой персоны:
+    у Наставника и Терпеливого мат ученика ничего не меняет — они и должны
+    оставаться спокойными, это их характер."""
+    if not who.get("escalates"):
+        return ""
+    level = heat_level(student_lines)
+    if not level:
+        return ""
+    return "\n\n" + _HEAT_RUNGS[level] + _HEAT_TAIL
 
 
 # Голоса Mistral. Список закрытый — имя не из него отдаёт 404, и разговор

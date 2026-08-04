@@ -126,9 +126,12 @@ app.add_middleware(GZipExceptStreams, minimum_size=500)
 # без зависимостей от main; здесь только импорт.
 from personas import (  # noqa: E402 — после настройки окружения, как и прочие
     DEFAULT_PERSONA,
+    MAX_HEAT,
     PERSONAS,
     SYSTEM_PROMPT,
     emotion_of,
+    heat_block,
+    heat_level,
     persona_of,
     reply_tokens,
 )
@@ -2969,6 +2972,15 @@ async def talk_stream(audio: UploadFile = File(...),
         sys_prompt += "\n" + dialogue.flow_block(exchanges)
         print(f"[dialog] обмен {exchanges + 1}, "
               f"ступень {dialogue.rung_index(exchanges) + 1}")
+
+        # Градус противостояния — только у жёсткой персоны. Считается по мату в
+        # репликах ученика, включая текущую: ответ на брань должен прийти
+        # СРАЗУ, а не со следующего хода.
+        said = [m["content"] for m in past if m["role"] == "user"] + [user_text]
+        heat = heat_block(who, said)
+        if heat:
+            sys_prompt += heat
+            print(f"[dialog] градус {heat_level(said)}/{MAX_HEAT}")
 
         if mem.get("user"):
             sys_prompt += (

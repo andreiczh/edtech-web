@@ -98,9 +98,9 @@ check("запрет выдумывать сказанное учеником",
       and "You mentioned X earlier" in personas.SYSTEM_PROMPT)
 check("велено переспрашивать, а не догадываться",
       "ask instead of guessing" in personas.SYSTEM_PROMPT)
-check("жёсткая персона не имеет права размякнуть насовсем",
+check("жёсткая персона одинакова под любым давлением",
       "STAYING IN CHARACTER" in personas.PERSONAS["critic"]["prompt"]
-      and "you do not stop being hard" in personas.PERSONAS["critic"]["prompt"])
+      and "same person in every reply" in personas.PERSONAS["critic"]["prompt"])
 check("длина ответа задана коридором, а не одной границей",
       all("roughly" in p["prompt"] for p in personas.PERSONAS.values())
       and "CEILING" in personas.SYSTEM_PROMPT)
@@ -122,6 +122,60 @@ check("опечатка в реестре не оставляет без гол�
       and personas.emotion_of({}) == personas.DEFAULT_EMOTION)
 check("жёсткой персоне достался злой голос",
       personas.emotion_of(personas.PERSONAS["critic"]) == "en_paul_angry")
+
+# --------------------------------------------------- противостояние «кто кого»
+print("\nГрадус жёсткой персоны")
+
+critic = personas.PERSONAS["critic"]
+tutor = personas.PERSONAS["tutor"]
+
+check("спокойный разговор градуса не поднимает",
+      personas.heat_level(["I went to the cinema", "It was fun"]) == 0)
+check("мат ученика поднимает градус",
+      personas.heat_level(["what the fuck is this"]) == 1)
+check("мат по-русски тоже считается",
+      personas.heat_level(["да пошёл ты нахуй"]) >= 1)
+check("несколько бранных слов в одной реплике — одна ступень, а не три",
+      personas.heat_level(["fuck this shit you bitch"]) == 1)
+check("градус растёт от реплики к реплике и упирается в потолок",
+      [personas.heat_level(["fuck"] * n) for n in (1, 2, 3, 9)]
+      == [1, 2, 3, personas.MAX_HEAT])
+check("человек остыл — старое не тянется вечно",
+      personas.heat_level(["fuck"] + ["sorry, let us continue"] * 9) == 0)
+
+check("градус есть только у жёсткой персоны",
+      personas.heat_block(critic, ["fuck this"]).strip() != ""
+      and personas.heat_block(tutor, ["fuck this"]) == "")
+check("на спокойной беседе добавки нет вовсе",
+      personas.heat_block(critic, ["hello there"]) == "")
+check("на каждой ступени свой текст",
+      len({personas.heat_block(critic, ["fuck"] * n) for n in (1, 2, 3)}) == 3)
+check("на любой ступени велено учить, а не только злиться",
+      all("Correct what is actually WRONG" in personas.heat_block(critic, ["fuck"] * n)
+          for n in (1, 2, 3)))
+# Прогон 05.08.2026: на грамматически верном оскорблении модель выдавала
+# «поправку» той же фразой и хвалила за неё, лишь бы поправка была.
+check("выдуманных поправок ради галочки быть не должно",
+      "Never invent a correction just to have one"
+      in personas.heat_block(critic, ["fuck"] * 2))
+check("градус не отменяет запрета на переход к личности",
+      "never at who they are" in personas.heat_block(critic, ["fuck"]))
+
+# Решение владельца: просьбу смягчиться персона отбивает и указывает на
+# переключатель режима, а сама не меняется. Настоящая беда — исключение.
+check("просьба смягчиться не меняет персону, а отправляет в настройки",
+      "You do NOT tone yourself down on request" in critic["prompt"]
+      and "go to settings and pick the nice one" in critic["prompt"])
+check("настоящая беда — исключение, и оно стоит выше всего остального",
+      "STOP EVERYTHING IF THEY ARE ACTUALLY HURTING" in critic["prompt"]
+      and "outranks every other rule" in critic["prompt"])
+check("исключение отделено от «просто не нравится тон»",
+      "NOT the same as someone who simply dislikes your tone" in critic["prompt"])
+# Правило беды обязано стоять ДО правила «не смягчайся»: ближняя и более
+# категоричная инструкция побеждает, и в прогоне это решило исход.
+check("правило беды идёт раньше запрета смягчаться",
+      critic["prompt"].index("STOP EVERYTHING IF THEY ARE ACTUALLY HURTING")
+      < critic["prompt"].index("You do NOT tone yourself down on request"))
 check("формат озвучки не потерян",
       "no markdown" in personas.SYSTEM_PROMPT
       and "one simple follow-up question" in personas.SYSTEM_PROMPT)
