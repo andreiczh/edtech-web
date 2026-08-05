@@ -445,6 +445,54 @@ def ending_pattern(swaps: list[dict]) -> list[dict]:
     return marked if len(marked) >= _ENDING_PATTERN_AT else []
 
 
+# Длина совпадения, которую засчитываем ВТОРЫМ заходом. Три слова подряд —
+# уже не случайность; на двух («of the», «in the») текст на сто слов дал бы
+# ложное покрытие где угодно.
+_REREAD_MIN_RUN = 3
+_REREAD_PASSES = 2
+
+
+def _rescue_reread(ref: list[str], leftover: list[str], covered: list[bool]) -> int:
+    """Отметить слова эталона, прозвучавшие ВТОРЫМ заходом. Возвращает сколько.
+
+    Зачем. Основное выравнивание монотонно: оно ищет один сквозной проход по
+    тексту. Ученик, который начал читать с середины, а потом вернулся к началу,
+    для него выглядит так, будто начало он не читал вовсе — и получает пропуск
+    за прочитанное (замер 05.08.2026: покрытие 0.61 вместо 1.00, двенадцать
+    прочитанных слов записаны в непрочитанные).
+
+    Правило от тестировщика простое и справедливое: слово засчитано, если оно
+    прозвучало ХОТЯ БЫ РАЗ, в любом заходе. Отсюда и остальные его случаи:
+    ошибся и сам поправил — засчитано; прочитал половину и начал заново —
+    засчитано; вернулся перечитать середину — то, что уже прочитано, не
+    обнуляется.
+
+    Спасаем ТОЛЬКО то, что основной проход счёл непрочитанным, и только по
+    длинным совпадениям: обычное чтение ведёт себя ровно как раньше.
+    """
+    saved = 0
+    rest = list(leftover)
+    for _ in range(_REREAD_PASSES):
+        if not rest:
+            break
+        sm = difflib.SequenceMatcher(a=ref, b=rest, autojunk=False)
+        used: set[int] = set()
+        progress = False
+        for block in sm.get_matching_blocks():
+            if block.size < _REREAD_MIN_RUN:
+                continue
+            for k in range(block.size):
+                if not covered[block.a + k]:
+                    covered[block.a + k] = True
+                    saved += 1
+                    progress = True
+                used.add(block.b + k)
+        if not progress:
+            break
+        rest = [w for i, w in enumerate(rest) if i not in used]
+    return saved
+
+
 def reading_diff(reference: str, transcript: str) -> dict:
     """Сверка эталона с тем, что распознано: где пропуски и подмены.
 
@@ -453,21 +501,42 @@ def reading_diff(reference: str, transcript: str) -> dict:
     принимает модель (она видит, похоже это на оговорку чтеца или на промах
     распознавания). Код решает сам только там, где улика надёжна: большой
     непрочитанный кусок в середине и оборванный хвост.
+
+    Слово считается прочитанным, если прозвучало ХОТЯ БЫ РАЗ — см.
+    _rescue_reread. Поэтому самоисправление ученику не вредит: подмена, которую
+    он сам же и поправил, из улик выбрасывается.
     """
     ref, got = _words(reference), _words(transcript)
     if not ref:
         return {"ok": False, "reason": "нет эталонного текста"}
 
     sm = difflib.SequenceMatcher(a=ref, b=got, autojunk=False)
+    opcodes = sm.get_opcodes()
+    covered = [False] * len(ref)
+    used_got: set[int] = set()
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            for k in range(i1, i2):
+                covered[k] = True
+            used_got.update(range(j1, j2))
+    # Слова расшифровки, не вошедшие в сквозной проход, — это либо шум
+    # распознавания, либо ВТОРОЙ ЗАХОД на текст. Проверяем второе.
+    reread = _rescue_reread(
+        ref, [w for i, w in enumerate(got) if i not in used_got], covered)
+
     missing_runs: list[list[str]] = []
     swaps: list[dict] = []
-    matched = 0
+    matched = sum(covered)
     tail_missing = 0
 
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+    for tag, i1, i2, j1, j2 in opcodes:
         if tag == "equal":
-            matched += i2 - i1
-        elif tag == "delete":
+            continue
+        # Кусок, спасённый вторым заходом, уликой больше не является: ученик
+        # эти слова прочитал, пусть и не с первого раза.
+        if tag in ("delete", "replace") and all(covered[i1:i2]):
+            continue
+        if tag == "delete":
             missing_runs.append(ref[i1:i2])
             if i2 == len(ref):  # хвост эталона не прозвучал
                 tail_missing = i2 - i1
@@ -501,6 +570,9 @@ def reading_diff(reference: str, transcript: str) -> dict:
         "tail_missing": tail_missing,
         "missing_fragments": [" ".join(r) for r in missing_runs if len(r) >= 2][:6],
         "swaps": swaps[:8],
+        # Сколько слов зачтено ВТОРЫМ заходом. Ноль — читал сквозняком; больше
+        # нуля — возвращался и перечитывал, и это ему не в минус.
+        "reread": reread,
     }
 
 

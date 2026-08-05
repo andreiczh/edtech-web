@@ -499,6 +499,56 @@ def check_recheck_pick() -> list[str]:
     return bad
 
 
+def check_reread() -> list[str]:
+    """Правила перечитывания в задании 39 (правки тестировщика 05.08.2026).
+
+    Смысл один: слово засчитано, если прозвучало ХОТЯ БЫ РАЗ, в любом заходе.
+    Ученик, который поправляет сам себя, не должен получать за это минус — но
+    и тот, кто честно недочитал, не должен получать плюс.
+    """
+    bad = []
+    W = ("The old library on the hill keeps books that nobody reads today but the roof "
+         "still leaks every spring and the town council promises to repair it each year "
+         "without fail").split()
+    ref = " ".join(W)
+
+    def diff(words):
+        return sc.reading_diff(ref, " ".join(words))
+
+    cases = [
+        # (название, что прозвучало, покрытие, пропущено)
+        ("сквозное чтение", W, 1.0, 0),
+        # Главная поломка: монотонное выравнивание видит один проход, и начало,
+        # прочитанное ПОСЛЕ середины, считало непрочитанным (было 0.61).
+        ("начал с середины, вернулся к началу", W[12:] + W[:12], 1.0, 0),
+        ("читал, вернулся назад, дочитал", W[:20] + W[7:], 1.0, 0),
+        ("прочитал половину и начал заново", W[:14] + W, 1.0, 0),
+        ("дочитал и перечитал середину", W + W[6:12], 1.0, 0),
+    ]
+    for name, got, want_cov, want_missing in cases:
+        d = diff(got)
+        if abs(d["coverage"] - want_cov) > 0.001 or d["missing_total"] != want_missing:
+            bad.append(f"39 перечитывание, {name}: покрытие {d['coverage']} "
+                       f"(ждали {want_cov}), пропущено {d['missing_total']}")
+
+    # Обратная сторона: щедрость не должна превращаться во всепрощение.
+    stopped = diff(W[:14])
+    if stopped["coverage"] > 0.6 or stopped["tail_missing"] < 10:
+        bad.append(f"39: недочитанный текст перестал считаться недочитанным: {stopped}")
+    skipped = diff(W[:8] + W[16:])
+    if skipped["missing_total"] < 5:
+        bad.append(f"39: пропуск в середине перестал ловиться: {skipped}")
+
+    # Самоисправление: подмена, которую ученик сам же поправил, уликой не
+    # является — иначе он наказан за то, что услышал свою ошибку.
+    fixed = sc.reading_diff(ref, ref.replace("roof still", "roof steel roof still"))
+    if fixed["swaps"] or fixed["missing_total"]:
+        bad.append(f"39: самоисправление засчитано как ошибка: {fixed['swaps']}")
+
+    print(f"{'ok  ' if not bad else 'FAIL'} 39: перечитывание и самоисправление")
+    return bad
+
+
 def main() -> int:
     print("Сверка шкалы с методичкой ФИПИ 2026\n")
     bad: list[str] = []
@@ -507,6 +557,7 @@ def main() -> int:
     bad += check_organization()
     bad += check_language()
     bad += check_reading()
+    bad += check_reread()
     bad += check_quotes()
     bad += check_aspects()
     bad += check_recheck_pick()
