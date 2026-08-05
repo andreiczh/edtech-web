@@ -33,6 +33,7 @@ import {
   type DisputeDraft,
 } from '../ege2/dispute'
 import { sendDispute } from '../ege2/feedback'
+import { imageFromPaste, prepareShot, type Shot } from '../ege2/screenshot'
 
 /** Что уедет на сервер — словами, по объекту спора. Врать тут нельзя. */
 function whatGoes(ctx: DisputeContext): string {
@@ -42,7 +43,7 @@ function whatGoes(ctx: DisputeContext): string {
     case 'talk_review':
       return 'Вместе с жалобой уйдут разговор и его разбор — иначе пересмотреть спор нечем.'
     case 'app':
-      return 'К отзыву приложатся модель браузера и размер экрана — без них «не работает» невозможно повторить.'
+      return 'К отзыву приложатся модель браузера и размер экрана — без них «не работает» невозможно повторить. Снимок экрана увидит только владелец.'
     default:
       return 'Вместе с жалобой уйдут расшифровка твоего ответа, текст задания и сам разбор — иначе пересмотреть оценку нечем.'
   }
@@ -61,7 +62,23 @@ export function DisagreeModal({
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [shot, setShot] = useState<Shot | null>(null)
+  const [shotBusy, setShotBusy] = useState(false)
   const firstRef = useRef<HTMLButtonElement | null>(null)
+  const fileRef = useRef<HTMLInputElement | null>(null)
+
+  /* Один путь для всех трёх способов приложить снимок: кнопка, перетаскивание
+     и Ctrl+V. Сжатие живёт в screenshot.ts — форме о нём знать незачем. */
+  const takeFile = (file: File | Blob | null | undefined) => {
+    if (!file) return
+    setShotBusy(true)
+    setError(null)
+    void prepareShot(file).then((res) => {
+      setShotBusy(false)
+      if (res.shot) setShot(res.shot)
+      else if (res.error) setError(res.error)
+    })
+  }
 
   useEffect(() => {
     firstRef.current?.focus()
@@ -92,7 +109,7 @@ export function DisagreeModal({
     const full: DisputeContext = place
       ? { ...ctx, targetKey: place.code, targetLabel: `Отзыв · ${place.label}` }
       : ctx
-    void sendDispute(full, draft).then((res) => {
+    void sendDispute(full, draft, shot && { data: shot.data, mime: shot.mime }).then((res) => {
       setSending(false)
       if (res.ok) {
         setSent(true)
@@ -135,6 +152,24 @@ export function DisagreeModal({
         aria-modal="true"
         aria-labelledby="dsg-title"
         onClick={(e) => e.stopPropagation()}
+        /* Вставка и перетаскивание ловятся на ВСЕЙ модалке, а не на кнопке:
+           человек со снимком в буфере жмёт Ctrl+V там, где стоит курсор, и
+           попадать при этом в маленькую зону не обязан. */
+        onPaste={(e) => {
+          const file = imageFromPaste(e.nativeEvent)
+          if (file) {
+            e.preventDefault()
+            takeFile(file)
+          }
+        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          const file = e.dataTransfer?.files?.[0]
+          if (file) {
+            e.preventDefault()
+            takeFile(file)
+          }
+        }}
       >
         <header className="dsg__head">
           <h2 className="dsg__title" id="dsg-title">
@@ -239,6 +274,53 @@ export function DisagreeModal({
               onChange={(e) => setDraft({ ...draft, comment: e.target.value })}
               placeholder={hint}
               rows={3}
+            />
+          </fieldset>
+
+          {/* Снимок экрана. Показать быстрее, чем описать: «кнопка не
+              нажимается» и скриншот этой кнопки — две разные по полезности
+              жалобы. Необязателен: требовать картинку значило бы отсекать всех,
+              кто не умеет её делать. */}
+          <fieldset className="dsg__block">
+            <legend className="dsg__legend">
+              Снимок экрана <span className="dsg__now">по желанию</span>
+            </legend>
+            {shot ? (
+              <div className="dsg__shot">
+                <img className="dsg__shotimg" src={shot.url} alt="Снимок экрана" />
+                <div className="dsg__shotside">
+                  <span className="dsg__now">{Math.round(shot.bytes / 1024)} КБ</span>
+                  <button
+                    type="button"
+                    className="dsg__chip"
+                    onClick={() => {
+                      setShot(null)
+                      if (fileRef.current) fileRef.current.value = ''
+                    }}
+                  >
+                    Убрать
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="dsg__chips">
+                <button
+                  type="button"
+                  className="dsg__chip"
+                  disabled={shotBusy}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  {shotBusy ? 'Готовлю…' : '📎 Выбрать картинку'}
+                </button>
+                <span className="dsg__now">или перетащи сюда, или вставь через Ctrl+V</span>
+              </div>
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg"
+              hidden
+              onChange={(e) => takeFile(e.target.files?.[0])}
             />
           </fieldset>
 

@@ -17,6 +17,8 @@ docs/DECISIONS.md §6.1). Ценность такого набора опред�
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import re
 
@@ -91,6 +93,20 @@ _MAX_FEEDBACK = 8000
 # беседы; при 1000 жалоб это ~20 МБ, для базы пыль.
 _MAX_CONTEXT = 12000
 
+# Скриншот проблемы. 700 КБ base64 (~520 КБ картинки) — потолок, до которого
+# фронт ужимает снимок сам: экран телефона в JPEG после сжатия весит 80-250 КБ,
+# так что порог не мешает, а страхует от заливки гигабайтов. При сотне жалоб со
+# снимками это ~50 МБ — Neon free держит 0.5 ГБ.
+MAX_SHOT_B64 = 700_000
+
+# Тип картинки определяем ПО СОДЕРЖИМОМУ, а не по заявленному mime: mime
+# приходит от клиента, и верить ему — значит согласиться отдать владельцу
+# что угодно под видом png. Проверяем сигнатуры файлов.
+_SHOT_MAGIC = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+)
+
 _SPACES = re.compile(r"\s+")
 
 
@@ -115,6 +131,41 @@ def reasons_for(target: str) -> list[str]:
 
 def _clean(value: object, limit: int) -> str:
     return _SPACES.sub(" ", str(value or "").strip())[:limit]
+
+
+def screenshot(raw: object) -> tuple[dict | None, str]:
+    """Снимок экрана к жалобе: проверка и нормализация. (данные | None, ошибка).
+
+    Пусто на входе — не ошибка: снимок необязателен, и отсутствие возвращается
+    как (None, "").
+
+    Что проверяем и почему именно так:
+      * размер ДО декодирования — иначе гигабайтная строка сначала развернётся
+        в памяти и только потом окажется отвергнутой;
+      * содержимое, а не заявленный тип. Клиент присылает mime сам, и доверять
+        ему нельзя: под видом image/png может приехать что угодно, а показывать
+        это владельцу в теге <img> — способ подарить постороннему исполнение
+        в своей админке. Признаём только PNG и JPEG, определённые по сигнатуре;
+      * base64 разбираем СТРОГО: мусор с «подходящими» первыми байтами не
+        должен доехать до базы.
+    """
+    if not raw:
+        return None, ""
+    if not isinstance(raw, dict):
+        return None, "Снимок пришёл в непонятном виде."
+    data = str(raw.get("data") or "")
+    if not data:
+        return None, ""
+    if len(data) > MAX_SHOT_B64:
+        return None, "Снимок слишком большой — уменьши или обрежь его."
+    try:
+        blob = base64.b64decode(data, validate=True)
+    except (ValueError, binascii.Error):
+        return None, "Снимок не читается."
+    for magic, mime in _SHOT_MAGIC:
+        if blob.startswith(magic):
+            return {"mime": mime, "data": data, "bytes": len(blob)}, ""
+    return None, "Снимок должен быть картинкой PNG или JPEG."
 
 
 def _int(value: object, default: int = 0) -> int:
@@ -187,6 +238,13 @@ def normalize(body: dict) -> tuple[dict | None, str]:
     if kind != "app" and not transcript:
         return None, "Пустая жалоба: нет расшифровки."
 
+    # Снимок экрана. Кривой снимок ОТВЕРГАЕТ всю жалобу, а не выбрасывается
+    # молча: человек приложил его осознанно, и «отправлено» без картинки —
+    # это тихая потеря того, ради чего он старался.
+    shot, shot_err = screenshot(body.get("shot"))
+    if shot_err:
+        return None, shot_err
+
     # Балл «по мнению ученика»: -1 — «дело не в балле». Значение выше максимума
     # ничего не значит, поэтому подрезаем, а не отвергаем: спорят о разборе, а
     # не о попадании в диапазон.
@@ -210,6 +268,9 @@ def normalize(body: dict) -> tuple[dict | None, str]:
         "transcript": transcript,
         "feedback": _json_capped(body.get("feedback"), _MAX_FEEDBACK),
         "context": _json_capped(body.get("context"), _MAX_CONTEXT),
+        # Кладётся в отдельную таблицу (картинки весят на два порядка больше
+        # текста и не должны ездить в каждой выборке жалоб).
+        "shot": shot,
     }, ""
 
 

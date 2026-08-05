@@ -234,3 +234,9 @@ export interface DisputeContext {
   /** Обстановка: текст задания, соседние реплики, что было на экране. */
   context?: Record<string, unknown>
 }
+
+/** Снимок экрана, уже сжатый браузером (см. screenshot.ts). */
+export interface DisputeShot {
+  data: string
+  mime: string
+}

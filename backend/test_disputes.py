@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -98,6 +99,50 @@ big, _ = sent(context={"text": "щ" * 20000})
 parsed = json.loads(big["context"])
 check(parsed.get("_truncated") is True, "переросшая обстановка помечена как урезанная")
 check(len(big["context"]) < 13000, "переросшая обстановка подрезана")
+
+# --- снимок экрана: принимаем картинку, отвергаем всё остальное
+PNG = base64.b64encode(
+    b"\x89PNG\r\n\x1a\n" + b"\x00" * 200).decode()
+JPEG = base64.b64encode(b"\xff\xd8\xff\xe0" + b"\x00" * 200).decode()
+
+d, e = sent(shot={"mime": "image/png", "data": PNG})
+check(d is not None and d["shot"]["mime"] == "image/png", "PNG принимается", e)
+d, _ = sent(shot={"mime": "image/png", "data": JPEG})
+# Тип берём ПО СОДЕРЖИМОМУ: клиент заявил png, приехал jpeg — верим байтам.
+check(d is not None and d["shot"]["mime"] == "image/jpeg",
+      "тип снимка определяется по содержимому, а не по словам клиента")
+
+# Под видом картинки может приехать что угодно, и оно попадёт в <img> в
+# админке владельца. Отвергаем по сигнатуре, а не по расширению.
+html = base64.b64encode(b"<svg onload=alert(1)></svg>").decode()
+d, e = sent(shot={"mime": "image/png", "data": html})
+check(d is None, "не-картинка под видом картинки отвергнута")
+check("PNG" in e or "картинк" in e, "и объяснение человеческое", e)
+
+check(sent(shot={"mime": "image/png", "data": "не base64!!!"})[0] is None,
+      "мусор вместо base64 отвергнут")
+
+# Base64 разбираем СТРОГО. Небрежный разбор молча выбрасывает посторонние
+# символы, и строка с мусором внутри всё равно превращается в картинку —
+# то есть проверка перестаёт быть проверкой. Тест ловит именно это: без
+# validate=True такая строка развернулась бы в валидный PNG и прошла.
+sloppy = PNG[:8] + "!!!" + PNG[8:]
+check(disputes.screenshot({"data": sloppy})[0] is None,
+      "base64 с мусором внутри отвергнут, а не почищен молча")
+
+# Слишком большой снимок должен отвергаться ИМЕННО за размер. Раньше здесь
+# стояла строка из букв «A»: она отсеивалась заодно и как не-картинка, и тест
+# проходил бы даже со снятым лимитом. Берём НАСТОЯЩИЙ PNG нужной длины.
+big_png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 600_000).decode()
+check(len(big_png) > disputes.MAX_SHOT_B64, "заготовка для проверки лимита достаточно велика")
+d, e = disputes.screenshot({"data": big_png})
+check(d is None and "больш" in e, "слишком большой снимок отвергнут ЗА РАЗМЕР", e)
+check(sent(shot={"mime": "image/png", "data": big_png})[0] is None,
+      "и всю жалобу с ним тоже не принимаем молча")
+
+check(sent(shot=None)[0] is not None, "жалоба без снимка по-прежнему проходит")
+check(disputes.screenshot(None) == (None, ""), "пустой снимок — не ошибка")
+check(disputes.screenshot({"data": ""}) == (None, ""), "пустые данные — не ошибка")
 
 # --- вердикт владельца
 v, _ = disputes.resolution({"status": "done", "verdict": "student", "verdict_score": 3,
@@ -187,10 +232,34 @@ eq(storage.disputes_stats()["pending"], 2, "разобранная больше 
 eq(storage.disputes_stats()["by_verdict"].get("student"), 1, "вердикт попал в разрез")
 eq(len(storage.disputes_list("new")), 2, "фильтр по статусу работает")
 
+# --- снимки экрана: отдельная таблица, признак в списке, картинка по ручке
+shot_case, _ = disputes.normalize(dict(FULL, shot={"mime": "image/png", "data": PNG}))
+did_shot = storage.dispute_add("stu-3", {k: v for k, v in shot_case.items() if k != "shot"})
+sid = storage.shot_add(did_shot, shot_case["shot"]["mime"],
+                       shot_case["shot"]["data"], shot_case["shot"]["bytes"])
+
+got = storage.shot_get(sid)
+check(got is not None and got[0] == "image/png", "снимок достаётся по id")
+check(got is not None and got[1] == PNG, "снимок не испортился в базе")
+check(storage.shot_get("нет-такого") is None, "несуществующий снимок не выдумывается")
+
+marks = storage.shots_for([did_shot, did])
+check(did_shot in marks and marks[did_shot][0]["id"] == sid,
+      "список жалоб знает, что снимок есть")
+check("data" not in marks[did_shot][0],
+      "но саму картинку в список не тащит — иначе сотня жалоб весит десятки МБ")
+check(did not in marks, "у жалобы без снимка признака нет")
+eq(storage.disputes_stats()["with_shot"], 1, "снимки посчитаны в сводке")
+
 # Бэкап обязан выносить жалобы целиком: Neon free без бэкапов, и потеря
 # калибровочного набора невосполнима — заново его не соберёшь.
 dump = storage.dump_all()
-check("disputes" in dump and len(dump["disputes"]) == 3, "жалобы попадают в бэкап")
+check("dispute_shots" not in dump,
+      "обычный бэкап не тащит картинки — иначе ночной дамп распухнет")
+check(len(storage.dump_all(with_images=True).get("dispute_shots", [])) == 1,
+      "с флагом картинок снимки в бэкап попадают")
+check("disputes" in dump and len(dump["disputes"]) == len(storage.disputes_list()),
+      "в бэкап попадают ВСЕ жалобы, а не часть")
 check("context" in dump["disputes"][0], "обстановка попадает в бэкап")
 
 # ------------------------------------- фронт и сервер знают одни и те же коды

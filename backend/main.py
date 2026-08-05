@@ -1215,9 +1215,21 @@ async def task_dispute(request: Request, body: dict = Body(...),
     data, err = disputes.normalize(body if isinstance(body, dict) else {})
     if data is None:
         raise HTTPException(status_code=422, detail=err)
+    shot = data.pop("shot", None)
     did = await asyncio.to_thread(storage.dispute_add, x_device or "admin", data)
+    # Снимок пишем ПОСЛЕ жалобы и отдельно: если картинка не ляжет, объяснение
+    # ученика всё равно сохранится. Обратный порядок терял бы главное ради
+    # второстепенного.
+    if shot:
+        try:
+            await asyncio.to_thread(storage.shot_add, did, shot["mime"],
+                                    shot["data"], shot["bytes"])
+        except Exception as e:  # noqa: BLE001
+            print(f"[dispute] снимок не сохранился ({type(e).__name__}) — "
+                  f"жалоба {did} осталась без картинки")
     print(f"[dispute] {data['kind']}/{data['target']} — {data['reason']}"
-          f" (балл {data['score']}/{data['max_score']}, просят {data['claim_score']})")
+          f" (балл {data['score']}/{data['max_score']}, просят {data['claim_score']}"
+          f"{', со снимком' if shot else ''})")
     return {"ok": True, "id": did}
 
 
@@ -1230,8 +1242,46 @@ async def admin_disputes(status: str | None = None,
         raise HTTPException(status_code=503, detail="База недоступна.")
     items = await asyncio.to_thread(storage.disputes_list, status, 200)
     stats = await asyncio.to_thread(storage.disputes_stats)
+    # Снимки — только ПРИЗНАКОМ (id и размер), сами картинки приезжают по
+    # отдельной ручке, когда владелец откроет карточку. Иначе список из ста
+    # жалоб весил бы десятки мегабайт ради превью, которых в списке нет.
+    shots = await asyncio.to_thread(
+        storage.shots_for, [str(d.get("id")) for d in items])
+    for d in items:
+        d["shots"] = shots.get(str(d.get("id")), [])
     return {"stats": stats, "disputes": items, "catalog": disputes.catalog(),
             "verdicts": disputes.VERDICTS}
+
+
+@app.get("/admin/shot/{shot_id}")
+async def admin_shot(shot_id: str, key: str | None = None,
+                     x_admin_key: str | None = Header(None)):
+    """Снимок экрана из жалобы — ТОЛЬКО владельцу.
+
+    Ключ принимаем и заголовком, и параметром: тег <img> заголовки слать не
+    умеет, а показывать картинку в админке надо. Параметр не страшнее
+    заголовка — админка и так открывается по ключу, и он уже лежит в
+    sessionStorage браузера владельца.
+
+    Content-Disposition: inline с фиксированным именем и nosniff — снимок
+    прислал посторонний, и браузер не должен угадывать, что это такое.
+    """
+    _require_admin(x_admin_key or key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    row = await asyncio.to_thread(storage.shot_get, shot_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Снимка нет.")
+    mime, data_b64 = row
+    try:
+        blob = base64.b64decode(data_b64)
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail="Снимок повреждён.")
+    return Response(content=blob, media_type=mime, headers={
+        "Content-Disposition": 'inline; filename="screenshot"',
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, max-age=600",
+    })
 
 
 @app.post("/admin/disputes/{did}")
@@ -1717,6 +1767,16 @@ async def admin_backup(images: int = 0,
     if not _storage_ok:
         raise HTTPException(status_code=503, detail="База недоступна.")
     data = await asyncio.to_thread(storage.dump_all, bool(images))
+    # Отмечаем ФАКТ выгрузки. Скрипт на ноуте может тихо перестать работать —
+    # задача отключилась, ноут спал, файл скрипта пропал с диска (наблюдалось
+    # 05.08.2026), — и снаружи это ничем не отличается от «всё хорошо».
+    # Сервер знает точно, когда его последний раз забирали, и показывает это
+    # в сводке; пропущенные сутки видно сразу.
+    rows = sum(len(v) for v in data.values())
+    try:
+        await asyncio.to_thread(storage.meta_set, "last_backup", f"{rows} строк")
+    except Exception as e:  # noqa: BLE001 — отметка не должна ломать сам бэкап
+        print(f"[backup] отметка о выгрузке не записалась ({type(e).__name__})")
     return {"created_at": datetime.now(timezone.utc).isoformat(),
             "storage": storage.describe(), "tables": data}
 

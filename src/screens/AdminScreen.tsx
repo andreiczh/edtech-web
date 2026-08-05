@@ -252,6 +252,7 @@ function BankList({
 
 interface Overview {
   users: { total: number; active_today: number; active_month: number }
+  last_backup: { at: string; what: string } | null
   month: string
   days_with_traffic: number
   llm_requests: number
@@ -298,6 +299,49 @@ const STAGE_RU: Record<string, string> = {
     в скорости читался бы как «мгновенно», а в расходе — как «не тратим». */
 const fmt = (v: number | null | undefined, unit = ''): string =>
   v === null || v === undefined ? 'нет данных' : `${v}${unit}`
+
+/**
+ * Когда базу последний раз забирали на ноут.
+ *
+ * Ночная задача проваливается молча: она может быть отключена, ноут мог спать,
+ * файл скрипта мог исчезнуть с диска (наблюдалось 05.08.2026). Снаружи всё это
+ * неотличимо от «бэкап работает» — до дня, когда база понадобится. Сервер же
+ * точно знает, когда его последний раз выгружали, поэтому цифра приходит от
+ * него, а не из папки на ноуте.
+ */
+function BackupCell({
+  last,
+  cell,
+  label,
+  value,
+}: {
+  last: Overview['last_backup']
+  cell: CSSProperties
+  label: CSSProperties
+  value: CSSProperties
+}) {
+  const hours = last ? (Date.now() - new Date(last.at).getTime()) / 3_600_000 : null
+  // Сутки с запасом: бэкап ночной, и «26 часов назад» ещё норма, а вот двое
+  // суток означают, что как минимум одна ночь пропущена.
+  const stale = hours === null || hours > 48
+  const ago =
+    hours === null
+      ? 'ни разу'
+      : hours < 1
+        ? 'только что'
+        : hours < 24
+          ? `${Math.round(hours)} ч назад`
+          : `${Math.round(hours / 24)} дн назад`
+  return (
+    <div style={{ ...cell, ...(stale ? { background: 'rgba(180,72,92,0.16)' } : {}) }}>
+      <div style={label}>последний бэкап базы</div>
+      <div style={{ ...value, color: stale ? '#b4485c' : undefined }}>{ago}</div>
+      <div style={label}>
+        {stale ? 'ночная задача не отработала — проверь backup.log' : last?.what}
+      </div>
+    </div>
+  )
+}
 
 /**
  * Сводка о работе системы. Все числа приходят ОДНИМ снимком из базы
@@ -364,6 +408,7 @@ function OverviewCard({ adminKey }: { adminKey: string }) {
           <div style={value}>{fmt(b.days_left_estimate, ' дн')}</div>
           <div style={label}>при расходе как сейчас</div>
         </div>
+        <BackupCell last={o.last_backup} cell={cell} label={label} value={value} />
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -451,11 +496,14 @@ interface Dispute {
   verdict_note: string | null
   created_at: string
   resolved_at: string | null
+  /** Признак снимка: id и размер. Сама картинка приезжает по /admin/shot. */
+  shots?: Array<{ id: string; mime: string; bytes: number }>
 }
 
 interface DisputeStats {
   total: number
   pending: number
+  with_shot: number
   by_kind: Record<string, number>
   by_reason: Record<string, number>
   by_target: Record<string, number>
@@ -527,6 +575,41 @@ const quoteBox: CSSProperties = {
   whiteSpace: 'pre-wrap',
   maxHeight: 220,
   overflowY: 'auto',
+}
+
+/**
+ * Снимки экрана из жалобы. Ключ уходит ПАРАМЕТРОМ: тег <img> заголовков не
+ * шлёт, а ключ и так лежит в этой вкладке — админка по нему и открыта.
+ */
+function Shots({ shots, adminKey }: { shots?: Dispute['shots']; adminKey: string }) {
+  if (!shots?.length) return null
+  return (
+    <>
+      <p style={blockTitle}>СНИМОК ЭКРАНА</p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {shots.map((s) => {
+          const src = `${BACKEND}/admin/shot/${s.id}?key=${encodeURIComponent(adminKey)}`
+          return (
+            /* Открывается в новой вкладке: разглядывать мелкий текст на
+               превью в 240 px бессмысленно, а ради этого и прикладывали. */
+            <a key={s.id} href={src} target="_blank" rel="noreferrer" title="Открыть целиком">
+              <img
+                src={src}
+                alt="Снимок экрана от ученика"
+                style={{
+                  maxWidth: 240,
+                  maxHeight: 180,
+                  borderRadius: 8,
+                  border: '1px solid rgba(0,0,0,0.15)',
+                  display: 'block',
+                }}
+              />
+            </a>
+          )
+        })}
+      </div>
+    </>
+  )
 }
 
 /** Обстановка спора: текст задания либо кусок беседы — что приложил экран. */
@@ -719,6 +802,9 @@ function Disputes({ adminKey }: { adminKey: string }) {
   const [stats, setStats] = useState<DisputeStats | null>(null)
   const [status, setStatus] = useState<'new' | 'all'>('new')
   const [kind, setKind] = useState<string>('all')
+  // Жалобы со снимком разбираются в разы быстрее — их логично разгребать
+  // первыми, поэтому это отдельный фильтр, а не колонка в таблице.
+  const [onlyShots, setOnlyShots] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -740,7 +826,9 @@ function Disputes({ adminKey }: { adminKey: string }) {
     void load()
   }, [load])
 
-  const shown = list.filter((d) => kind === 'all' || d.kind === kind)
+  const shown = list.filter(
+    (d) => (kind === 'all' || d.kind === kind) && (!onlyShots || (d.shots?.length ?? 0) > 0),
+  )
 
   const download = () => {
     const blob = new Blob([JSON.stringify(list, null, 2)], { type: 'application/json' })
@@ -787,10 +875,14 @@ function Disputes({ adminKey }: { adminKey: string }) {
             <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--card-ink-dim)' }}>
               {' '}
               — {stats.total} всего, {stats.pending} ждут разбора
+              {stats.with_shot > 0 ? `, ${stats.with_shot} со снимком` : ''}
             </span>
           )}
         </p>
         <span style={{ display: 'flex', gap: 6 }}>
+          <Pill quiet onClick={() => setOnlyShots(!onlyShots)}>
+            {onlyShots ? '🖼 только со снимком' : '🖼 все'}
+          </Pill>
           <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)}>
             <option value="new">ждут разбора</option>
             <option value="all">все</option>
@@ -855,7 +947,9 @@ function Disputes({ adminKey }: { adminKey: string }) {
                 {d.target_label ? ` · ${d.target_label}` : ''}
               </div>
               {!isOpen && d.comment && (
-                <div style={{ fontSize: 13, marginTop: 2 }}>«{d.comment.slice(0, 110)}»</div>
+                <div style={{ fontSize: 13, marginTop: 2 }}>
+                  {(d.shots?.length ?? 0) > 0 && '🖼 '}«{d.comment.slice(0, 110)}»
+                </div>
               )}
             </button>
 
@@ -876,6 +970,7 @@ function Disputes({ adminKey }: { adminKey: string }) {
                   </>
                 )}
 
+                <Shots shots={d.shots} adminKey={adminKey} />
                 <ContextView raw={d.context} />
                 <VerdictView raw={d.feedback} />
 

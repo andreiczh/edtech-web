@@ -11,7 +11,7 @@
 import { getSettings } from '../account/me'
 import { backendUnreachableMessage, httpErrorMessage } from '../backendError'
 import { identityId } from '../auth/auth'
-import type { DisputeContext, DisputeDraft } from './dispute'
+import type { DisputeContext, DisputeDraft, DisputeShot } from './dispute'
 import type { TaskKind } from './tasks'
 
 const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
@@ -150,8 +150,11 @@ function clientInfo(): Record<string, unknown> {
 export async function sendDispute(
   ctx: DisputeContext,
   draft: DisputeDraft,
+  /** Снимок экрана — уже сжатый браузером, см. ege2/screenshot.ts. */
+  shot?: DisputeShot | null,
 ): Promise<{ ok: boolean; error?: string }> {
   const body = {
+    shot: shot ?? null,
     kind: ctx.kind,
     target: ctx.target,
     target_key: ctx.targetKey ?? '',

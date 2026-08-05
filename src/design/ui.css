@@ -1606,6 +1606,28 @@ body {
   resize: vertical;
   min-height: 74px;
 }
+/* Снимок экрана: превью рядом с кнопкой «Убрать». Ограничиваем высоту, иначе
+   вертикальный скриншот с телефона выдавливает кнопку отправки за экран. */
+.dsg__shot {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 6px;
+}
+.dsg__shotimg {
+  max-width: min(320px, 60%);
+  max-height: 180px;
+  border-radius: 10px;
+  border: 1px solid rgba(60, 40, 120, 0.22);
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.04);
+}
+.dsg__shotside {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
 .dsg__notice {
   margin: 0;
   font-size: 12px;

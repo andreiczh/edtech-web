@@ -195,6 +195,23 @@ def ensure_schema() -> None:
         " variant TEXT, persona TEXT, score INTEGER, max_score INTEGER,"
         " transcript TEXT NOT NULL, feedback TEXT NOT NULL, comment TEXT,"
         " status TEXT NOT NULL DEFAULT 'new', created_at TEXT NOT NULL)",
+        # Снимки экрана к жалобам — ОТДЕЛЬНОЙ таблицей, а не колонкой в
+        # disputes. Картинка весит на два порядка больше всей текстовой части
+        # жалобы, а очередь разбора выбирает жалобы пачками: держи снимок
+        # рядом — и каждое открытие админки тянуло бы десятки мегабайт ради
+        # списка, где картинок не видно. base64 в TEXT по тем же причинам, что
+        # и у картинок заданий: один тип на оба движка.
+        # Маленький ключ-значение под факты о самой системе. Первый жилец —
+        # время последнего скачанного бэкапа: скрипт на ноуте может умереть
+        # (задача отключилась, файл удалили, ноут спал), и снаружи это никак
+        # не видно — задача в планировщике проваливается молча. Пусть сервер
+        # сам показывает, когда его последний раз забирали.
+        "CREATE TABLE IF NOT EXISTS meta ("
+        " key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS dispute_shots ("
+        " id TEXT PRIMARY KEY, dispute_id TEXT NOT NULL, mime TEXT NOT NULL,"
+        " data TEXT NOT NULL, bytes INTEGER NOT NULL, created_at TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_shots_dispute ON dispute_shots(dispute_id)",
     ):
         _exec(ddl)
 
@@ -713,6 +730,50 @@ def dispute_add(student_id: str, data: dict) -> str:
     return did
 
 
+def meta_set(key: str, value: str) -> None:
+    _exec("INSERT INTO meta(key, value, updated_at) VALUES(?,?,?)"
+          " ON CONFLICT (key) DO UPDATE SET value=excluded.value,"
+          " updated_at=excluded.updated_at", (key, value[:200], _now()))
+
+
+def meta_get(key: str) -> tuple[str, str] | None:
+    """(значение, когда обновлено) либо None."""
+    row = _exec("SELECT value, updated_at FROM meta WHERE key=?", (key,)).fetchone()
+    return (row[0], row[1]) if row else None
+
+
+def shot_add(dispute_id: str, mime: str, data_b64: str, size: int) -> str:
+    """Снимок экрана к жалобе. Пишется ПОСЛЕ самой жалобы: если картинка не
+    доедет, спор всё равно сохранится — терять объяснение из-за картинки
+    было бы обидно вдвойне."""
+    sid = str(uuid.uuid4())
+    _exec("INSERT INTO dispute_shots(id, dispute_id, mime, data, bytes, created_at)"
+          " VALUES(?,?,?,?,?,?)", (sid, dispute_id, mime, data_b64, int(size), _now()))
+    return sid
+
+
+def shot_get(shot_id: str) -> tuple[str, str] | None:
+    row = _exec("SELECT mime, data FROM dispute_shots WHERE id=?", (shot_id,)).fetchone()
+    return (row[0], row[1]) if row else None
+
+
+def shots_for(dispute_ids: list[str]) -> dict[str, list[dict]]:
+    """{id жалобы: [{id, mime, bytes}]} — БЕЗ самих картинок.
+
+    Список жалоб должен знать, что снимок есть, и не тащить его: сама картинка
+    приезжает отдельной ручкой, когда владелец откроет карточку."""
+    if not dispute_ids:
+        return {}
+    marks = ",".join("?" for _ in dispute_ids)
+    rows = _exec(f"SELECT id, dispute_id, mime, bytes FROM dispute_shots"  # noqa: S608
+                 f" WHERE dispute_id IN ({marks}) ORDER BY created_at",
+                 tuple(dispute_ids)).fetchall()
+    out: dict[str, list[dict]] = {}
+    for sid, did, mime, size in rows:
+        out.setdefault(did, []).append({"id": sid, "mime": mime, "bytes": int(size or 0)})
+    return out
+
+
 def disputes_list(status: str | None = None, limit: int = 200) -> list[dict]:
     """Для админки: свежие жалобы ЦЕЛИКОМ, при желании только неразобранные.
 
@@ -744,9 +805,15 @@ def disputes_stats() -> dict:
     total = int(_exec("SELECT COUNT(*) FROM disputes").fetchone()[0] or 0)
     pending = int(_exec("SELECT COUNT(*) FROM disputes WHERE status='new'")
                   .fetchone()[0] or 0)
+    # Со снимком экрана — отдельное число: жалоба с картинкой разбирается в
+    # разы быстрее, и по этой доле видно, доносим ли мы до учеников, что
+    # скриншот прикладывать можно.
+    with_shot = int(_exec("SELECT COUNT(DISTINCT dispute_id) FROM dispute_shots")
+                    .fetchone()[0] or 0)
     return {
         "total": total,
         "pending": pending,
+        "with_shot": with_shot,
         "by_kind": group("SELECT kind, COUNT(*) FROM disputes GROUP BY kind"),
         "by_reason": group("SELECT reason, COUNT(*) FROM disputes GROUP BY reason"),
         "by_target": group("SELECT target, COUNT(*) FROM disputes GROUP BY target"),
@@ -780,8 +847,12 @@ def dump_all(with_images: bool = False) -> dict:
 
     Neon free — одна база без бэкапов; этот дамп, скачиваемый по расписанию
     на ноут владельца, и есть стратегия восстановления. Формат — честный
-    JSON: восстановление в любую SQL-базу без спецсредств."""
-    tables = _BACKUP_TABLES + (("task_images",) if with_images else ())
+    JSON: восстановление в любую SQL-базу без спецсредств.
+
+    Снимки экрана к жалобам едут только с `with_images`, как и картинки
+    заданий: ночной бэкап не должен вырасти в сотню мегабайт из-за них.
+    """
+    tables = _BACKUP_TABLES + (("task_images", "dispute_shots") if with_images else ())
     out: dict = {}
     for t in tables:
         cur = _exec(f"SELECT * FROM {t}")  # noqa: S608 — имена из белого списка
@@ -985,9 +1056,14 @@ def overview(month: str, msk_today: str) -> dict:
         n = usage.get(f"lat_{stage}_n", 0)
         latency[stage] = {"avg_sec": round(ms / n / 1000, 2), "n": n} if n else None
 
+    last_backup = meta_get("last_backup")
     return {
         "users": {"total": users_total, "active_today": active_today,
                   "active_month": active_month},
+        # Когда базу последний раз выгружали на ноут. None — не выгружали ни
+        # разу с момента появления отметки.
+        "last_backup": ({"at": last_backup[1], "what": last_backup[0]}
+                        if last_backup else None),
         "month": month,
         "days_with_traffic": int(days_with_traffic),
         "llm_requests": usage.get("llm_req", 0),
