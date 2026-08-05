@@ -479,16 +479,27 @@ export function TaskScreen({
               <div className="card2" style={{ width: '100%' }}>
                 <p style={{ margin: 0 }}>{failure}</p>
                 {blobRef.current && (
-                  <div className="rowend" style={{ marginTop: 12 }}>
-                    <Pill
-                      onClick={() => {
-                        const b = blobRef.current
-                        if (b) void analyze(b)
-                      }}
-                    >
-                      Повторить разбор
-                    </Pill>
-                  </div>
+                  <>
+                    {/* Кнопка шлёт ТУ ЖЕ САМУЮ запись, и об этом надо сказать
+                        прямо. Тестировщик жал её и считал, что «ничего не
+                        происходит»: разбор честно повторялся и упирался в ту
+                        же причину, а выход был в соседней кнопке. */}
+                    <p style={{ margin: '8px 0 0', fontSize: 13, color: 'var(--card-ink-dim)' }}>
+                      «Разобрать заново» отправит ту же запись ещё раз — помогает,
+                      когда виноват был сервер. Если дело в самой записи, жми
+                      «Ещё раз» внизу: он даст записать ответ заново.
+                    </p>
+                    <div className="rowend" style={{ marginTop: 12 }}>
+                      <Pill
+                        onClick={() => {
+                          const b = blobRef.current
+                          if (b) void analyze(b)
+                        }}
+                      >
+                        Разобрать заново
+                      </Pill>
+                    </div>
+                  </>
                 )}
               </div>
             ) : (

@@ -80,14 +80,27 @@ export function DisagreeModal({
     })
   }
 
+  /* Свежая ссылка на onClose в ref — чтобы обработчик Escape видел актуальный
+     колбэк, а эффект НЕ пересоздавался из-за него. */
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
+  /* Фокус ставим РОВНО ОДИН РАЗ, при открытии.
+     Здесь была настоящая поломка (05.08.2026, жалоба «залипает ввод текста»):
+     эффект зависел от onClose, а тот приходит инлайновой стрелкой и меняется
+     при КАЖДОМ рендере родителя. Любой посторонний рендер — долетел ответ
+     сервера с настройками, тикнул разговор, пришёл каталог персон — заново
+     запускал эффект и уводил фокус с поля обратно на первую кнопку. Человек
+     продолжал печатать, а буквы уходили в никуда: набранное «залипало».
+     Отсюда и «иногда»: зависело от того, совпал ли чужой рендер с набором. */
   useEffect(() => {
     firstRef.current?.focus()
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') closeRef.current()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [])
 
   const reasons = reasonsFor(ctx.target)
   const max = ctx.max ?? 0

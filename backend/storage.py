@@ -484,10 +484,19 @@ def month_report() -> dict:
 
 
 def usage_report(days: int = 14) -> dict:
-    """{день: {метрика: значение}} за последние N дней, новые сверху."""
-    rows = _exec(
-        "SELECT day, metric, value FROM usage_daily ORDER BY day DESC LIMIT ?",
-        (days * 12,)).fetchall()
+    """{день: {метрика: значение}} за последние N дней, новые сверху.
+
+    Отбираем ПО ДАТЕ, а не «первые N×12 строк». Слепой LIMIT молча резал отчёт
+    посередине: метрик за день уже под два десятка (расход + замеры скорости по
+    этапам), и `usage_report(1)` отдавал двенадцать случайных из них. В
+    `/health` это выглядело как «замеров нет» там, где они были, — то есть
+    диагностика врала ровно в тот момент, когда по ней принимали решение
+    (поймано 05.08.2026 при разборе жалобы на «не удалось разобрать»).
+    Строка дня — 'ГГГГ-ММ-ДД', она сравнивается как текст.
+    """
+    first = (datetime.now(timezone.utc) - timedelta(days=max(1, days) - 1)).strftime("%Y-%m-%d")
+    rows = _exec("SELECT day, metric, value FROM usage_daily WHERE day >= ?"
+                 " ORDER BY day DESC", (first,)).fetchall()
     out: dict = {}
     for day, metric, value in rows:
         out.setdefault(day, {})[metric] = value

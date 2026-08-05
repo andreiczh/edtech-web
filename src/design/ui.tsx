@@ -36,15 +36,20 @@ export function ConfirmDialog({
   onLeave: () => void
 }) {
   const stayRef = useRef<HTMLButtonElement | null>(null)
+  // Свежий колбэк в ref: эффект не должен пересоздаваться из-за инлайновой
+  // стрелки родителя, иначе фокус перескакивает при каждом чужом рендере
+  // (та же поломка, что чинилась в Disagree 05.08.2026).
+  const stayCb = useRef(onStay)
+  stayCb.current = onStay
 
   useEffect(() => {
     stayRef.current?.focus()
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onStay()
+      if (e.key === 'Escape') stayCb.current()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onStay])
+  }, [])
 
   return createPortal(
     <div className="modal-backdrop" onClick={onStay}>

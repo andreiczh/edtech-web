@@ -36,6 +36,11 @@ export function ReviewCard({
   onNewTopic: () => void
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null)
+  // Колбэк держим в ref, а эффект вешаем один раз: разговор перерисовывает
+  // родителя на каждое изменение состояния, и эффект с зависимостью от
+  // onClose уводил бы фокус посреди работы (05.08.2026, см. Disagree).
+  const closeCb = useRef(onClose)
+  closeCb.current = onClose
 
   useEffect(() => {
     closeRef.current?.focus()
@@ -44,11 +49,11 @@ export function ReviewCard({
       // висят на window, и наш зарегистрирован раньше — без этой проверки один
       // Escape сносил бы вместе с формой и весь разбор, вместе с набранным
       // текстом жалобы.
-      if (e.key === 'Escape' && !document.querySelector('.dsg')) onClose()
+      if (e.key === 'Escape' && !document.querySelector('.dsg')) closeCb.current()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [])
 
   const { mistakes, good, phrases, stats } = review
 
