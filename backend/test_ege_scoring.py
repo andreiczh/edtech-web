@@ -549,6 +549,44 @@ def check_reread() -> list[str]:
     return bad
 
 
+def check_gross_errors() -> list[str]:
+    """Официальный счёт грубых ошибок в чтении (методичка ФИПИ, задание 1).
+
+    Два разных правила, и путать их нельзя: повторно перевранное ОДНО И ТО ЖЕ
+    слово — одна ошибка, а каждый пропуск — отдельная.
+    """
+    bad = []
+    cases = [
+        ("одна подмена", [{"expected": "science", "heard": "sinus"}], 1),
+        ("то же слово переврано дважды",
+         [{"expected": "science", "heard": "sinus"},
+          {"expected": "science", "heard": "sinus"}], 1),
+        ("разные слова переврано дважды",
+         [{"expected": "science", "heard": "sinus"},
+          {"expected": "leave", "heard": "live"}], 2),
+        ("подмена накрыла два слова эталона",
+         [{"expected": "stronger teachers", "heard": "strange doctors"}], 2),
+        ("одно и то же слово пропущено дважды — считается дважды",
+         [{"expected": "the", "heard": ""}, {"expected": "the", "heard": ""}], 2),
+        ("пропуск и подмена того же слова считаются раздельно",
+         [{"expected": "science", "heard": ""},
+          {"expected": "science", "heard": "sinus"}], 2),
+    ]
+    for name, misread, want in cases:
+        got = sc.gross_errors(misread)
+        if got != want:
+            bad.append(f"счёт грубых ошибок, {name}: {got} вместо {want}")
+
+    # Практический смысл правила: ученик, споткнувшийся на ОДНОМ трудном слове
+    # три раза, не должен получать ноль — эксперт поставил бы балл.
+    stumble = [{"expected": "phenomenon", "heard": "fenomen"}] * 3
+    if sc.gross_errors(stumble) >= 3:
+        bad.append("три запинки на одном слове по-прежнему дают ноль")
+
+    print(f"{'ok  ' if not bad else 'FAIL'} 39: счёт грубых ошибок по методичке")
+    return bad
+
+
 def main() -> int:
     print("Сверка шкалы с методичкой ФИПИ 2026\n")
     bad: list[str] = []
@@ -558,6 +596,7 @@ def main() -> int:
     bad += check_language()
     bad += check_reading()
     bad += check_reread()
+    bad += check_gross_errors()
     bad += check_quotes()
     bad += check_aspects()
     bad += check_recheck_pick()

@@ -120,11 +120,10 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
                 misread.append({"expected": s["expected"], "heard": s["heard"],
                                 "explanation": "форма слова прочитана неверно"})
                 covered.add(s["expected"].strip().lower())
-        # Считаем СЛОВА, а не пункты списка: по критериям каждое пропущенное
-        # или перевранное слово — грубая ошибка, а одна подмена может накрыть
-        # два слова сразу («stronger teachers» -> «strange doctors»).
-        misread_words = sum(
-            max(1, len(str(m.get("expected") or "").split())) for m in misread)
+        # Считаем СЛОВА, а не пункты списка, и по официальным правилам счёта:
+        # одно и то же перевранное слово — одна ошибка, а каждый пропуск —
+        # отдельная (методичка ФИПИ, задание 1; см. ege_scoring.gross_errors).
+        misread_words = ege_scoring.gross_errors(misread)
         score, note = ege_scoring.score_reading(ctx["diff"], misread_words)
         errors = [{
             "cat": "missing" if not str(m.get("heard") or "").strip() else "lex",

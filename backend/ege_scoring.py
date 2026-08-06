@@ -736,6 +736,41 @@ def sanity_gate(kind: str, transcript: str) -> str | None:
 MIN_READ_COVERAGE = 0.5
 
 
+def gross_errors(misread: list[dict]) -> int:
+    """Сколько ГРУБЫХ ошибок по официальному счёту (методичка ФИПИ, задание 1).
+
+    Правил два, и они разные для двух видов ошибок:
+
+      * «Считать повторяющимися ошибками только ошибки в произнесении ОДНОГО И
+        ТОГО ЖЕ слова» — переврал `science` дважды, это ОДНА ошибка;
+      * «каждый пропуск слова считается отдельно и не является повторяющейся
+        ошибкой» — пропустил два раза одно и то же слово, это ДВЕ ошибки.
+
+    Раньше мы считали всё подряд, и ученик, спотыкавшийся на одном трудном
+    слове, набирал три «грубых» за одно и то же — то есть получал ноль там, где
+    эксперт поставил бы балл.
+
+    Подмена, накрывшая несколько слов сразу («stronger teachers» -> «strange
+    doctors»), считается по числу слов эталона: по критериям каждое перевранное
+    слово — отдельная грубая ошибка.
+    """
+    seen: set[str] = set()
+    total = 0
+    for m in misread:
+        expected = str(m.get("expected") or "").strip()
+        words = expected.split()
+        skipped = not str(m.get("heard") or "").strip()
+        if skipped:
+            total += max(1, len(words))      # пропуски считаются каждый раз
+            continue
+        key = expected.lower()
+        if key in seen:
+            continue                          # то же слово переврано снова — не в счёт
+        seen.add(key)
+        total += max(1, len(words))
+    return total
+
+
 def score_reading(diff: dict, misread_words: int) -> tuple[int, str]:
     """1 или 0 за чтение вслух.
 
