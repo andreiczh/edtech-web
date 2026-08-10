@@ -470,6 +470,138 @@ function OverviewCard({ adminKey }: { adminKey: string }) {
   )
 }
 
+interface PronStats {
+  total: number
+  students: number
+  variants: number
+  percentiles: Record<string, number>
+  below: Record<string, { words: number; pct: number }>
+  worst: Array<{ word: string; p_norm: number; variant: string | null }>
+}
+
+/**
+ * Копилка замеров произношения — экран подбора порога.
+ *
+ * Показатель считается по каждому слову чтения вслух: насколько звук
+ * подтверждает ИМЕННО ТО слово, что написано в тексте (backend/gop.py).
+ * Ученику пока не показывается ничего — сначала надо увидеть, как показатель
+ * распределён на живой речи. Порог, снятый с синтезированного голоса, на
+ * школьнике с акцентом почти наверняка окажется другим, а выдуманная точность
+ * тут хуже отсутствия функции.
+ *
+ * Голос НЕ хранится: в базе только слово из задания и число рядом с ним.
+ */
+function Pronunciation({ adminKey }: { adminKey: string }) {
+  const [d, setD] = useState<{
+    stats: PronStats
+    collecting: boolean
+    model: string
+    done_this_process: number
+  } | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    api('/admin/pronunciation', adminKey)
+      .then((x) => setD(x as typeof d))
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+  }, [adminKey])
+
+  if (err)
+    return (
+      <div className="card2" style={{ width: 'min(100%, 760px)' }}>
+        <p style={{ margin: 0, color: '#b4485c' }}>Замеры произношения: {err}</p>
+      </div>
+    )
+  if (!d) return null
+  const s = d.stats
+
+  return (
+    <div className="card2" style={{ width: 'min(100%, 760px)' }}>
+      <div className="rowbetween" style={{ marginBottom: 4 }}>
+        <p style={{ margin: 0, fontWeight: 800 }}>
+          Произношение: копилка для калибровки{' '}
+          <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--card-ink-dim)' }}>
+            — {s.total} слов от {s.students} учеников
+          </span>
+        </p>
+        <span style={{ fontSize: 12, color: 'var(--card-ink-dim)' }}>
+          {d.collecting ? `собирается · ${d.model}` : 'сбор выключен'}
+        </span>
+      </div>
+
+      {s.total === 0 ? (
+        <p style={{ margin: 0, fontSize: 13 }}>
+          Пока пусто. Числа появятся, когда кто-нибудь прочитает вслух задание 39:
+          замер идёт фоном, ученик его не ждёт и ничего о нём не видит.
+        </p>
+      ) : (
+        <>
+          <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--card-ink-dim)' }}>
+            Показатель нормирован на собственный уровень говорящего: 1.0 — как
+            остальные его слова, ниже 0.5 — звук плохо подтверждает написанное.
+            Порог выбирается по этой таблице, а не из головы.
+          </p>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+            {Object.entries(s.percentiles).map(([k, v]) => (
+              <div
+                key={k}
+                style={{
+                  flex: '1 1 90px',
+                  padding: '6px 10px',
+                  borderRadius: 10,
+                  background: 'rgba(0,0,0,0.05)',
+                }}
+              >
+                <div style={{ fontSize: 11, color: 'var(--card-ink-dim)' }}>{k}</div>
+                <div style={{ fontWeight: 800 }}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          <p style={{ margin: '0 0 4px', fontWeight: 800, fontSize: 12 }}>
+            СКОЛЬКО СЛОВ СТАНЕТ «ОШИБКОЙ» ПРИ ПОРОГЕ
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+            {Object.entries(s.below).map(([thr, v]) => (
+              <span
+                key={thr}
+                style={{
+                  fontSize: 13,
+                  padding: '4px 10px',
+                  borderRadius: 999,
+                  background: 'rgba(0,0,0,0.06)',
+                }}
+              >
+                {thr} → <b>{v.words}</b> слов ({v.pct}%)
+              </span>
+            ))}
+          </div>
+
+          <p style={{ margin: '0 0 4px', fontWeight: 800, fontSize: 12 }}>
+            САМЫЕ СЛАБЫЕ МЕСТА
+          </p>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {s.worst.map((w, i) => (
+              <span
+                key={i}
+                style={{
+                  fontSize: 13,
+                  padding: '3px 9px',
+                  borderRadius: 8,
+                  background: 'rgba(180,72,92,0.12)',
+                }}
+              >
+                {w.word} · <b>{w.p_norm}</b>
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 /* ------------------------------------------- Обратная связь и споры об оценке */
 
 interface Dispute {
@@ -1416,6 +1548,8 @@ export function AdminScreen({ onExit }: { onExit: () => void }) {
         {/* Копилка стоит ВТОРОЙ сверху, сразу под сводкой: это рабочая очередь
             владельца, а банк заданий и коды — обслуживание. */}
         <Disputes adminKey={key} />
+
+        <Pronunciation adminKey={key} />
 
         <div className="card2" style={{ width: 'min(100%, 760px)' }}>
           <p style={{ margin: '0 0 10px', fontWeight: 800 }}>Добавить вариант</p>

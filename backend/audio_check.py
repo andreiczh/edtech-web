@@ -53,35 +53,45 @@ _MIN_WPM = 25
 _WPM_MIN_SPEECH_SECONDS = 8.0
 
 
+def to_pcm(data: bytes, ext: str = ".webm") -> np.ndarray | None:
+    """Байты записи -> моно float32 16 кГц. None, если декодировать не вышло.
+
+    Вынесено отдельно, потому что тот же звук нужен не только осмотру: по нему
+    же считается произношение (gop.py). Декодируем тем же PyAV, что уже стоит
+    ради перекодирования в wav, — новой зависимости не появляется.
+    """
+    def decode(fmt: str | None) -> list[np.ndarray]:
+        with av.open(io.BytesIO(data), format=fmt) as c:
+            rs = av.audio.resampler.AudioResampler(format="s16", layout="mono",
+                                                   rate=16000)
+            got: list[np.ndarray] = []
+            for frame in c.decode(audio=0):
+                for f in rs.resample(frame):
+                    got.append(f.to_ndarray().reshape(-1))
+            return got
+
+    try:
+        chunks = decode(ext.lstrip(".") or None)
+    except Exception:
+        try:  # формат не угадали — пусть PyAV определит сам
+            chunks = decode(None)
+        except Exception:
+            return None
+    if not chunks:
+        return np.zeros(0, dtype=np.float32)
+    return np.concatenate(chunks).astype(np.float32) / 32768.0
+
+
 def inspect(data: bytes, ext: str = ".webm") -> dict:
     """Длительность и доля кадров с речью. Ошибка разбора — не приговор:
     возвращаем ok=False, и все проверки ниже пропускают запись дальше.
-
-    Декодируем тем же PyAV, что уже стоит ради перекодирования в wav, — новой
-    зависимости не появляется.
     """
-    try:
-        with av.open(io.BytesIO(data), format=ext.lstrip(".") or None) as c:
-            rs = av.audio.resampler.AudioResampler(format="s16", layout="mono", rate=16000)
-            chunks: list[np.ndarray] = []
-            for frame in c.decode(audio=0):
-                for f in rs.resample(frame):
-                    chunks.append(f.to_ndarray().reshape(-1))
-    except Exception:
-        try:  # формат не угадали — пусть PyAV определит сам
-            with av.open(io.BytesIO(data)) as c:
-                rs = av.audio.resampler.AudioResampler(format="s16", layout="mono", rate=16000)
-                chunks = []
-                for frame in c.decode(audio=0):
-                    for f in rs.resample(frame):
-                        chunks.append(f.to_ndarray().reshape(-1))
-        except Exception:
-            return {"ok": False}
-
-    if not chunks:
+    pcm = to_pcm(data, ext)
+    if pcm is None:
+        return {"ok": False}
+    if len(pcm) == 0:
         return {"ok": True, "seconds": 0.0, "speech_ratio": 0.0}
 
-    pcm = np.concatenate(chunks).astype(np.float32) / 32768.0
     sr = 16000
     step = int(sr * _FRAME_MS / 1000)
     if step <= 0 or len(pcm) < step:

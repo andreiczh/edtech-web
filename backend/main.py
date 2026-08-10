@@ -810,16 +810,27 @@ def _track_usage(**metrics) -> None:
     if not _storage_ok:
         return
 
-    async def run():
+    def write() -> None:
         try:
-            await asyncio.to_thread(storage.bump_usage, metrics)
+            storage.bump_usage(metrics)
         except Exception as e:  # noqa: BLE001
             print(f"[usage] не записал ({type(e).__name__}: {str(e)[:60]})")
 
+    # Зовут и из обработчика запроса (есть цикл событий), и из ФОНОВОГО ПОТОКА
+    # — оттуда сбор произношения пишет свой замер. Раньше здесь безусловно
+    # создавалась корутина, и во втором случае она отправлялась в мусор с
+    # предупреждением «coroutine was never awaited», а метрика молча терялась.
+    # Наличие цикла проверяем ДО создания корутины, иначе она уже создана.
     try:
-        asyncio.create_task(run())
+        asyncio.get_running_loop()
     except RuntimeError:
-        pass  # вне event loop — в наших путях не случается
+        write()          # в потоке блокировать некого — пишем прямо
+        return
+
+    async def run():
+        await asyncio.to_thread(write)
+
+    asyncio.create_task(run())
 
 
 def _track_latency(stage: str, seconds: float) -> None:
@@ -1282,6 +1293,24 @@ async def admin_shot(shot_id: str, key: str | None = None,
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, max-age=600",
     })
+
+
+@app.get("/admin/pronunciation")
+async def admin_pronunciation(x_admin_key: str | None = Header(None)):
+    """Копилка замеров произношения: распределение показателя на живой речи.
+
+    Ради этого экрана всё и собирается. Порог «это ошибка произношения» нельзя
+    взять из головы: на синтезированной речи он один, на школьнике с акцентом
+    другой. Здесь видно, какой он НА САМОМ ДЕЛЕ и сколько слов попадёт под
+    каждый вариант порога.
+    """
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    stats = await asyncio.to_thread(storage.pron_stats)
+    return {"stats": stats, "collecting": PRON_COLLECT and not _pron_disabled,
+            "model": os.environ.get("GOP_MODEL", "base.en"),
+            "done_this_process": _pron_done}
 
 
 @app.post("/admin/disputes/{did}")
@@ -2899,6 +2928,71 @@ async def _recheck_aspects(kind: str, observations: dict, ctx: dict,
     return observations
 
 
+# Сбор замеров произношения. Включается переменной; по умолчанию ВКЛЮЧЁН,
+# потому что без живой речи порог не подобрать, а ученику это ничего не стоит:
+# считается фоном, после того как разбор уже уехал.
+PRON_COLLECT = os.environ.get("PRON_COLLECT", "1").strip() not in ("0", "false", "no")
+# Потолок времени на одну запись. Дальше замер бросается: копилка не стоит
+# того, чтобы занимать процессор на слабой машине дольше этого.
+PRON_BUDGET_SEC = float(os.environ.get("PRON_BUDGET_SEC", "90"))
+# Считаем СТРОГО ПО ОДНОЙ записи за раз. На 0.1 vCPU (Render) параллельный
+# разбор двух чтений отнял бы процессор у живых запросов остальных учеников.
+_pron_gate = threading.Semaphore(1)
+_pron_disabled = False
+_pron_done = 0
+
+
+def _collect_pron_bg(device: str | None, variant: str, data: bytes,
+                     ext: str, reference: str) -> None:
+    """Замерить произношение и сложить числа в копилку. Ничего не возвращает.
+
+    Всё, что здесь может пойти не так, обязано остаться внутри: ученик свой
+    разбор уже получил, и падение фоновой калибровки не имеет права его
+    касаться.
+    """
+    global _pron_disabled, _pron_done
+    if not (PRON_COLLECT and _storage_ok and reference and device) or _pron_disabled:
+        return
+
+    def work() -> None:
+        global _pron_disabled, _pron_done
+        # Не ждём очереди: если процессор уже занят другим замером, эту запись
+        # просто пропускаем. Копилка наполнится со следующей.
+        if not _pron_gate.acquire(blocking=False):
+            print("[pron] замер пропущен: процессор занят предыдущим")
+            return
+        try:
+            import gop
+            pcm = audio_check.to_pcm(data, ext)
+            if pcm is None:
+                return
+            t0 = time.time()
+            res = gop.score(pcm, reference, budget_sec=PRON_BUDGET_SEC)
+            spent = time.time() - t0
+            if not res.get("ok"):
+                print(f"[pron] замер не удался: {res.get('reason')}")
+                return
+            n = storage.pron_add(device, "reading", variant, res["words"],
+                                 res.get("model", ""))
+            _pron_done += 1
+            print(f"[pron] {n} слов за {spent:.1f} с "
+                  f"(покрыто {res['covered']}/{res['of']}, медиана {res['median']})")
+            _track_latency("pron_gop", spent)
+            # Громкий отказ вместо тихого тормоза: если на этой машине замер
+            # съедает больше отведённого, выключаемся до перезапуска и говорим
+            # об этом. Иначе фоновая задача незаметно душила бы весь сервис.
+            if spent > PRON_BUDGET_SEC:
+                _pron_disabled = True
+                print(f"[pron] {spent:.0f} с на запись — это дороже отведённого "
+                      f"{PRON_BUDGET_SEC:.0f} с. Сбор выключен до перезапуска.")
+        except Exception as e:  # noqa: BLE001 — фоновая калибровка не критична
+            print(f"[pron] сбор сорвался ({type(e).__name__}: {str(e)[:90]})")
+        finally:
+            _pron_gate.release()
+
+    threading.Thread(target=work, daemon=True, name="pron-collect").start()
+
+
 async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                               device: str | None, variant: str,
                               duration_sec: int, session_done: bool = False,
@@ -3057,6 +3151,15 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
 
     # В память — после того как ответ готов, мимо критического пути.
     _remember(device, kind, variant, feedback, duration_sec, session_done)
+
+    # Замер произношения — ТОЛЬКО в копилку калибровки и ТОЛЬКО фоном.
+    # Ученику сейчас не показывается ничего: порога, отделяющего ошибку от
+    # акцента, ещё нет, и придумать его вместо того, чтобы измерить, значило
+    # бы повторить старую ошибку с выдуманной точностью.
+    if kind == "reading":
+        _collect_pron_bg(device, variant, data,
+                         os.path.splitext(filename)[1].lower() or ".mp3",
+                         str((ctx or {}).get("reference") or ""))
 
     t2 = time.time()
     _track_latency("task_llm", t2 - t1)

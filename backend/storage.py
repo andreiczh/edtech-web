@@ -201,6 +201,20 @@ def ensure_schema() -> None:
         # рядом — и каждое открытие админки тянуло бы десятки мегабайт ради
         # списка, где картинок не видно. base64 в TEXT по тем же причинам, что
         # и у картинок заданий: один тип на оба движка.
+        # Замеры произношения для КАЛИБРОВКИ. По строке на слово.
+        #
+        # Хранятся ЧИСЛА, а не голос. Это не осторожность ради осторожности:
+        # для подбора порога нужно распределение показателя на живой речи, а
+        # не сама речь, и запись голоса несовершеннолетних потребовала бы
+        # согласия, которого у нас нет. Общее правило «транскрипты не храним»
+        # остаётся в силе; здесь нет даже транскрипта — только эталонное слово,
+        # которое и так лежит в банке заданий, и число рядом с ним.
+        "CREATE TABLE IF NOT EXISTS pron_samples ("
+        " id TEXT PRIMARY KEY, student_id TEXT NOT NULL, kind TEXT NOT NULL,"
+        " variant TEXT, word TEXT NOT NULL, ord INTEGER NOT NULL,"
+        " p REAL NOT NULL, p_norm REAL NOT NULL, dur REAL,"
+        " model TEXT, created_at TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_pron_created ON pron_samples(created_at)",
         # Маленький ключ-значение под факты о самой системе. Первый жилец —
         # время последнего скачанного бэкапа: скрипт на ноуте может умереть
         # (задача отключилась, файл удалили, ноут спал), и снаружи это никак
@@ -737,6 +751,65 @@ def dispute_add(student_id: str, data: dict) -> str:
            int(data["max_score"]), int(data["claim_score"]), data["transcript"],
            data["feedback"], data["context"], _now()))
     return did
+
+
+def pron_add(student_id: str, kind: str, variant: str, words: list[dict],
+             model: str) -> int:
+    """Замеры произношения одной работы. Возвращает число записанных слов.
+
+    Пишется фоном, после того как ученик уже получил разбор: калибровка не
+    должна стоить ему ни секунды ожидания."""
+    now = _now()
+    n = 0
+    for i, w in enumerate(words):
+        _exec("INSERT INTO pron_samples(id, student_id, kind, variant, word, ord,"
+              " p, p_norm, dur, model, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+              (str(uuid.uuid4()), student_id, kind, variant[:64],
+               str(w.get("word") or "")[:40], i, float(w.get("p") or 0.0),
+               float(w.get("p_norm") or 0.0), float(w.get("dur") or 0.0),
+               model[:32], now))
+        n += 1
+    return n
+
+
+def pron_stats() -> dict:
+    """Распределение показателя на живой речи — то, ради чего всё копится.
+
+    Порог «это ошибка произношения» брать с потолка нельзя: на синтезированной
+    речи он один, на школьнике с акцентом другой. Здесь видно, какой он на
+    САМОМ ДЕЛЕ, и сколько слов попадёт под него при каждом варианте.
+    """
+    row = _exec("SELECT COUNT(*), COUNT(DISTINCT student_id), COUNT(DISTINCT variant)"
+                " FROM pron_samples").fetchone()
+    total, students, variants = (int(row[0] or 0), int(row[1] or 0), int(row[2] or 0))
+    if not total:
+        return {"total": 0, "students": 0, "variants": 0,
+                "percentiles": {}, "below": {}, "worst": []}
+
+    vals = [float(r[0]) for r in _exec(
+        "SELECT p_norm FROM pron_samples ORDER BY p_norm").fetchall()]
+
+    def pct(q: float) -> float:
+        if not vals:
+            return 0.0
+        i = min(len(vals) - 1, max(0, int(round(q * (len(vals) - 1)))))
+        return round(vals[i], 3)
+
+    # Сколько слов оказалось бы «ошибкой» при каждом кандидате в пороги.
+    below = {}
+    for thr in (0.2, 0.35, 0.5, 0.7):
+        k = sum(1 for v in vals if v < thr)
+        below[str(thr)] = {"words": k, "pct": round(100.0 * k / len(vals), 1)}
+
+    worst = [{"word": r[0], "p_norm": round(float(r[1]), 3), "variant": r[2]}
+             for r in _exec(
+                 "SELECT word, p_norm, variant FROM pron_samples"
+                 " ORDER BY p_norm LIMIT 15").fetchall()]
+
+    return {"total": total, "students": students, "variants": variants,
+            "percentiles": {"p05": pct(0.05), "p10": pct(0.10), "p25": pct(0.25),
+                            "p50": pct(0.50), "p75": pct(0.75)},
+            "below": below, "worst": worst}
 
 
 def meta_set(key: str, value: str) -> None:
