@@ -237,6 +237,9 @@ def ensure_schema() -> None:
     _add_columns("tasks", ("source TEXT", "source_id TEXT"))
     # Жалоба ученика: без этих полей у неё нет ни причины, ни обстановки —
     # см. backend/disputes.py. Порядок колонок здесь = порядок в dispute_add.
+    # Каким СПОСОБОМ получен замер произношения. Смешивать способы в одном
+    # распределении нельзя — см. pron_stats.
+    _add_columns("pron_samples", ("method TEXT",))
     _add_columns("disputes", (
         "target TEXT", "target_key TEXT", "target_label TEXT", "reason TEXT",
         "claim_score INTEGER", "said TEXT", "context TEXT",
@@ -754,62 +757,90 @@ def dispute_add(student_id: str, data: dict) -> str:
 
 
 def pron_add(student_id: str, kind: str, variant: str, words: list[dict],
-             model: str) -> int:
+             model: str, method: str = "forced") -> int:
     """Замеры произношения одной работы. Возвращает число записанных слов.
 
     Пишется фоном, после того как ученик уже получил разбор: калибровка не
-    должна стоить ему ни секунды ожидания."""
+    должна стоить ему ни секунды ожидания.
+
+    `method` — КАК получен эталон для сверки, см. pron_stats."""
     now = _now()
     n = 0
     for i, w in enumerate(words):
         _exec("INSERT INTO pron_samples(id, student_id, kind, variant, word, ord,"
-              " p, p_norm, dur, model, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+              " p, p_norm, dur, model, method, created_at)"
+              " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
               (str(uuid.uuid4()), student_id, kind, variant[:64],
                str(w.get("word") or "")[:40], i, float(w.get("p") or 0.0),
                float(w.get("p_norm") or 0.0), float(w.get("dur") or 0.0),
-               model[:32], now))
+               model[:32], method[:16], now))
         n += 1
     return n
 
 
-def pron_stats() -> dict:
-    """Распределение показателя на живой речи — то, ради чего всё копится.
-
-    Порог «это ошибка произношения» брать с потолка нельзя: на синтезированной
-    речи он один, на школьнике с акцентом другой. Здесь видно, какой он на
-    САМОМ ДЕЛЕ, и сколько слов попадёт под него при каждом варианте.
-    """
-    row = _exec("SELECT COUNT(*), COUNT(DISTINCT student_id), COUNT(DISTINCT variant)"
-                " FROM pron_samples").fetchone()
-    total, students, variants = (int(row[0] or 0), int(row[1] or 0), int(row[2] or 0))
-    if not total:
-        return {"total": 0, "students": 0, "variants": 0,
-                "percentiles": {}, "below": {}, "worst": []}
-
-    vals = [float(r[0]) for r in _exec(
-        "SELECT p_norm FROM pron_samples ORDER BY p_norm").fetchall()]
+def _distribution(rows: list[float]) -> dict:
+    """Процентили и «сколько слов станет ошибкой» для одного набора чисел."""
+    if not rows:
+        return {"total": 0, "percentiles": {}, "below": {}}
 
     def pct(q: float) -> float:
-        if not vals:
-            return 0.0
-        i = min(len(vals) - 1, max(0, int(round(q * (len(vals) - 1)))))
-        return round(vals[i], 3)
+        i = min(len(rows) - 1, max(0, int(round(q * (len(rows) - 1)))))
+        return round(rows[i], 3)
 
-    # Сколько слов оказалось бы «ошибкой» при каждом кандидате в пороги.
     below = {}
     for thr in (0.2, 0.35, 0.5, 0.7):
-        k = sum(1 for v in vals if v < thr)
-        below[str(thr)] = {"words": k, "pct": round(100.0 * k / len(vals), 1)}
-
-    worst = [{"word": r[0], "p_norm": round(float(r[1]), 3), "variant": r[2]}
-             for r in _exec(
-                 "SELECT word, p_norm, variant FROM pron_samples"
-                 " ORDER BY p_norm LIMIT 15").fetchall()]
-
-    return {"total": total, "students": students, "variants": variants,
+        k = sum(1 for v in rows if v < thr)
+        below[str(thr)] = {"words": k, "pct": round(100.0 * k / len(rows), 1)}
+    return {"total": len(rows),
             "percentiles": {"p05": pct(0.05), "p10": pct(0.10), "p25": pct(0.25),
                             "p50": pct(0.50), "p75": pct(0.75)},
-            "below": below, "worst": worst}
+            "below": below}
+
+
+def pron_stats() -> dict:
+    """Распределения показателя на живой речи — то, ради чего всё копится.
+
+    РАЗДЕЛЬНО ПО СПОСОБАМ, и это не педантизм. Способа два, и числа у них
+    несравнимые:
+
+      forced — эталон ИЗВЕСТЕН заранее (чтение вслух, задание 39). Мы
+        навязываем модели тот самый текст, который был на экране, и меряем,
+        подтверждает ли его звук. Это настоящий GOP;
+      cross  — эталона нет (задания 40-42 и свободный разговор: ученик говорит
+        что хочет). Сверяем звук с тем, что услышал ДРУГОЙ распознаватель
+        (Mistral). Не замкнутый круг — системы разные, — но и не то же самое:
+        низкий показатель здесь значит «два распознавателя не сошлись», а не
+        «звук не похож на нужное слово».
+
+    Смешать их в одном распределении — значит вывести порог, который не годится
+    ни там, ни там.
+    """
+    out: dict = {"by_method": {}, "students": 0, "variants": 0, "total": 0}
+    row = _exec("SELECT COUNT(*), COUNT(DISTINCT student_id),"
+                " COUNT(DISTINCT variant) FROM pron_samples").fetchone()
+    out["total"] = int(row[0] or 0)
+    out["students"] = int(row[1] or 0)
+    out["variants"] = int(row[2] or 0)
+    if not out["total"]:
+        return out
+
+    for method in ("forced", "cross"):
+        # Старые строки писались до появления колонки — они все из чтения.
+        cond = ("(method='forced' OR method IS NULL)" if method == "forced"
+                else "method='cross'")
+        vals = [float(r[0]) for r in _exec(
+            f"SELECT p_norm FROM pron_samples WHERE {cond}"  # noqa: S608
+            " ORDER BY p_norm").fetchall()]
+        d = _distribution(vals)
+        d["kinds"] = {r[0]: int(r[1]) for r in _exec(
+            f"SELECT kind, COUNT(*) FROM pron_samples WHERE {cond}"  # noqa: S608
+            " GROUP BY kind").fetchall()}
+        d["worst"] = [{"word": r[0], "p_norm": round(float(r[1]), 3), "kind": r[2]}
+                      for r in _exec(
+                          f"SELECT word, p_norm, kind FROM pron_samples"  # noqa: S608
+                          f" WHERE {cond} ORDER BY p_norm LIMIT 12").fetchall()]
+        out["by_method"][method] = d
+    return out
 
 
 def meta_set(key: str, value: str) -> None:

@@ -470,13 +470,31 @@ function OverviewCard({ adminKey }: { adminKey: string }) {
   )
 }
 
+interface PronDist {
+  total: number
+  percentiles: Record<string, number>
+  below: Record<string, { words: number; pct: number }>
+  kinds: Record<string, number>
+  worst: Array<{ word: string; p_norm: number; kind: string | null }>
+}
+
 interface PronStats {
   total: number
   students: number
   variants: number
-  percentiles: Record<string, number>
-  below: Record<string, { words: number; pct: number }>
-  worst: Array<{ word: string; p_norm: number; variant: string | null }>
+  by_method: Record<string, PronDist>
+}
+
+/* Два способа замера дают НЕСРАВНИМЫЕ числа, поэтому и показаны раздельно. */
+const METHOD_RU: Record<string, { title: string; hint: string }> = {
+  forced: {
+    title: 'Чтение вслух (эталон известен)',
+    hint: 'Настоящий GOP: навязываем модели тот самый текст, что был на экране, и меряем, подтверждает ли его звук. Только задание 39 — в остальных ученик говорит своими словами, и навязывать нечего.',
+  },
+  cross: {
+    title: 'Задания 40-42 и разговор (эталона нет)',
+    hint: 'Сверяем звук с тем, что услышал ДРУГОЙ распознаватель — Mistral. Не замкнутый круг, системы разные, но показатель значит «два распознавателя не сошлись», а не «звук не похож на нужное слово». Слабее, и порог у него будет свой.',
+  },
 }
 
 /**
@@ -496,7 +514,6 @@ function Pronunciation({ adminKey }: { adminKey: string }) {
     stats: PronStats
     collecting: boolean
     model: string
-    done_this_process: number
   } | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -531,72 +548,83 @@ function Pronunciation({ adminKey }: { adminKey: string }) {
 
       {s.total === 0 ? (
         <p style={{ margin: 0, fontSize: 13 }}>
-          Пока пусто. Числа появятся, когда кто-нибудь прочитает вслух задание 39:
-          замер идёт фоном, ученик его не ждёт и ничего о нём не видит.
+          Пока пусто. Числа появятся, когда кто-нибудь позанимается: замер идёт
+          фоном, ученик его не ждёт и ничего о нём не видит.
         </p>
       ) : (
-        <>
-          <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--card-ink-dim)' }}>
-            Показатель нормирован на собственный уровень говорящего: 1.0 — как
-            остальные его слова, ниже 0.5 — звук плохо подтверждает написанное.
-            Порог выбирается по этой таблице, а не из головы.
-          </p>
+        Object.entries(METHOD_RU).map(([key, meta]) => {
+          const dist = s.by_method?.[key]
+          if (!dist || !dist.total) return null
+          return (
+            <div key={key} style={{ marginTop: 12 }}>
+              <p style={{ margin: '0 0 2px', fontWeight: 800, fontSize: 13 }}>
+                {meta.title}{' '}
+                <span style={{ fontWeight: 600, color: 'var(--card-ink-dim)' }}>
+                  — {dist.total} слов
+                  {Object.keys(dist.kinds).length > 0 &&
+                    ` (${Object.entries(dist.kinds)
+                      .map(([k, n]) => `${KIND_ALL[k] ?? k}: ${n}`)
+                      .join(', ')})`}
+                </span>
+              </p>
+              <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--card-ink-dim)' }}>
+                {meta.hint}
+              </p>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            {Object.entries(s.percentiles).map(([k, v]) => (
-              <div
-                key={k}
-                style={{
-                  flex: '1 1 90px',
-                  padding: '6px 10px',
-                  borderRadius: 10,
-                  background: 'rgba(0,0,0,0.05)',
-                }}
-              >
-                <div style={{ fontSize: 11, color: 'var(--card-ink-dim)' }}>{k}</div>
-                <div style={{ fontWeight: 800 }}>{v}</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                {Object.entries(dist.percentiles).map(([k, v]) => (
+                  <div
+                    key={k}
+                    style={{
+                      flex: '1 1 80px',
+                      padding: '5px 9px',
+                      borderRadius: 10,
+                      background: 'rgba(0,0,0,0.05)',
+                    }}
+                  >
+                    <div style={{ fontSize: 11, color: 'var(--card-ink-dim)' }}>{k}</div>
+                    <div style={{ fontWeight: 800 }}>{v}</div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
 
-          <p style={{ margin: '0 0 4px', fontWeight: 800, fontSize: 12 }}>
-            СКОЛЬКО СЛОВ СТАНЕТ «ОШИБКОЙ» ПРИ ПОРОГЕ
-          </p>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            {Object.entries(s.below).map(([thr, v]) => (
-              <span
-                key={thr}
-                style={{
-                  fontSize: 13,
-                  padding: '4px 10px',
-                  borderRadius: 999,
-                  background: 'rgba(0,0,0,0.06)',
-                }}
-              >
-                {thr} → <b>{v.words}</b> слов ({v.pct}%)
-              </span>
-            ))}
-          </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: 'var(--card-ink-dim)', alignSelf: 'center' }}>
+                  станет «ошибкой» при пороге:
+                </span>
+                {Object.entries(dist.below).map(([thr, v]) => (
+                  <span
+                    key={thr}
+                    style={{
+                      fontSize: 13,
+                      padding: '3px 9px',
+                      borderRadius: 999,
+                      background: 'rgba(0,0,0,0.06)',
+                    }}
+                  >
+                    {thr} → <b>{v.words}</b> ({v.pct}%)
+                  </span>
+                ))}
+              </div>
 
-          <p style={{ margin: '0 0 4px', fontWeight: 800, fontSize: 12 }}>
-            САМЫЕ СЛАБЫЕ МЕСТА
-          </p>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {s.worst.map((w, i) => (
-              <span
-                key={i}
-                style={{
-                  fontSize: 13,
-                  padding: '3px 9px',
-                  borderRadius: 8,
-                  background: 'rgba(180,72,92,0.12)',
-                }}
-              >
-                {w.word} · <b>{w.p_norm}</b>
-              </span>
-            ))}
-          </div>
-        </>
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                {dist.worst.slice(0, 10).map((w, i) => (
+                  <span
+                    key={i}
+                    style={{
+                      fontSize: 12,
+                      padding: '2px 8px',
+                      borderRadius: 8,
+                      background: 'rgba(180,72,92,0.12)',
+                    }}
+                  >
+                    {w.word} · <b>{w.p_norm}</b>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )
+        })
       )}
     </div>
   )

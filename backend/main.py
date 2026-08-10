@@ -2935,6 +2935,12 @@ PRON_COLLECT = os.environ.get("PRON_COLLECT", "1").strip() not in ("0", "false",
 # Потолок времени на одну запись. Дальше замер бросается: копилка не стоит
 # того, чтобы занимать процессор на слабой машине дольше этого.
 PRON_BUDGET_SEC = float(os.environ.get("PRON_BUDGET_SEC", "90"))
+# Короче этого замерять нечего: на трёх словах нормировка бессмысленна.
+PRON_MIN_WORDS = int(os.environ.get("PRON_MIN_WORDS", "6"))
+# Разговор идёт десятками реплик за сессию, и мерить КАЖДУЮ на 0.1 vCPU
+# нельзя — процессор нужен живым запросам. Берём каждую N-ю.
+PRON_TALK_EVERY = int(os.environ.get("PRON_TALK_EVERY", "4"))
+_pron_talk_seen = 0
 # Считаем СТРОГО ПО ОДНОЙ записи за раз. На 0.1 vCPU (Render) параллельный
 # разбор двух чтений отнял бы процессор у живых запросов остальных учеников.
 _pron_gate = threading.Semaphore(1)
@@ -2942,9 +2948,16 @@ _pron_disabled = False
 _pron_done = 0
 
 
-def _collect_pron_bg(device: str | None, variant: str, data: bytes,
-                     ext: str, reference: str) -> None:
+def _collect_pron_bg(device: str | None, kind: str, variant: str, data: bytes,
+                     ext: str, reference: str, method: str = "forced") -> None:
     """Замерить произношение и сложить числа в копилку. Ничего не возвращает.
+
+    ДВА СПОСОБА, и путать их нельзя (подробности — storage.pron_stats):
+      forced — эталон известен заранее (чтение вслух). Настоящий GOP;
+      cross  — эталона нет, сверяем с тем, что услышал ДРУГОЙ распознаватель
+               (Mistral). Системы разные, так что это не замкнутый круг, но и
+               не то же самое: показатель значит «два распознавателя не
+               сошлись», а не «звук не похож на нужное слово».
 
     Всё, что здесь может пойти не так, обязано остаться внутри: ученик свой
     разбор уже получил, и падение фоновой калибровки не имеет права его
@@ -2952,6 +2965,9 @@ def _collect_pron_bg(device: str | None, variant: str, data: bytes,
     """
     global _pron_disabled, _pron_done
     if not (PRON_COLLECT and _storage_ok and reference and device) or _pron_disabled:
+        return
+    # Слишком короткая реплика ничего не даёт распределению, а процессор ест.
+    if len(reference.split()) < PRON_MIN_WORDS:
         return
 
     def work() -> None:
@@ -2972,10 +2988,10 @@ def _collect_pron_bg(device: str | None, variant: str, data: bytes,
             if not res.get("ok"):
                 print(f"[pron] замер не удался: {res.get('reason')}")
                 return
-            n = storage.pron_add(device, "reading", variant, res["words"],
-                                 res.get("model", ""))
+            n = storage.pron_add(device, kind, variant, res["words"],
+                                 res.get("model", ""), method)
             _pron_done += 1
-            print(f"[pron] {n} слов за {spent:.1f} с "
+            print(f"[pron] {kind}/{method}: {n} слов за {spent:.1f} с "
                   f"(покрыто {res['covered']}/{res['of']}, медиана {res['median']})")
             _track_latency("pron_gop", spent)
             # Громкий отказ вместо тихого тормоза: если на этой машине замер
@@ -3157,9 +3173,16 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     # акцента, ещё нет, и придумать его вместо того, чтобы измерить, значило
     # бы повторить старую ошибку с выдуманной точностью.
     if kind == "reading":
-        _collect_pron_bg(device, variant, data,
+        _collect_pron_bg(device, kind, variant, data,
                          os.path.splitext(filename)[1].lower() or ".mp3",
-                         str((ctx or {}).get("reference") or ""))
+                         str((ctx or {}).get("reference") or ""), method="forced")
+    else:
+        # У 40, 41 и 42 эталона НЕТ: ученик говорит своими словами. Сверяем
+        # звук с расшифровкой Mistral — это другой, более слабый показатель,
+        # и в копилке он лежит отдельно.
+        _collect_pron_bg(device, kind, variant, data,
+                         os.path.splitext(filename)[1].lower() or ".mp3",
+                         transcript_text, method="cross")
 
     t2 = time.time()
     _track_latency("task_llm", t2 - t1)
@@ -3497,6 +3520,16 @@ async def talk_stream(audio: UploadFile = File(...),
         # Реплика состоялась целиком — только теперь она считается занятием
         # (стрик + XP). Оборванные и ошибочные ходы в статистику не попадают.
         _note_reply_bg(x_device)
+
+        # Замер произношения в разговоре — КАЖДАЯ N-я реплика, а не все.
+        # Реплик за сессию десятки, и мерить каждую на 0.1 vCPU значило бы
+        # отнимать процессор у живых ответов. Эталона тут нет вовсе, поэтому
+        # способ «cross»: сверяем звук с тем, что услышал Mistral.
+        global _pron_talk_seen
+        _pron_talk_seen += 1
+        if PRON_TALK_EVERY > 0 and _pron_talk_seen % PRON_TALK_EVERY == 0:
+            _collect_pron_bg(x_device, "talk", "", data, ".webm",
+                             user_text, method="cross")
 
         t2 = time.time()
         _track_latency("conv_answer", (first_audio_at or t2) - t0)
