@@ -1296,7 +1296,8 @@ async def admin_shot(shot_id: str, key: str | None = None,
 
 
 @app.get("/admin/pronunciation")
-async def admin_pronunciation(x_admin_key: str | None = Header(None)):
+async def admin_pronunciation(raw: int = 0,
+                              x_admin_key: str | None = Header(None)):
     """Копилка замеров произношения: распределение показателя на живой речи.
 
     Ради этого экрана всё и собирается. Порог «это ошибка произношения» нельзя
@@ -1307,6 +1308,10 @@ async def admin_pronunciation(x_admin_key: str | None = Header(None)):
     _require_admin(x_admin_key)
     if not _storage_ok:
         raise HTTPException(status_code=503, detail="База недоступна.")
+    if raw:
+        # Сырые строки для разбора порога снаружи: голоса тут нет и не было,
+        # только слова заданий и числа при них.
+        return {"samples": await asyncio.to_thread(storage.pron_raw, 20000)}
     stats = await asyncio.to_thread(storage.pron_stats)
     return {"stats": stats, "collecting": PRON_COLLECT and not _pron_disabled,
             "model": os.environ.get("GOP_MODEL", "base.en"),
@@ -2185,6 +2190,18 @@ async def synthesize_mistral(text: str, voice: str | None = None) -> bytes:
 
 
 _tts_degraded = False
+# Обратный откат: отказ Mistral (обычно 429 — минутное ведро в 12000 знаков)
+# переводит озвучку на edge-tts на время остывания, потом пробуем Mistral
+# снова. Именно ОСТЫВАНИЕ, а не защёлка до перезапуска: минутный лимит
+# проходит сам, и терять эмоции голоса до деплоя из-за одного 429 незачем.
+# Защёлка осталась только у edge: его отказ значит «точка не пускает с этого
+# IP», и через минуту это не меняется. До 16.08.2026 обратного отката не было
+# вовсе: Mistral стал первичным ещё 04.08, и его сбой оставлял ученика без
+# голоса при живом edge-tts рядом.
+_TTS_COOLDOWN_SEC = float(os.environ.get("TTS_COOLDOWN_SEC", "120"))
+_tts_mistral_down_until = 0.0
+_tts_fallbacks = 0
+_tts_last_error = ""
 
 
 async def synthesize(text: str, who: dict | None = None) -> bytes:
@@ -2211,10 +2228,25 @@ async def synthesize(text: str, who: dict | None = None) -> bytes:
     IP, — через фразу он доступен не станет, и платить таймаутом на каждой
     реплике незачем.
     """
-    global _tts_degraded
+    global _tts_degraded, _tts_mistral_down_until, _tts_fallbacks, _tts_last_error
     who = who or persona_of(None)
     if TTS_PROVIDER == "mistral" or _tts_degraded:
-        return await synthesize_mistral(text, emotion_of(who))
+        if time.time() >= _tts_mistral_down_until:
+            try:
+                return await synthesize_mistral(text, emotion_of(who))
+            except Exception as e:  # noqa: BLE001
+                _tts_fallbacks += 1
+                _tts_last_error = f"{type(e).__name__}: {str(e)[:100]}"
+                _tts_mistral_down_until = time.time() + _TTS_COOLDOWN_SEC
+                print(f"[tts] Mistral отказал ({_tts_last_error}) — "
+                      f"{_TTS_COOLDOWN_SEC:.0f} с озвучивает edge-tts")
+                notify_owner("tts:mistral_down",
+                             "Mistral TTS отказал — озвучка временно на "
+                             f"edge-tts (без эмоций). Осечка: {_tts_last_error}")
+        # Пока Mistral остывает — edge-tts. Голос другой, но он ЕСТЬ; тишина
+        # хуже смены тембра. Если и edge мёртв (сюда же ведёт путь с защёлкой
+        # _tts_degraded), исключение уйдёт наверх — честнее, чем зациклиться.
+        return await synthesize_edge(text, who.get("voice"))
     try:
         return await synthesize_edge(text, who.get("voice"))
     except Exception as e:  # noqa: BLE001
@@ -2523,6 +2555,28 @@ def test_page():
     return FileResponse(os.path.join(_HERE, "test.html"))
 
 
+def _tts_health() -> str:
+    """Чем озвучиваем НА САМОМ ДЕЛЕ и не ушли ли на запасной.
+
+    Поле уже один раз врало: было захардкожено строкой «edge-tts», хотя с
+    04.08.2026 первичный провайдер — Mistral (поймано 16.08.2026 сверкой с
+    ненулевым usage_today.tts_mistral_chars). Та же ловушка, из-за которой у
+    STT завели счётчик откатов: откат обязан быть ГРОМКИМ, иначе система
+    выглядит рабочей вслепую.
+    """
+    if TTS_PROVIDER == "mistral" or _tts_degraded:
+        s = (f"mistral:{TTS_REMOTE_MODEL} (эмоция в голосе, диктор один)"
+             if TTS_PROVIDER == "mistral" else
+             f"mistral:{TTS_REMOTE_MODEL} — ЗАПАСНОЙ, edge-tts отказал")
+        if _tts_fallbacks:
+            s += (f"; откатов на edge {_tts_fallbacks}"
+                  + (" (сейчас остывает, говорит edge)"
+                     if time.time() < _tts_mistral_down_until else "")
+                  + f"; последняя осечка — {_tts_last_error}")
+        return s
+    return f"edge-tts:{TTS_VOICE}"
+
+
 @app.get("/health")
 def health():
     return {
@@ -2542,15 +2596,7 @@ def health():
                      + (f"; последняя осечка — {_stt_task_last_error}"
                         if _stt_task_last_error else "")
                      if STT_TASK_MODEL else "та же, что в разговоре"),
-        # Чем озвучиваем НА САМОМ ДЕЛЕ и не ушли ли на запасной. Поле было
-        # захардкожено строкой «edge-tts» и врало с 04.08.2026: провайдер по
-        # умолчанию mistral, а панель показывала три голоса edge, которых в бою
-        # нет. Ровно та ловушка, из-за которой у STT сделали счётчик откатов:
-        # откат обязан быть ГРОМКИМ, иначе система выглядит рабочей вслепую.
-        "tts": (f"mistral:{TTS_REMOTE_MODEL} (эмоция в голосе, диктор один)"
-                if TTS_PROVIDER == "mistral" else
-                f"mistral:{TTS_REMOTE_MODEL} — ЗАПАСНОЙ, edge-tts отказал"
-                if _tts_degraded else f"edge-tts:{TTS_VOICE}"),
+        "tts": _tts_health(),
         "llm_base": LLM_BASE_URL,
         "llm_model": LLM_MODEL,
         "llm_key": bool(os.environ.get("LLM_API_KEY")),
@@ -2957,7 +3003,8 @@ _pron_done = 0
 
 
 def _collect_pron_bg(device: str | None, kind: str, variant: str, data: bytes,
-                     ext: str, reference: str, method: str = "forced") -> None:
+                     ext: str, reference: str, method: str = "forced",
+                     transcript: str = "") -> None:
     """Замерить произношение и сложить числа в копилку. Ничего не возвращает.
 
     ДВА СПОСОБА, и путать их нельзя (подробности — storage.pron_stats):
@@ -2996,7 +3043,26 @@ def _collect_pron_bg(device: str | None, kind: str, variant: str, data: bytes,
             if not res.get("ok"):
                 print(f"[pron] замер не удался: {res.get('reason')}")
                 return
-            n = storage.pron_add(device, kind, variant, res["words"],
+            words = res["words"]
+            if method == "forced" and transcript:
+                # Слова, которые ученик и не пытался читать, — не произношение.
+                # Помечаем их по расшифровке; в распределение порога они не
+                # пойдут (storage.pron_stats), но останутся в базе: по ним
+                # видно, ЧТО именно было пропущено, и их же можно поднять при
+                # разборе жалобы «записали не то».
+                unspoken = gop.mark_spoken(words, transcript)
+                if unspoken:
+                    print(f"[pron] {unspoken} слов эталона не прозвучали — "
+                          "в распределение не пойдут")
+            else:
+                for w in words:
+                    w["spoken"] = 1
+            # Слова короче трёх букв (in, is, do) выравнивание держит плохо —
+            # на проде они заняли весь верх слабых у cross. Поводом придраться
+            # к ученику они не станут никогда, так что и копить их незачем.
+            words = [w for w in words
+                     if sum(ch.isalpha() for ch in str(w.get("word") or "")) >= 3]
+            n = storage.pron_add(device, kind, variant, words,
                                  res.get("model", ""), method)
             _pron_done += 1
             print(f"[pron] {kind}/{method}: {n} слов за {spent:.1f} с "
@@ -3183,7 +3249,8 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     if kind == "reading":
         _collect_pron_bg(device, kind, variant, data,
                          os.path.splitext(filename)[1].lower() or ".mp3",
-                         str((ctx or {}).get("reference") or ""), method="forced")
+                         str((ctx or {}).get("reference") or ""), method="forced",
+                         transcript=transcript_text)
     else:
         # У 40, 41 и 42 эталона НЕТ: ученик говорит своими словами. Сверяем
         # звук с расшифровкой Mistral — это другой, более слабый показатель,

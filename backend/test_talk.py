@@ -17,8 +17,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
+import time
 
 import dialogue
 import personas
@@ -357,6 +359,52 @@ check("короткие фразы копятся в одну голову",
 whole_short = "Oh, nice. What did you watch?"
 check("короткая реплика уходит одним куском",
       main._take_head(whole_short) == ("", whole_short))
+
+# --- Откат озвучки: отказ Mistral не оставляет ученика без голоса -----------
+# Сбой Mistral (обычно 429 минутного ведра) должен на время остывания уводить
+# синтез на edge-tts и потом пробовать Mistral снова. До 16.08.2026 обратного
+# отката не было вовсе: mistral первичный, его исключение = тишина.
+print("\n— откат озвучки —")
+_saved = (main.synthesize_mistral, main.synthesize_edge, main.TTS_PROVIDER,
+          main._tts_mistral_down_until, main._tts_fallbacks, main._tts_last_error)
+_calls = {"mistral": 0, "edge": 0}
+
+
+async def _m_fail(text, voice=None):
+    _calls["mistral"] += 1
+    raise RuntimeError("429 капля лимита")
+
+
+async def _e_ok(text, voice=None):
+    _calls["edge"] += 1
+    return b"edge-bytes"
+
+main.synthesize_mistral = _m_fail
+main.synthesize_edge = _e_ok
+main.TTS_PROVIDER = "mistral"
+main._tts_mistral_down_until = 0.0
+main._tts_fallbacks = 0
+
+out = asyncio.run(main.synthesize("hello"))
+check("отказ Mistral отдаёт звук через edge", out == b"edge-bytes")
+check("откат посчитан и осечка записана",
+      main._tts_fallbacks == 1 and "429" in main._tts_last_error)
+check("остывание выставлено", main._tts_mistral_down_until > time.time())
+
+out = asyncio.run(main.synthesize("again"))
+check("в остывании Mistral не дёргаем",
+      _calls["mistral"] == 1 and out == b"edge-bytes")
+
+main._tts_mistral_down_until = 0.0
+asyncio.run(main.synthesize("retry"))
+check("после остывания Mistral пробуем снова", _calls["mistral"] == 2)
+
+check("здоровье говорит про откат вслух",
+      "откатов на edge" in main._tts_health()
+      and "осечка" in main._tts_health())
+
+(main.synthesize_mistral, main.synthesize_edge, main.TTS_PROVIDER,
+ main._tts_mistral_down_until, main._tts_fallbacks, main._tts_last_error) = _saved
 
 print()
 if _fails:

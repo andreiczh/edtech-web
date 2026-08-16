@@ -80,6 +80,32 @@ def pcm(text: str) -> np.ndarray:
 def main() -> int:
     print(f"модель {gop.GOP_MODEL}\n")
 
+    print("0. mark_spoken: «не читал» отличается от «прочитал плохо» (без сети)")
+    ref = ("the old library keeps books that nobody reads today "
+           "but the roof still leaks every spring").split()
+    words = [{"word": w} for w in ref]
+
+    # Прочитано всё, одно слово подменено близким (walk-эффект): это ПОПЫТКА,
+    # она остаётся в распределении.
+    said = " ".join(ref).replace("roof", "roost")
+    n = gop.mark_spoken(words, said)
+    check("подмена слова — это попытка, не пропуск", n == 0,
+          f"непрозвучавших {n}")
+
+    # Выброшен кусок из пяти слов подряд — difflib даст replace с большой
+    # потерей, и весь кусок обязан лечь пропуском.
+    said = " ".join(ref[:5] + ["uh"] + ref[10:])
+    n = gop.mark_spoken(words, said)
+    dropped = [w["word"] for w in words if not w["spoken"]]
+    check("пропущенный кусок помечен целиком", n >= 4, f"выпало {dropped}")
+    check("прочитанные края не задеты",
+          words[0]["spoken"] == 1 and words[-1]["spoken"] == 1)
+
+    # Пустая расшифровка — не прозвучало ничего.
+    n = gop.mark_spoken(words, "")
+    check("пустая расшифровка гасит всё", n == len(ref))
+    print()
+
     print("1. Верное чтение короткого текста")
     r = gop.score(pcm(SHORT), SHORT)
     check("разбор состоялся", r.get("ok"), str(r.get("reason")))

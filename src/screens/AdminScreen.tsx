@@ -476,6 +476,9 @@ interface PronDist {
   below: Record<string, { words: number; pct: number }>
   kinds: Record<string, number>
   worst: Array<{ word: string; p_norm: number; kind: string | null }>
+  /** Только у чтения: слова вне распределения — пропущенные учеником куски
+   *  текста (unspoken) и строки, записанные до этого разделения (legacy). */
+  excluded?: { unspoken: number; legacy: number }
 }
 
 interface PronStats {
@@ -554,14 +557,21 @@ function Pronunciation({ adminKey }: { adminKey: string }) {
       ) : (
         Object.entries(METHOD_RU).map(([key, meta]) => {
           const dist = s.by_method?.[key]
-          if (!dist || !dist.total) return null
+          const excluded = dist?.excluded
+            ? dist.excluded.unspoken + dist.excluded.legacy
+            : 0
+          // Секция живёт, пока есть ХОТЬ ЧТО-ТО: спрятать блок с 1806 старыми
+          // словами только потому, что новых ещё ноль, значило бы потерять их
+          // из виду.
+          if (!dist || (!dist.total && !excluded)) return null
           return (
             <div key={key} style={{ marginTop: 12 }}>
               <p style={{ margin: '0 0 2px', fontWeight: 800, fontSize: 13 }}>
                 {meta.title}{' '}
                 <span style={{ fontWeight: 600, color: 'var(--card-ink-dim)' }}>
-                  — {dist.total} слов
-                  {Object.keys(dist.kinds).length > 0 &&
+                  — {dist.total} слов в распределении
+                  {dist.total > 0 &&
+                    Object.keys(dist.kinds).length > 0 &&
                     ` (${Object.entries(dist.kinds)
                       .map(([k, n]) => `${KIND_ALL[k] ?? k}: ${n}`)
                       .join(', ')})`}
@@ -570,6 +580,35 @@ function Pronunciation({ adminKey }: { adminKey: string }) {
               <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--card-ink-dim)' }}>
                 {meta.hint}
               </p>
+              {dist.excluded && dist.excluded.unspoken + dist.excluded.legacy > 0 && (
+                <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--card-ink-dim)' }}>
+                  Вне распределения:
+                  {dist.excluded.unspoken > 0 && (
+                    <>
+                      {' '}
+                      <b>{dist.excluded.unspoken}</b> слов ученик не прочитал вовсе
+                      (это пропуск, не произношение — он виден в разборе чтения)
+                    </>
+                  )}
+                  {dist.excluded.unspoken > 0 && dist.excluded.legacy > 0 && ' и'}
+                  {dist.excluded.legacy > 0 && (
+                    <>
+                      {' '}
+                      <b>{dist.excluded.legacy}</b> слов записаны до этого разделения
+                      (не отличить пропуск от акцента — в порог им нельзя)
+                    </>
+                  )}
+                  .
+                </p>
+              )}
+
+              {dist.total === 0 && (
+                <p style={{ margin: 0, fontSize: 13 }}>
+                  В распределении пока пусто: с 16.08 сюда идут только слова,
+                  которые ученик реально пытался произнести. Наполнится со
+                  следующими чтениями.
+                </p>
+              )}
 
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
                 {Object.entries(dist.percentiles).map(([k, v]) => (
@@ -588,6 +627,7 @@ function Pronunciation({ adminKey }: { adminKey: string }) {
                 ))}
               </div>
 
+              {dist.total > 0 && (
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
                 <span style={{ fontSize: 12, color: 'var(--card-ink-dim)', alignSelf: 'center' }}>
                   станет «ошибкой» при пороге:
@@ -606,6 +646,7 @@ function Pronunciation({ adminKey }: { adminKey: string }) {
                   </span>
                 ))}
               </div>
+              )}
 
               <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                 {dist.worst.slice(0, 10).map((w, i) => (

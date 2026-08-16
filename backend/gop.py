@@ -33,6 +33,7 @@
 
 from __future__ import annotations
 
+import difflib
 import os
 import statistics
 import threading
@@ -184,6 +185,45 @@ def score(pcm, reference: str, budget_sec: float = 0.0) -> dict:
         "seconds": round(time.time() - started, 2),
         "model": GOP_MODEL,
     }
+
+
+def _alpha(word: str) -> str:
+    return "".join(ch for ch in word.lower() if ch.isalpha())
+
+
+def mark_spoken(words: list[dict], transcript: str) -> int:
+    """Пометить каждое слово эталона: пытался ли ученик его произнести.
+
+    Зачем. Принудительное выравнивание оценивает КАЖДОЕ слово эталона — в том
+    числе те, которые ученик вовсе не читал. Пропущенное предложение ложится
+    в копилку сплошными нулями, неотличимыми от «произнёс ужасно». На проде
+    эти нули и составили весь хвост распределения: p05 = 0.046 при 0.695 на
+    чистом чтении (замер 16.08.2026, 1806 слов, средний балл чтения 43%).
+    Порог, снятый с такой смеси, мерил бы «сколько текста прочитано», а не
+    произношение.
+
+    Как. Сверяем эталон с расшифровкой ДРУГОГО распознавателя (Mistral, та же,
+    по которой считается балл): слово из общего прохода difflib — прозвучало.
+    Замена без большой потери длины — тоже попытка: «walk»→«work» и есть тот
+    случай произношения, ради которого всё затевалось. Потеря от трёх слов —
+    пропуск куска (порог тот же, что у ege_scoring.reading_diff: обычная
+    подмена теряет слово-два, пропущенная строка — больше).
+
+    Помечает words на месте (spoken 1/0), возвращает число непрозвучавших.
+    """
+    ref = [_alpha(w.get("word") or "") for w in words]
+    got = [x for x in (_alpha(t) for t in transcript.split()) if x]
+    spoken = [False] * len(ref)
+    sm = difflib.SequenceMatcher(a=ref, b=got, autojunk=False)
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal" or (tag == "replace" and (i2 - i1) - (j2 - j1) < 3):
+            for k in range(i1, i2):
+                spoken[k] = True
+    unspoken = 0
+    for w, s in zip(words, spoken):
+        w["spoken"] = 1 if s else 0
+        unspoken += 0 if s else 1
+    return unspoken
 
 
 def weakest(result: dict, limit: int = 5) -> list[dict]:

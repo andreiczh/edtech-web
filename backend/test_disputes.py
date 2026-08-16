@@ -281,6 +281,42 @@ if os.path.exists(_ts):
 else:
     check(False, "файл src/ege2/dispute.ts на месте", _ts)
 
+# ------------------------------------------------- копилка произношения
+# Порог выбирается только по словам, которые ученик ПЫТАЛСЯ произнести:
+# пропущенные куски и строки до колонки spoken в распределение не идут,
+# но остаются в базе и видны счётчиком excluded.
+
+cols = storage._columns("pron_samples")
+check({"method", "spoken"} <= cols, "миграция дописала method и spoken")
+
+# Строка «до колонки» — spoken NULL, как лежит на проде.
+storage._exec("INSERT INTO pron_samples(id, student_id, kind, variant, word,"
+              " ord, p, p_norm, created_at) VALUES('legacy','stu','reading',"
+              " 'v0','ghost',0,0.001,0.001,'2026-08-10T00:00:00+00:00')")
+storage.pron_add("stu", "reading", "v1", [
+    {"word": "library", "p": 0.9, "p_norm": 1.0, "dur": 0.3, "spoken": 1},
+    {"word": "council", "p": 0.5, "p_norm": 0.6, "dur": 0.3, "spoken": 1},
+    {"word": "money", "p": 0.001, "p_norm": 0.001, "dur": 0.2, "spoken": 0},
+], "base.en", "forced")
+storage.pron_add("stu", "talk", "", [
+    {"word": "skateboard", "p": 0.8, "p_norm": 0.95, "dur": 0.4, "spoken": 1},
+], "base.en", "cross")
+
+st = storage.pron_stats()
+fr, cr = st["by_method"]["forced"], st["by_method"]["cross"]
+eq(fr["total"], 2, "forced: в распределении только spoken=1")
+eq(fr["excluded"], {"unspoken": 1, "legacy": 1},
+   "forced: пропуск и старая строка видны счётчиком")
+check(all(w["word"] != "money" for w in fr["worst"]),
+      "непрозвучавшее слово не лезет в слабые")
+eq(cr["total"], 1, "cross: свои слова на месте")
+eq(st["total"], 5, "общий счёт считает всё записанное")
+
+raw = storage.pron_raw()
+eq(len(raw), 5, "сырая выгрузка отдаёт все строки")
+check({"word", "ord", "p_norm", "method", "spoken", "variant"} <=
+      set(raw[0].keys()), "в сырой выгрузке есть чем разбирать хвост")
+
 print()
 print("ВСЁ ЗЕЛЕНО" if not failed else f"ПРОВАЛОВ: {failed}")
 raise SystemExit(1 if failed else 0)

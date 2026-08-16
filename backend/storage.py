@@ -237,9 +237,10 @@ def ensure_schema() -> None:
     _add_columns("tasks", ("source TEXT", "source_id TEXT"))
     # Жалоба ученика: без этих полей у неё нет ни причины, ни обстановки —
     # см. backend/disputes.py. Порядок колонок здесь = порядок в dispute_add.
-    # Каким СПОСОБОМ получен замер произношения. Смешивать способы в одном
-    # распределении нельзя — см. pron_stats.
-    _add_columns("pron_samples", ("method TEXT",))
+    # Каким СПОСОБОМ получен замер произношения (смешивать нельзя) и ПЫТАЛСЯ
+    # ли ученик произнести слово (spoken): пропущенный кусок текста ложится
+    # нулями, неотличимыми от «произнёс ужасно», — см. pron_stats.
+    _add_columns("pron_samples", ("method TEXT", "spoken INTEGER"))
     _add_columns("disputes", (
         "target TEXT", "target_key TEXT", "target_label TEXT", "reason TEXT",
         "claim_score INTEGER", "said TEXT", "context TEXT",
@@ -768,12 +769,12 @@ def pron_add(student_id: str, kind: str, variant: str, words: list[dict],
     n = 0
     for i, w in enumerate(words):
         _exec("INSERT INTO pron_samples(id, student_id, kind, variant, word, ord,"
-              " p, p_norm, dur, model, method, created_at)"
-              " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+              " p, p_norm, dur, model, method, spoken, created_at)"
+              " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
               (str(uuid.uuid4()), student_id, kind, variant[:64],
                str(w.get("word") or "")[:40], i, float(w.get("p") or 0.0),
                float(w.get("p_norm") or 0.0), float(w.get("dur") or 0.0),
-               model[:32], method[:16], now))
+               model[:32], method[:16], int(w.get("spoken", 1)), now))
         n += 1
     return n
 
@@ -825,13 +826,32 @@ def pron_stats() -> dict:
         return out
 
     for method in ("forced", "cross"):
-        # Старые строки писались до появления колонки — они все из чтения.
-        cond = ("(method='forced' OR method IS NULL)" if method == "forced"
+        # Старые строки писались до появления колонки method — они все из чтения.
+        base = ("(method='forced' OR method IS NULL)" if method == "forced"
                 else "method='cross'")
+        # В распределение порога идут ТОЛЬКО слова, которые ученик пытался
+        # произнести. У forced это spoken=1 строго: строки без колонки не
+        # отличают «прочитано плохо» от «не прочитано вовсе», и на проде эти
+        # нули составили весь хвост (p05=0.046 при 0.695 на чистом чтении) —
+        # в порог им нельзя. У cross эталон — сама расшифровка, непрозвучавших
+        # слов там нет по построению, старые строки равноправны.
+        cond = (f"{base} AND spoken=1" if method == "forced"
+                else f"{base} AND (spoken=1 OR spoken IS NULL)")
         vals = [float(r[0]) for r in _exec(
             f"SELECT p_norm FROM pron_samples WHERE {cond}"  # noqa: S608
             " ORDER BY p_norm").fetchall()]
         d = _distribution(vals)
+        if method == "forced":
+            # Исключённое показываем счётчиком, а не прячем: владелец должен
+            # видеть, сколько слов лежит вне распределения и почему.
+            d["excluded"] = {
+                "unspoken": int(_exec(
+                    f"SELECT COUNT(*) FROM pron_samples WHERE {base}"  # noqa: S608
+                    " AND spoken=0").fetchone()[0] or 0),
+                "legacy": int(_exec(
+                    f"SELECT COUNT(*) FROM pron_samples WHERE {base}"  # noqa: S608
+                    " AND spoken IS NULL").fetchone()[0] or 0),
+            }
         d["kinds"] = {r[0]: int(r[1]) for r in _exec(
             f"SELECT kind, COUNT(*) FROM pron_samples WHERE {cond}"  # noqa: S608
             " GROUP BY kind").fetchall()}
@@ -841,6 +861,21 @@ def pron_stats() -> dict:
                           f" WHERE {cond} ORDER BY p_norm LIMIT 12").fetchall()]
         out["by_method"][method] = d
     return out
+
+
+def pron_raw(limit: int = 20000) -> list[dict]:
+    """Сырые строки копилки — для подбора порога снаружи.
+
+    Сводка отвечает на «как распределено», но порог выбирается по устройству
+    хвоста: серии соседних слабых слов — это пропуск куска, одиночные — само
+    произношение. Для такого разбора нужны ord и variant, то есть сами строки.
+    """
+    cols = ("student_id", "kind", "variant", "word", "ord", "p", "p_norm",
+            "dur", "model", "method", "spoken", "created_at")
+    rows = _exec(f"SELECT {', '.join(cols)} FROM pron_samples"  # noqa: S608
+                 " ORDER BY created_at, ord LIMIT ?", (int(limit),)).fetchall()
+    return [{k: (str(v) if k == "created_at" else v)
+             for k, v in zip(cols, r)} for r in rows]
 
 
 def meta_set(key: str, value: str) -> None:
