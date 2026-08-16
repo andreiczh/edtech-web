@@ -172,6 +172,54 @@ fb_two = scoring._score_feedback(
 check(fb_two["score"] == 0,
       "чтение: двухсловная далёкая подмена плюс оговорка = три слова = ноль")
 
+# Дубль модели (то же слово, то же прочтение) на экран попадает один раз:
+# жалоба 15.08.2026 — «Повторная ошибка в том же месте» читалась как двойное
+# наказание, хотя счёт её и не задваивал.
+fb_dup = scoring._score_feedback(
+    "reading",
+    {"summary": "s", "misread": [
+        {"real": True, "expected": "choose", "heard": "those"},
+        {"real": True, "expected": "choose", "heard": "those"},
+        {"real": True, "expected": "tree", "heard": "three"},
+    ]},
+    {"diff": diff_ok})
+check(len(fb_dup["errors"]) == 2,
+      "чтение: дубль пары от модели схлопнут в одну запись",
+      f"записей {len(fb_dup['errors'])}")
+
+# Одиночная потеря окончания — шум распознавания. Код давно требует
+# систематики (два и больше), но модель могла записать одиночное окончание
+# грубой ошибкой сама — и «game» вместо «games» становилось третьим словом,
+# обнулявшим работу (жалоба 15.08.2026).
+diff_end = ege_scoring.reading_diff(ref, ref.replace("branches", "branch"))
+fb_end = scoring._score_feedback(
+    "reading",
+    {"summary": "s", "misread": [
+        {"real": True, "expected": "branches", "heard": "branch"},
+        {"real": True, "expected": "tree", "heard": "three"},
+        {"real": True, "expected": "wood", "heard": "food"},
+    ]},
+    {"diff": diff_end})
+check(fb_end["score"] == 1,
+      "чтение: одиночное окончание от модели не считается и не обнуляет",
+      f"балл {fb_end['score']}")
+check(all(e["correction"] != "branches" for e in fb_end["errors"]),
+      "чтение: одиночное окончание не показывается ошибкой")
+
+# А СИСТЕМАТИКА окончаний (две и больше в одной записи) считается как прежде.
+diff_sys = ege_scoring.reading_diff(
+    ref, ref.replace("branches", "branch").replace("is", "was"))
+sys_swaps = diff_sys.get("swaps") or []
+fb_sys = scoring._score_feedback(
+    "reading",
+    {"summary": "s", "misread": [{"real": True, "expected": "wood", "heard": "food"}]},
+    {"diff": ege_scoring.reading_diff(
+        "Cats eat plants and dogs eat bones in gardens near houses.",
+        "Cat eat plant and dogs eat bone in gardens near houses.")})
+check(fb_sys["score"] == 0,
+      "чтение: систематика окончаний по-прежнему в счёте",
+      f"балл {fb_sys['score']}")
+
 # ------------------------------------------------------------- санитизация
 
 dirty = [

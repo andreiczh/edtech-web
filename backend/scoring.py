@@ -100,6 +100,20 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
                    if isinstance(m, dict) and m.get("real")
                    and not (reference and ege_scoring.quote_is_fabricated(
                        str(m.get("expected") or ""), reference))]
+        # Дубли модели схлопываются ДО всего остального: счёт их и так не
+        # считал дважды (gross_errors), но на экране «Повторная ошибка в том
+        # же месте» выглядела как двойное наказание — ровно на это пришла
+        # жалоба 15.08.2026 («одну и ту же ошибку посчитали за 2 разные»).
+        seen_pairs: set[tuple[str, str]] = set()
+        unique: list[dict] = []
+        for m in misread:
+            pair = (str(m.get("expected") or "").strip().lower(),
+                    str(m.get("heard") or "").strip().lower())
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            unique.append(m)
+        misread = unique
         # Фонетически ДАЛЁКИЕ подмены засчитывает КОД, модель их простить не
         # может (05.08.2026). Распознавание ошибается в сторону похожего
         # звучания; «teachers -> doctors» означает, что другое слово
@@ -120,6 +134,22 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
                 misread.append({"expected": s["expected"], "heard": s["heard"],
                                 "explanation": "форма слова прочитана неверно"})
                 covered.add(s["expected"].strip().lower())
+        # Одиночная потеря окончания — шум распознавания, а не ошибка чтеца.
+        # Для подмен, которые находит КОД, это правило действует давно
+        # (ending_pattern требует двух и больше), но модель могла записать
+        # одиночное окончание грубой ошибкой САМА — и «game» вместо «games»
+        # становилось третьим словом, обнулявшим работу (жалоба 15.08.2026:
+        # счёт 3 = games + choose + thus). Правило одно, исполняет его код:
+        # без систематики ending-подмены не считаются и не показываются.
+        systematic = {(s["expected"].strip().lower(), s["heard"].strip().lower())
+                      for s in ege_scoring.ending_pattern(swaps)}
+        if not systematic:
+            endings = {(s["expected"].strip().lower(), s["heard"].strip().lower())
+                       for s in swaps if s.get("ending_only")}
+            misread = [m for m in misread
+                       if (str(m.get("expected") or "").strip().lower(),
+                           str(m.get("heard") or "").strip().lower())
+                       not in endings]
         # Считаем СЛОВА, а не пункты списка, и по официальным правилам счёта:
         # одно и то же перевранное слово — одна ошибка, а каждый пропуск —
         # отдельная (методичка ФИПИ, задание 1; см. ege_scoring.gross_errors).
