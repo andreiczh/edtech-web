@@ -344,6 +344,20 @@ check(brief is not None and brief["student_id"] == "stu-1",
       "краткая карточка жалобы отдаёт ученика и время")
 eq(storage.dispute_brief("нет-такого"), None, "нет жалобы — нет карточки")
 
+# ------------------------------------------------- память прошлой беседы
+storage.talk_memory_set("stu-t", "Talked about football; loves match days")
+eq(storage.talk_memory_get("stu-t"), "Talked about football; loves match days",
+   "память беседы пишется и читается")
+storage.talk_memory_set("stu-t", "Now into chess")
+eq(storage.talk_memory_get("stu-t"), "Now into chess",
+   "хранится ПОСЛЕДНЯЯ беседа, а не архив")
+storage.talk_memory_set("stu-t", "")
+eq(storage.talk_memory_get("stu-t"), "Now into chess",
+   "пустая выжимка не затирает прошлую")
+mem = storage.get_digests("stu-t", None)
+eq(mem.get("talk"), "Now into chess",
+   "память беседы едет тем же SELECT горячего пути")
+
 print()
 print("ВСЁ ЗЕЛЕНО" if not failed else f"ПРОВАЛОВ: {failed}")
 raise SystemExit(1 if failed else 0)

@@ -61,6 +61,29 @@ def rung_index(exchanges: int) -> int:
     return min(len(RUNGS) - 1, max(0, exchanges) // TURNS_PER_RUNG)
 
 
+# Каждый сколько-то обменов собеседник ОДИН раз предлагает выучить что-то
+# новое (запрос владельца 16.08.2026: «не только просто болтать»). Такт
+# считает СЕРВЕР арифметикой — как и ступени лестницы: спрашивать модель
+# «пора ли учить» значило бы удваивать расход. Тема при этом остаётся за
+# учеником: выражение подбирается К ТОМУ, о чём он сам говорит, — решение
+# «тему выбирает человек» от 04.08.2026 это не трогает.
+TEACH_EVERY = 4
+
+
+def teach_block(exchanges: int) -> str:
+    """Обучающий ход: раз в TEACH_EVERY обменов, не раньше первого круга."""
+    if exchanges < TEACH_EVERY or exchanges % TEACH_EVERY != 0:
+        return ""
+    return (
+        "\nTEACH ONE THING in this reply: offer ONE useful English expression "
+        "or idiom that fits what the student is talking about right now "
+        "('there's a good phrase for that — ...'), show it in a short example "
+        "sentence, and invite them to try it in their next answer. Exactly one "
+        "expression, on THEIR topic, woven into the conversation — do not turn "
+        "the chat into a lesson and do not add more teaching until asked."
+    )
+
+
 def flow_block(exchanges: int) -> str:
     """Подсказка о ходе беседы для системного промпта.
 

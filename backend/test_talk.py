@@ -360,6 +360,32 @@ whole_short = "Oh, nice. What did you watch?"
 check("короткая реплика уходит одним куском",
       main._take_head(whole_short) == ("", whole_short))
 
+# --- Обучающий ход и память беседы (16.08.2026) -----------------------------
+# «Не только просто болтать»: раз в TEACH_EVERY обменов собеседник предлагает
+# выучить ОДНО выражение по теме ученика. Такт считает сервер, тему не трогаем.
+print("\n— обучающий ход и память —")
+check("первые обмены — без урока",
+      all(dialogue.teach_block(n) == "" for n in range(dialogue.TEACH_EVERY)))
+check("на четвёртом обмене — один обучающий ход",
+      "ONE useful English expression" in dialogue.teach_block(dialogue.TEACH_EVERY))
+check("между тактами уроков нет",
+      dialogue.teach_block(dialogue.TEACH_EVERY + 1) == ""
+      and dialogue.teach_block(dialogue.TEACH_EVERY * 2) != "")
+check("урок не отменяет хозяина темы: выражение — к теме ученика",
+      "THEIR topic" in dialogue.teach_block(dialogue.TEACH_EVERY))
+
+_hist = [{"role": "user", "content": "I play football on Sundays"},
+         {"role": "assistant", "content": "Nice."}]
+_rv = talk_review.verify({"summary": "s", "mistakes": [], "good": [],
+                          "phrases": [],
+                          "memory": "  Talked about football;   loves match days  "},
+                         _hist)
+check("память беседы проходит сверку и чистится",
+      _rv["memory"] == "Talked about football; loves match days")
+check("память просят по-английски и без ошибок ученика",
+      "memory" in talk_review.SCHEMA_HINT
+      and "БЕЗ ошибок" in talk_review.build_prompt("строго"))
+
 # --- Откат озвучки: отказ Mistral не оставляет ученика без голоса -----------
 # Сбой Mistral (обычно 429 минутного ведра) должен на время остывания уводить
 # синтез на edge-tts и потом пробовать Mistral снова. До 16.08.2026 обратного

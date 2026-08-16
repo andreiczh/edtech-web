@@ -3501,8 +3501,14 @@ async def talk_stream(audio: UploadFile = File(...),
         # объявлена «вторичной ко всему выше» и не должна перебивать её собой.
         exchanges = len(past) // 2
         sys_prompt += "\n" + dialogue.flow_block(exchanges)
+        # Обучающий ход — раз в несколько обменов, такт считает СЕРВЕР
+        # (запрос владельца 16.08.2026: «не только просто болтать»).
+        teach = dialogue.teach_block(exchanges)
+        if teach:
+            sys_prompt += teach
         print(f"[dialog] обмен {exchanges + 1}, "
-              f"ступень {dialogue.rung_index(exchanges) + 1}")
+              f"ступень {dialogue.rung_index(exchanges) + 1}"
+              + (", обучающий ход" if teach else ""))
 
         # Градус противостояния — только у жёсткой персоны. Считается по мату в
         # репликах ученика, включая текущую: ответ на брань должен прийти
@@ -3532,6 +3538,26 @@ async def talk_stream(audio: UploadFile = File(...),
                 "only things the student has told you are in the messages above."
             )
             print("[memory] профиль ученика подключён к разговору")
+
+        # Память ПРОШЛОЙ БЕСЕДЫ — правило противоположное профилю ошибок:
+        # это действительно было между вами (выжимка вашего же прошлого
+        # разговора, записана его разбором), и сослаться на неё — то, что
+        # делает собеседника человеком, а не автоответчиком. Но тема
+        # сегодняшнего разговора всё равно принадлежит ученику.
+        if mem.get("talk") and not past:
+            # Только в ПЕРВОЙ реплике сессии: дальше жива собственная история
+            # разговора, и прошлое уже не нужно — токены дороже ностальгии.
+            sys_prompt += (
+                "\n\nYOUR LAST CONVERSATION with this student, one line from "
+                f"your previous session together: {mem['talk']}\n"
+                "This DID happen between you two. If they open with just a "
+                "greeting or no subject of their own, FOLLOW UP on it — one "
+                "concrete question ('how did that match go?') beats inventing "
+                "a fresh observation: it shows you remember them. The moment "
+                "they bring anything up, today's topic is theirs — drop the "
+                "past and never drag them back to it."
+            )
+            print("[memory] прошлый разговор подключён")
 
         # Ретрай LLM (03.08.2026): на домашнем канале 2 запроса из 5 рвались с
         # пустой ошибкой, и ученик молча терял свой ход. Повторяем ТОЛЬКО пока
@@ -3773,6 +3799,21 @@ async def talk_review_endpoint(request: Request, body: dict = Body(...),
                 print(f"[memory] разговорные ошибки не записал ({type(e).__name__})")
 
         asyncio.create_task(_remember_talk())
+
+    # Память беседы для СЛЕДУЮЩЕГО разговора: темы и интересы, без дословной
+    # речи. Пишется только отсюда — то есть только когда ученик сам нажал
+    # «Разбор»; сессия без разбора памяти не оставляет (и лишнего вызова LLM
+    # ради неё нет: поле едет в том же ответе, что и весь разбор).
+    if _storage_ok and x_device and review.get("memory"):
+
+        async def _remember_gist():
+            try:
+                await asyncio.to_thread(
+                    storage.talk_memory_set, x_device, review["memory"])
+            except Exception as e:  # noqa: BLE001
+                print(f"[memory] выжимку беседы не записал ({type(e).__name__})")
+
+        asyncio.create_task(_remember_gist())
 
     return review
 

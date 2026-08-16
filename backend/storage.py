@@ -280,6 +280,9 @@ def get_digests(student_id: str | None, kind: str | None) -> dict:
     scopes = []
     if student_id:
         scopes.append(f"user:{student_id}")
+        # Память прошлого разговора едет тем же единственным SELECT: ещё один
+        # ключ в IN — это не второй поход в базу.
+        scopes.append(f"talk:{student_id}")
     if kind:
         scopes.append(f"global:{kind}")
     if not scopes:
@@ -289,7 +292,9 @@ def get_digests(student_id: str | None, kind: str | None) -> dict:
                  tuple(scopes)).fetchall()
     out: dict = {}
     for scope, text in rows:
-        out["user" if scope.startswith("user:") else "global"] = text
+        key = ("user" if scope.startswith("user:")
+               else "talk" if scope.startswith("talk:") else "global")
+        out[key] = text
     return out
 
 
@@ -363,6 +368,23 @@ def save_talk_mistakes(student_id: str, errors: list) -> None:
                str(e.get("correction") or "")[:_TRUNC],
                str(e.get("explanation") or "")[:_TRUNC], now))
     _rebuild_user_digest(student_id)
+
+
+def talk_memory_set(student_id: str, text: str) -> None:
+    """Память ПРОШЛОГО разговора: темы и интересы, 1-2 предложения.
+
+    Пишется из разбора беседы (talk_review) — дословной речи здесь нет,
+    только выжимка «о чём говорили и что зацепило». Хранится последняя:
+    собеседнику важно, о чём говорили В ПРОШЛЫЙ РАЗ, а не архив за месяц.
+    """
+    if text:
+        _upsert_digest(f"talk:{student_id}", text)
+
+
+def talk_memory_get(student_id: str) -> str:
+    row = _exec("SELECT text FROM digests WHERE scope=?",
+                (f"talk:{student_id}",)).fetchone()
+    return str(row[0]) if row else ""
 
 
 def _upsert_digest(scope: str, text: str) -> None:

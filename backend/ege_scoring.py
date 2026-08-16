@@ -448,49 +448,83 @@ def ending_pattern(swaps: list[dict]) -> list[dict]:
 # Длина совпадения, которую засчитываем ВТОРЫМ заходом. Три слова подряд —
 # уже не случайность; на двух («of the», «in the») текст на сто слов дал бы
 # ложное покрытие где угодно.
-_REREAD_MIN_RUN = 3
-_REREAD_PASSES = 2
+# Обычный ход чтения: следующее слово ищется в ближнем окне впереди (подмены
+# и шум распознавания сдвигают на слово-два). Возврат «поправить только что
+# прочитанное» локален — дальше _NEAR_BACK слов без подтверждения не верим.
+_NEAR_FWD = 4
+_NEAR_BACK = 12
 
 
-def _rescue_reread(ref: list[str], leftover: list[str], covered: list[bool]) -> int:
-    """Отметить слова эталона, прозвучавшие ВТОРЫМ заходом. Возвращает сколько.
+def _index_of(seq: list[str], w: str, start: int, stop: int) -> int | None:
+    for k in range(start, stop):
+        if seq[k] == w:
+            return k
+    return None
 
-    Зачем. Основное выравнивание монотонно: оно ищет один сквозной проход по
-    тексту. Ученик, который начал читать с середины, а потом вернулся к началу,
-    для него выглядит так, будто начало он не читал вовсе — и получает пропуск
-    за прочитанное (замер 05.08.2026: покрытие 0.61 вместо 1.00, двенадцать
-    прочитанных слов записаны в непрочитанные).
 
-    Правило от тестировщика простое и справедливое: слово засчитано, если оно
-    прозвучало ХОТЯ БЫ РАЗ, в любом заходе. Отсюда и остальные его случаи:
-    ошибся и сам поправил — засчитано; прочитал половину и начал заново —
-    засчитано; вернулся перечитать середину — то, что уже прочитано, не
-    обнуляется.
+def _last_index_before(seq: list[str], w: str, stop: int) -> int | None:
+    for k in range(stop - 1, -1, -1):
+        if seq[k] == w:
+            return k
+    return None
 
-    Спасаем ТОЛЬКО то, что основной проход счёл непрочитанным, и только по
-    длинным совпадениям: обычное чтение ведёт себя ровно как раньше.
+
+def _effective_words(ref: list[str], got: list[str]) -> tuple[list[str], int]:
+    """Оставить от расшифровки ПОСЛЕДНИЙ заход по каждому куску эталона.
+
+    Правило владельца (16.08.2026; сменило правило «хотя бы раз» от
+    05.08.2026): вернулся к слову — засчитывается НОВАЯ версия, а всё,
+    что было прочитано после этого слова прошлым заходом, СТИРАЕТСЯ и должно
+    быть перечитано. Кто перечитал только слово и продолжил со следующего
+    предложения — получает недочитанный кусок пропуском. Следствия, о которых
+    надо помнить: «начал с середины, вернулся к началу и остановился» теперь
+    НЕ дочитан (по старому правилу был), как и «дочитал и перечитал слово из
+    середины» — возврат стирает хвост в обоих случаях.
+
+    Возврат распознаётся по слову, совпавшему с эталоном ПОЗАДИ фронтира:
+      - близкий (до _NEAR_BACK слов назад) — содержательное слово (от четырёх
+        букв) считается возвратом сразу: ученик поправляет то, что только что
+        прочитал. Служебные the/is/a возвратом не считаются — иначе любое
+        «the… the» стирало бы прочитанное;
+      - далёкий (перечитывает с начала, вернулся к прошлой строке) — только
+        с подтверждением продолжением: следующее слово расшифровки должно
+        совпасть со словом эталона сразу за точкой возврата. Без подтверждения
+        далёкое совпадение — скорее шум распознавания, чем возврат.
+
+    Возвращает (последний заход, сколько слов прошлых заходов стёрто).
+    Слова, не совпавшие с эталоном (подмены, шум), сохраняются как есть —
+    их судьбу решает difflib и модель, здесь решается только «какой заход».
     """
-    saved = 0
-    rest = list(leftover)
-    for _ in range(_REREAD_PASSES):
-        if not rest:
-            break
-        sm = difflib.SequenceMatcher(a=ref, b=rest, autojunk=False)
-        used: set[int] = set()
-        progress = False
-        for block in sm.get_matching_blocks():
-            if block.size < _REREAD_MIN_RUN:
-                continue
-            for k in range(block.size):
-                if not covered[block.a + k]:
-                    covered[block.a + k] = True
-                    saved += 1
-                    progress = True
-                used.add(block.b + k)
-        if not progress:
-            break
-        rest = [w for i, w in enumerate(rest) if i not in used]
-    return saved
+    n = len(ref)
+    keep = [True] * len(got)
+    anchor: list[int | None] = [None] * len(got)
+    pos = 0
+    for i, w in enumerate(got):
+        j = _index_of(ref, w, pos, min(n, pos + _NEAR_FWD))
+        if j is None:
+            back = _last_index_before(ref, w, pos)
+            if back is not None:
+                near = pos - back <= _NEAR_BACK
+                content = sum(ch.isalpha() for ch in w) >= 4
+                nxt = got[i + 1] if i + 1 < len(got) else None
+                confirmed = nxt is not None and nxt in (
+                    ref[back + 1] if back + 1 < n else None,
+                    ref[back + 2] if back + 2 < n else None)
+                if (near and content) or confirmed:
+                    for k in range(i):
+                        if anchor[k] is not None and anchor[k] >= back:
+                            keep[k] = False
+                            anchor[k] = None
+                    anchor[i] = back
+                    pos = back + 1
+                    continue
+            # Далёкий скачок ВПЕРЁД — обычный пропуск куска, difflib покажет.
+            j = _index_of(ref, w, pos, n)
+        if j is not None:
+            anchor[i] = j
+            pos = j + 1
+    erased = keep.count(False)
+    return [w for i, w in enumerate(got) if keep[i]], erased
 
 
 def reading_diff(reference: str, transcript: str) -> dict:
@@ -502,27 +536,26 @@ def reading_diff(reference: str, transcript: str) -> dict:
     распознавания). Код решает сам только там, где улика надёжна: большой
     непрочитанный кусок в середине и оборванный хвост.
 
-    Слово считается прочитанным, если прозвучало ХОТЯ БЫ РАЗ — см.
-    _rescue_reread. Поэтому самоисправление ученику не вредит: подмена, которую
-    он сам же и поправил, из улик выбрасывается.
+    Перечитывание — по правилу владельца (16.08.2026): засчитывается
+    ПОСЛЕДНИЙ заход. Возврат к слову стирает всё, что было прочитано после
+    него прошлым заходом, — недочитанное после возврата становится пропуском.
+    Самоисправление одним словом по-прежнему безвредно: новая версия слова
+    встаёт на место старой (см. _effective_words).
     """
-    ref, got = _words(reference), _words(transcript)
+    ref, raw_got = _words(reference), _words(transcript)
     if not ref:
         return {"ok": False, "reason": "нет эталонного текста"}
+
+    # Сначала — какой заход считать: возвраты стирают прошлые чтения.
+    got, reread = _effective_words(ref, raw_got)
 
     sm = difflib.SequenceMatcher(a=ref, b=got, autojunk=False)
     opcodes = sm.get_opcodes()
     covered = [False] * len(ref)
-    used_got: set[int] = set()
     for tag, i1, i2, j1, j2 in opcodes:
         if tag == "equal":
             for k in range(i1, i2):
                 covered[k] = True
-            used_got.update(range(j1, j2))
-    # Слова расшифровки, не вошедшие в сквозной проход, — это либо шум
-    # распознавания, либо ВТОРОЙ ЗАХОД на текст. Проверяем второе.
-    reread = _rescue_reread(
-        ref, [w for i, w in enumerate(got) if i not in used_got], covered)
 
     missing_runs: list[list[str]] = []
     swaps: list[dict] = []
@@ -531,10 +564,6 @@ def reading_diff(reference: str, transcript: str) -> dict:
 
     for tag, i1, i2, j1, j2 in opcodes:
         if tag == "equal":
-            continue
-        # Кусок, спасённый вторым заходом, уликой больше не является: ученик
-        # эти слова прочитал, пусть и не с первого раза.
-        if tag in ("delete", "replace") and all(covered[i1:i2]):
             continue
         if tag == "delete":
             missing_runs.append(ref[i1:i2])
@@ -563,15 +592,15 @@ def reading_diff(reference: str, transcript: str) -> dict:
     return {
         "ok": True,
         "ref_words": len(ref),
-        "heard_words": len(got),
+        "heard_words": len(raw_got),
         "coverage": round(matched / len(ref), 3),
         "missing_total": missing_total,
         "longest_missing_run": longest_run,
         "tail_missing": tail_missing,
         "missing_fragments": [" ".join(r) for r in missing_runs if len(r) >= 2][:6],
         "swaps": swaps[:8],
-        # Сколько слов зачтено ВТОРЫМ заходом. Ноль — читал сквозняком; больше
-        # нуля — возвращался и перечитывал, и это ему не в минус.
+        # Сколько слов ПРОШЛЫХ заходов стёрто возвратами. Ноль — читал
+        # сквозняком; больше нуля — возвращался, и зачтён последний заход.
         "reread": reread,
     }
 
