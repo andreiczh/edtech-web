@@ -51,13 +51,24 @@ UptimeRobot, бесплатный тариф (50 мониторов, прове�
 В базе живёт всё: аккаунты, прогресс, банк заданий, копилка жалоб.
 Дамп забирается ручкой `/admin/backup` на твой ноут.
 
+**Рабочий скрипт — `backend/backup.py`, НЕ backup.ps1** (16.08.2026).
+PowerShell-версия трижды молча исчезала с диска: антивирус 360 Total Security
+считает .ps1 с веб-запросом и записью файлов «загрузчиком» и удаляет без
+следа в журналах. Python из .venv той же эвристикой не задет. Логика та же.
+Пока 360 стоит на машине, добавь папку проекта в его исключения — иначе он
+продолжит выкашивать и другие .ps1 (например, run.ps1), а их пропажа ломает
+`git pull` при запуске.
+
 1. Задай переменную окружения ОДИН раз (PowerShell от своего пользователя):
    `setx PINGO_ADMIN_KEY "твой-админ-ключ"`
+   (запасной путь: скрипт возьмёт PROD_ADMIN_KEY из backend/.env).
 2. Проверь руками:
-   `powershell -NoProfile -File C:\Users\Lenovo\edtech-copilot-web\backend\backup.ps1`
+   `C:\Users\Lenovo\edtech-copilot-web\backend\.venv\Scripts\python.exe C:\Users\Lenovo\edtech-copilot-web\backend\backup.py`
    — в `%USERPROFILE%\pingo-backups` появится `pingo-<дата>.json`.
-3. Поставь на расписание (каждая ночь в 03:30, ноут должен быть включён):
-   `schtasks /Create /SC DAILY /ST 03:30 /TN "PingoBackup" /TR "powershell -NoProfile -File C:\Users\Lenovo\edtech-copilot-web\backend\backup.ps1"`
+3. Задача «PingoBackup» в планировщике уже перенастроена (16.08.2026): зовёт
+   `pythonw.exe backup.py` без окна на экране, каждую ночь в 03:30, работает
+   и от батареи, пропуск догоняет при первом пробуждении. Пересоздавать её
+   не нужно; если когда-то придётся — действие задачи именно такое.
 
 Скрипт хранит последние 14 дампов и сам удаляет старые. Формат — обычный
 JSON по таблицам: восстановление не требует спецсредств.
