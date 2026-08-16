@@ -898,6 +898,112 @@ function VerdictView({ raw }: { raw: string | null }) {
   )
 }
 
+/** Арбитр спора о чтении: что слышал ЗВУК в том самом прогоне.
+ *
+ *  Жалоба «записали не то, что я сказал» — спор чтеца с распознавалкой, и
+ *  текстом он не решается: текст и есть предмет спора. Замер произношения
+ *  отвечает фактом: насколько звук подтверждает каждое слово эталона.
+ *  Первый такой арбитраж (goldfish, 16.08.2026) делался руками через сырую
+ *  выгрузку — теперь это кнопка. Спорные слова из жалобы подсвечиваются. */
+function PronArbiter({
+  id,
+  targetLabel,
+  said,
+  adminKey,
+}: {
+  id: string
+  targetLabel: string | null
+  said: string | null
+  adminKey: string
+}) {
+  const [words, setWords] = useState<Array<{
+    word: string
+    p_norm: number
+    dur: number | null
+    spoken: number | null
+  }> | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+
+  const load = () => {
+    setNote('слушаем…')
+    api(`/admin/disputes/${id}/pron`, adminKey)
+      .then((r) => {
+        const d = r as { words: typeof words; run_at: string | null }
+        if (!d.words || d.words.length === 0) {
+          setNote('замера рядом с этой жалобой нет — сбор мог быть занят или выключен')
+          return
+        }
+        setNote(null)
+        setWords(d.words)
+      })
+      .catch((e) => setNote(e instanceof Error ? e.message : String(e)))
+  }
+
+  // Слова из спора («All fish» → «goldfish» + «что я сказал на самом деле»)
+  // подсвечиваются в замере, чтобы взгляд шёл сразу к предмету спора.
+  const hot = new Set(
+    `${targetLabel ?? ''} ${said ?? ''}`
+      .toLowerCase()
+      .split(/[^a-zа-яё']+/)
+      .filter((w) => w.length >= 3),
+  )
+
+  if (words === null)
+    return (
+      <p style={{ margin: '8px 0 0' }}>
+        <button type="button" className="dsg__link" onClick={load}>
+          что слышал звук (замер произношения)
+        </button>
+        {note && <span style={{ ...dim, marginLeft: 8 }}>{note}</span>}
+      </p>
+    )
+
+  return (
+    <>
+      <p style={blockTitle}>ЧТО СЛЫШАЛ ЗВУК</p>
+      <p style={{ ...dim, margin: '0 0 4px', fontSize: 12 }}>
+        число у слова — насколько звук подтверждает ИМЕННО ЕГО (1 ≈ уверенно,
+        около нуля — прозвучало что-то другое); серое зачёркнутое ученик не
+        читал вовсе
+      </p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+        {words.map((w, i) => {
+          const weak = w.p_norm < 0.35
+          const mid = !weak && w.p_norm < 0.7
+          const skipped = w.spoken === 0
+          const isHot = hot.has(w.word.toLowerCase())
+          return (
+            <span
+              key={i}
+              title={`p_norm ${w.p_norm}${w.dur ? ` · ${w.dur} с` : ''}`}
+              style={{
+                fontSize: 12,
+                padding: '1px 6px',
+                borderRadius: 6,
+                background: skipped
+                  ? 'rgba(0,0,0,0.05)'
+                  : weak
+                    ? 'rgba(180,72,92,0.16)'
+                    : mid
+                      ? 'rgba(200,150,40,0.16)'
+                      : 'rgba(0,0,0,0.04)',
+                textDecoration: skipped ? 'line-through' : 'none',
+                opacity: skipped ? 0.6 : 1,
+                outline: isHot ? '2px solid rgba(80,110,220,0.8)' : 'none',
+              }}
+            >
+              {w.word}
+              {(weak || mid || isHot) && !skipped && (
+                <b style={{ marginLeft: 4 }}>{w.p_norm.toFixed(2)}</b>
+              )}
+            </span>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
 /** Форма вердикта. Это и есть разметка золотого набора: строка «наш балл 3,
     верный 5, потому что аспект 2 раскрыт» — готовый калибровочный случай. */
 function Resolve({
@@ -1174,6 +1280,14 @@ function Disputes({ adminKey }: { adminKey: string }) {
                 <Shots shots={d.shots} adminKey={adminKey} />
                 <ContextView raw={d.context} />
                 <VerdictView raw={d.feedback} />
+                {d.kind === 'reading' && (
+                  <PronArbiter
+                    id={d.id}
+                    targetLabel={d.target_label}
+                    said={d.said}
+                    adminKey={adminKey}
+                  />
+                )}
 
                 <p style={{ ...dim, marginTop: 8 }}>
                   ученик {d.student_id?.slice(0, 8)} · вариант {d.variant || '—'} · собеседник{' '}

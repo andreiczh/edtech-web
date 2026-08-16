@@ -1295,6 +1295,34 @@ async def admin_shot(shot_id: str, key: str | None = None,
     })
 
 
+@app.get("/admin/disputes/{did}/pron")
+async def admin_dispute_pron(did: str, x_admin_key: str | None = Header(None)):
+    """Арбитр спора о чтении: что слышал ЗВУК в том самом прогоне.
+
+    Жалоба «записали не то, что я сказал» — спор чтеца с распознавалкой, и
+    текстом он не решается: текст и есть предмет спора. Замер произношения
+    того же прогона отвечает фактом: насколько звук подтверждает каждое
+    слово эталона. Первый такой арбитраж (goldfish, 16.08.2026: p_norm
+    1.008 при нулях настоящих провалов — ученик был прав) делался руками
+    через сырую выгрузку; теперь владельцу это одна кнопка в карточке.
+    """
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    brief = await asyncio.to_thread(storage.dispute_brief, did)
+    if brief is None:
+        raise HTTPException(status_code=404, detail="Жалобы с таким id нет.")
+    words = await asyncio.to_thread(
+        storage.pron_run_near, brief["student_id"], brief["variant"],
+        brief["created_at"])
+    return {"kind": brief["kind"], "variant": brief["variant"],
+            "run_at": words[0]["run_at"] if words else None,
+            "model": words[0]["model"] if words else None,
+            "words": [{k: w[k] for k in ("word", "ord", "p_norm", "dur",
+                                          "method", "spoken")}
+                      for w in words]}
+
+
 @app.get("/admin/pronunciation")
 async def admin_pronunciation(raw: int = 0,
                               x_admin_key: str | None = Header(None)):

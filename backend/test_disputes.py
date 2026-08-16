@@ -317,6 +317,33 @@ eq(len(raw), 5, "сырая выгрузка отдаёт все строки")
 check({"word", "ord", "p_norm", "method", "spoken", "variant"} <=
       set(raw[0].keys()), "в сырой выгрузке есть чем разбирать хвост")
 
+# ------------------------------------------------- арбитр: замер к жалобе
+# Спор «я так не говорил» решается ЗВУКОМ того же прогона: ищем замер того же
+# ученика и варианта, ближайший по времени к жалобе (замер пишется фоном и
+# может встать в базу ПОЗЖЕ мгновенной жалобы — поэтому модуль, а не «до»).
+
+for run_at, p in (("2026-08-13T21:40:00+00:00", 0.9),
+                  ("2026-08-13T10:00:00+00:00", 0.1)):
+    storage._exec("INSERT INTO pron_samples(id, student_id, kind, variant,"
+                  " word, ord, p, p_norm, method, spoken, created_at)"
+                  " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                  (f"arb-{p}", "stu-arb", "reading", "39-x46", "goldfish",
+                   0, p, p, "forced", 1, run_at))
+
+near = storage.pron_run_near("stu-arb", "39-x46", "2026-08-13T21:45:00+00:00")
+eq(len(near), 1, "арбитр нашёл ровно один прогон")
+eq(near[0]["p_norm"], 0.9, "выбран ближайший прогон, а не утренний")
+eq(storage.pron_run_near("stu-arb", "39-x46", "2026-08-14T21:45:00+00:00"),
+   [], "прогон суточной давности не выдаётся за замер этой жалобы")
+eq(storage.pron_run_near("кто-то другой", "39-x46",
+                         "2026-08-13T21:45:00+00:00"),
+   [], "чужой ученик не получает чужой замер")
+
+brief = storage.dispute_brief(did)
+check(brief is not None and brief["student_id"] == "stu-1",
+      "краткая карточка жалобы отдаёт ученика и время")
+eq(storage.dispute_brief("нет-такого"), None, "нет жалобы — нет карточки")
+
 print()
 print("ВСЁ ЗЕЛЕНО" if not failed else f"ПРОВАЛОВ: {failed}")
 raise SystemExit(1 if failed else 0)

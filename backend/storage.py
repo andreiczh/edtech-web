@@ -971,6 +971,54 @@ def disputes_stats() -> dict:
     }
 
 
+def dispute_brief(did: str) -> dict | None:
+    """Минимум жалобы для перекрёстных запросов: кто, какой вариант, когда."""
+    row = _exec("SELECT student_id, kind, variant, created_at FROM disputes"
+                " WHERE id=?", (did,)).fetchone()
+    if row is None:
+        return None
+    return {"student_id": row[0], "kind": row[1], "variant": row[2] or "",
+            "created_at": str(row[3] or "")}
+
+
+def pron_run_near(student_id: str, variant: str, at_iso: str,
+                  window_min: float = 30.0) -> list[dict]:
+    """Замер произношения ТОГО ЖЕ прогона, что и жалоба: тот же ученик и
+    вариант, ближайший по времени запуск в окне ±window_min минут.
+
+    Зачем: спор «я так не говорил» — это спор чтеца с распознавалкой, и
+    решить его текстом нельзя: текст и есть предмет спора. А замер слышал
+    ЗВУК. Первый такой арбитраж (жалоба про goldfish, 16.08.2026) делался
+    руками через сырую выгрузку — теперь это запрос.
+
+    Ближайший по модулю, а не «последний до»: сам замер пишется фоном через
+    ~полминуты после разбора, и жалоба, отправленная сразу, может опередить
+    его строку в базе.
+    """
+    runs = [str(r[0]) for r in _exec(
+        "SELECT DISTINCT created_at FROM pron_samples WHERE student_id=?"
+        " AND variant=?", (student_id, variant[:64])).fetchall()]
+    if not runs or not at_iso:
+        return []
+
+    def _ts(iso: str) -> float:
+        try:
+            return datetime.fromisoformat(iso).timestamp()
+        except ValueError:
+            return 0.0
+
+    at = _ts(at_iso)
+    best = min(runs, key=lambda r: abs(_ts(r) - at))
+    if abs(_ts(best) - at) > window_min * 60:
+        return []
+    cols = ("word", "ord", "p_norm", "dur", "method", "spoken", "model")
+    rows = _exec(
+        f"SELECT {', '.join(cols)} FROM pron_samples WHERE student_id=?"
+        " AND variant=? AND created_at=? ORDER BY ord",
+        (student_id, variant[:64], best)).fetchall()
+    return [dict(zip(cols, r), run_at=best) for r in rows]
+
+
 def dispute_resolve(did: str, status: str, verdict: str, verdict_score: int,
                     verdict_note: str) -> bool:
     """Вердикт владельца по жалобе. Это и есть разметка золотого набора:
