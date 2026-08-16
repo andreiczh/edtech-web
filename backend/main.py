@@ -2542,7 +2542,15 @@ def health():
                      + (f"; последняя осечка — {_stt_task_last_error}"
                         if _stt_task_last_error else "")
                      if STT_TASK_MODEL else "та же, что в разговоре"),
-        "tts": f"edge-tts:{TTS_VOICE}",
+        # Чем озвучиваем НА САМОМ ДЕЛЕ и не ушли ли на запасной. Поле было
+        # захардкожено строкой «edge-tts» и врало с 04.08.2026: провайдер по
+        # умолчанию mistral, а панель показывала три голоса edge, которых в бою
+        # нет. Ровно та ловушка, из-за которой у STT сделали счётчик откатов:
+        # откат обязан быть ГРОМКИМ, иначе система выглядит рабочей вслепую.
+        "tts": (f"mistral:{TTS_REMOTE_MODEL} (эмоция в голосе, диктор один)"
+                if TTS_PROVIDER == "mistral" else
+                f"mistral:{TTS_REMOTE_MODEL} — ЗАПАСНОЙ, edge-tts отказал"
+                if _tts_degraded else f"edge-tts:{TTS_VOICE}"),
         "llm_base": LLM_BASE_URL,
         "llm_model": LLM_MODEL,
         "llm_key": bool(os.environ.get("LLM_API_KEY")),
