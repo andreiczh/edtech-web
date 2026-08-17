@@ -176,6 +176,14 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
         items = obs.get("questions" if is_dialogue else "answers") or []
         items = [it for it in items if isinstance(it, dict)]
         expected = len(ctx.get("points" if is_dialogue else "questions") or [])
+        # Задание без списка пунктов — это дырка в банке, а не строгая работа.
+        # Балл всё равно считаем из максимума (иначе ученик вовсе без оценки),
+        # но говорим об этом ГРОМКО: молча делить на пять, не зная вопросов,
+        # значит выставлять балл вслепую (поймано прогоном 16.08.2026).
+        if not expected:
+            print(f"[{kind}] в задании НЕТ списка пунктов — балл считается "
+                  f"из максимума {ege_scoring.MAX_SCORE[kind]} вслепую, "
+                  f"проверь вариант в банке")
         top = expected or ege_scoring.MAX_SCORE[kind]
         res = ege_scoring.score_items(items, top)
 
