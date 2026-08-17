@@ -3233,6 +3233,52 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     if observations is None:
         raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
 
+    # ОБРЫВ РАЗБОРА. Модель обязана вернуть пункт на каждый вопрос задания:
+    # балл — сумма зачтённых, поэтому недостающий пункт молча становится нулём,
+    # и ученик с пятью верными ответами видит 1 из 5 и слово «неправильно».
+    # Строгость и обрыв на экране неразличимы, поэтому недобор — это НАША
+    # ошибка, а не его: даём модели второй заход, и только он решает исход.
+    expected_items = len(ctx.get("points" if kind == "dialogue" else "questions") or [])
+    if ege_scoring.missing_items(kind, observations, expected_items):
+        lack = ege_scoring.missing_items(kind, observations, expected_items)
+        print(f"[{kind}] разбор оборвался: не хватает {lack} пунктов из "
+              f"{expected_items} — переспрашиваю модель")
+        try:
+            retry = await asyncio.to_thread(
+                lambda: client.chat.completions.create(
+                    model=LLM_MODEL,
+                    messages=[
+                        {"role": "system", "content": prompt + _memory_prompt_block(mem)},
+                        {"role": "user", "content": transcript_text},
+                        {"role": "assistant", "content": raw[:1500]},
+                        {"role": "user", "content":
+                         f"Разбор неполный: пунктов должно быть РОВНО "
+                         f"{expected_items}, по одному на каждый пункт задания, "
+                         f"даже если ответа на какой-то из них в записи нет. "
+                         f"Верни JSON целиком заново."},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.0,
+                    max_tokens=900,
+                )
+            )
+            _track_llm(retry)
+            again = _loads_forgiving((retry.choices[0].message.content or "").strip())
+            if again is not None and ege_scoring.missing_items(
+                    kind, again, expected_items) < lack:
+                observations = again
+                print(f"[{kind}] второй заход вернул разбор целиком")
+        except Exception as e:  # noqa: BLE001 — второй заход не обязан удаться
+            print(f"[{kind}] второй заход не удался ({type(e).__name__})")
+
+        # Не помогло — честный отказ вместо выдуманного низкого балла. Ученик
+        # переспросит разбор; ложная двойка стоит доверия ко всей проверке.
+        if ege_scoring.missing_items(kind, observations, expected_items):
+            raise HTTPException(
+                status_code=502,
+                detail="Разбор оборвался на середине — балл не выставляем, "
+                       "чтобы не занизить его случайно. Нажми «Повторить разбор».")
+
     # Механическая сверка улик ДО второго прохода: приписана ли ученику фраза,
     # которой он не говорил, и не засчитан ли обрывок вместо ответа. Ничего не
     # решает — только помечает пункты, чтобы старший эксперт посмотрел именно
