@@ -249,9 +249,19 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
     except (TypeError, ValueError):
         phrases = 0
 
+    # Обращение к другу — самое короткое место ответа и потому самое хрупкое:
+    # одно искажённое распознаванием слово стоило ученику двух баллов по
+    # организации (прод, 16.08.2026: «Hello Max!» -> «Philomach»). Если модель
+    # обращения не увидела, а ответ начинается коротким невнятным куском —
+    # засчитываем в пользу ученика, см. ege_scoring.opening_rescued.
+    opening = bool(obs.get("opening_with_address"))
+    if not opening and ege_scoring.opening_rescued(transcript):
+        opening = True
+        print("[42] обращение спасено: первая фраза похожа на съеденное "
+              "распознаванием приветствие")
+
     res = ege_scoring.score_monologue(
-        aspects, phrases,
-        bool(obs.get("opening_with_address")), bool(obs.get("closing")),
+        aspects, phrases, opening, bool(obs.get("closing")),
         len(logic), len(lang), grave,
     )
 

@@ -220,6 +220,46 @@ check(fb_sys["score"] == 0,
       "чтение: систематика окончаний по-прежнему в счёте",
       f"балл {fb_sys['score']}")
 
+# -------------------------------------------- рамочная фраза против распознавания
+# Прод 16.08.2026: «Hello Max!» с русским акцентом расшифровано как «Philomach»,
+# модель обращения не увидела, организация упала с 3 до 1 — минус два балла за
+# приветствие, которое ученик произнёс.
+
+RESCUE = [
+    ("Philomach. I want to tell you about two photos.", True, "съеденное распознаванием обращение"),
+    ("Hi! I want to tell you about two photos.", True, "обычное приветствие"),
+    ("I want to tell you about two photos from my project.", False, "сразу к делу — не спасаем"),
+    ("There are two pictures in front of me.", False, "запрещённый методичкой зачин"),
+    ("Um. I want to tell you about the photos.", False, "мусорный зачин обращением не был"),
+]
+for text, want, name in RESCUE:
+    check(ege_scoring.opening_rescued(text) == want, f"обращение: {name}")
+
+# И сквозь весь слой сборки: балл обязан вернуться к трём.
+mono_obs_rescue = {
+    "summary": "s", "phrases": 18, "opening_with_address": False, "closing": True,
+    "aspects": [{"n": n, "described_first": True, "described_second": True,
+                 "difference_stated": True, "difference_generalised": True,
+                 "linked_to_topic": True, "named_first": True, "named_second": True,
+                 "specific_first": True, "specific_second": True,
+                 "opinion_explicit": True, "choice_stated": True, "justified": True}
+                for n in (1, 2, 3, 4)],
+    "logic_errors": [], "lang_errors": [],
+}
+fb_resc = scoring._score_feedback(
+    "monologue", mono_obs_rescue,
+    {"transcript": "Philomach. I want to tell you about two photos. "
+                   "That's all, bye!"})
+check(fb_resc["criteria"][1]["score"] == 3,
+      "организация не падает из-за съеденного распознаванием обращения",
+      f"балл {fb_resc['criteria'][1]['score']}")
+fb_nores = scoring._score_feedback(
+    "monologue", mono_obs_rescue,
+    {"transcript": "I want to tell you about two photos. That's all, bye!"})
+check(fb_nores["criteria"][1]["score"] == 1,
+      "настоящее отсутствие обращения по-прежнему роняет организацию",
+      f"балл {fb_nores['criteria'][1]['score']}")
+
 # ------------------------------------------------------------- санитизация
 
 dirty = [
