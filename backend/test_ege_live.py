@@ -331,29 +331,37 @@ def run_monologues(client: OpenAI, recheck: bool) -> tuple[int, int, list[str]]:
     return exact, close, notes
 
 
+import fipi_cases  # noqa: E402 — корпус размеченных работ, см. модуль
+
+# Работы практикума с вердиктами экспертов лежат отдельным модулем: сетку
+# можно пополнять корпусом, не трогая код замера.
+INTERVIEWS += fipi_cases.INTERVIEW_EXTRA
+MONOLOGUES += fipi_cases.MONOLOGUE_EXTRA
+
+
 def run_interviews(client: OpenAI) -> tuple[int, list[str]]:
     print("\nЗАДАНИЕ 3 — интервью (по 1 баллу за ответ, максимум 5)\n")
     agree_total = 0
     notes = []
     for case in INTERVIEWS:
-        obs = ask(client, ege_prompts.interview_prompt(INTERVIEW_QUESTIONS),
+        questions = case.get("questions") or INTERVIEW_QUESTIONS
+        obs = ask(client, ege_prompts.interview_prompt(questions),
                   case["script"], 900)
         # Как на проде: сначала механическая сверка улик (она метит выдуманные
         # цитаты и зачтённые обрывки), потом общий подсчёт. Второго прохода
         # здесь нет — он живёт в main.py и стоит лишних вызовов; это
         # единственное, чем замер отличается от боевого пути.
         ege_scoring.flag_suspicious("interview", obs, case["script"])
-        fb = scoring._score_feedback("interview", obs,
-                                     {"questions": INTERVIEW_QUESTIONS})
-        marks = [c["score"] for c in fb["criteria"]][:5]
-        marks += [0] * (5 - len(marks))
+        fb = scoring._score_feedback("interview", obs, {"questions": questions})
         want = case["expected_marks"]
+        marks = [c["score"] for c in fb["criteria"]][:len(want)]
+        marks += [0] * (len(want) - len(marks))
         agree = sum(1 for a, b in zip(marks, want) if a == b)
         agree_total += agree
         flag = "==" if marks == want else "~~"
         print(f"{flag} {case['name']}: наш {marks} = {sum(marks)}/5 | "
-              f"эксперты {want} = {sum(want)}/5 | совпало вердиктов: {agree}/5")
-        if agree < 4:
+              f"эксперты {want} = {sum(want)}/{len(want)} | совпало вердиктов: {agree}/{len(want)}")
+        if agree < len(want) - 1:
             notes.append(f"{case['name']}: совпало только {agree}/5 вердиктов")
     return agree_total, notes
 
@@ -491,11 +499,12 @@ def main() -> int:
         return sum(xs) / len(xs)
 
     total = len(MONOLOGUES)
+    iv_total = sum(len(c["expected_marks"]) for c in INTERVIEWS)
     print(f"\n{'═' * 70}")
     print(f"Монолог: точное совпадение {avg(exacts):.1f}/{total} "
           f"(по прогонам {exacts}), в пределах ±1 балла {avg(closes):.1f}/{total} "
           f"(по прогонам {closes})")
-    print(f"Интервью: совпало {avg(agrees):.1f}/10 вердиктов (по прогонам {agrees})")
+    print(f"Интервью: совпало {avg(agrees):.1f}/{iv_total} вердиктов (по прогонам {agrees})")
     print(f"Вопросы (задание 40): совпало {avg(d_agrees):.1f}/20 вердиктов (по прогонам {d_agrees})")
     if runs > 1:
         print(f"Разброс между прогонами: монолог ±1 балл "
@@ -508,7 +517,7 @@ def main() -> int:
             print("  -", n)
     # Порог намеренно мягкий: требуем не идеала, а отсутствия перекоса. Судим
     # по среднему — одиночный неудачный прогон не должен объявлять регресс.
-    ok = (avg(closes) >= total - 1.5 and avg(agrees) >= 8
+    ok = (avg(closes) >= total - 1.5 and avg(agrees) >= iv_total - 3
           and avg(d_agrees) >= 17)
     print("\n" + ("ИТОГ: разбор держится рядом с экспертами." if ok
                   else "ИТОГ: расхождение великовато, промпты надо править."))
