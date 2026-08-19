@@ -883,6 +883,11 @@ _Q_REQUEST = (
 # Страдательный залог переворачивает смысл: спрашивают, чему учат САМОГО
 # ученика, а не что преподают в школе («What kind of dances are you taught?»).
 _Q_PASSIVE = re.compile(r"\bare\s+you\s+(taught|offered|given|provided)\b", re.I)
+# «Which» вместо «what» там, где выбирать не из чего: методичка разбирает
+# два примера — «Which accommodation do you offer?» (надо what / what kind of)
+# и «Which types of cars do you use?». «Which of the ...» не трогаем: там
+# выбор идёт из НАЗВАННОГО набора, и такой вопрос правильный.
+_Q_WHICH = re.compile("^" + r"\s*which\s+" + "(?!of[^a-z])" + "[a-z]", re.I)
 # Определители, после которых артикль не нужен.
 _DETERMINERS = {"the", "a", "an", "your", "their", "his", "her", "its", "my",
                 "our", "this", "that", "these", "those", "any", "some"}
@@ -906,6 +911,8 @@ def question_rejected(text: str) -> str:
             return "это просьба, а не прямой вопрос"
     if _Q_PASSIVE.search(q):
         return "страдательный залог переворачивает смысл вопроса"
+    if _Q_WHICH.match(q):
+        return "нужен «what», а не «which»: выбирать не из чего"
     # «What is minimum age for students?», «What is tutation fee?» — отсутствие
     # артикля меняет смысл: спрашивают о возрасте вообще, а не о минимальном
     # возрасте в ЭТОЙ школе. Собственные имена и определители не трогаем.
