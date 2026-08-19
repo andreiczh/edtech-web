@@ -191,3 +191,34 @@ export async function sendDispute(
   }
   return { ok: false, error: httpErrorMessage(res.status, detail) }
 }
+
+export interface WeakWord {
+  word: string
+  p_norm: number
+  ord: number
+}
+
+/**
+ * Слова, которые звук подтвердил слабее всего, — «переслушай эти».
+ *
+ * Отдельным запросом, а не в разборе: замер идёт фоном и стоит на бесплатном
+ * хостинге около 19 секунд, а балл ученик ждёт 2-6. Поэтому блок дорисовывается
+ * позже, когда числа доедут; до тех пор экран выглядит как раньше.
+ *
+ * НА БАЛЛ НЕ ВЛИЯЕТ — это совет, а не оценка. Порог, отделяющий ошибку
+ * произношения от акцента, ещё не выведен на живой речи, и пока его нет,
+ * снимать за это баллы нельзя.
+ */
+export async function fetchWeakWords(variantId: string): Promise<WeakWord[]> {
+  try {
+    const res = await fetch(
+      `${BACKEND}/pron/weakest?variant=${encodeURIComponent(variantId)}`,
+      { headers: { 'X-Device': identityId() } },
+    )
+    if (!res.ok) return []
+    const data = (await res.json()) as { words?: WeakWord[] }
+    return data.words ?? []
+  } catch {
+    return []
+  }
+}

@@ -17,11 +17,12 @@
  *     фонетические ошибки промпты прямо запрещают;
  *   - «мини тренировки» — такой фичи в продукте пока нет.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { Disagree } from '../components/Disagree'
 import type { DisputeContext } from '../ege2/dispute'
-import { type Delivery, type TaskFeedback } from '../ege2/feedback'
+import { type Delivery, type TaskFeedback, type WeakWord, fetchWeakWords }
+  from '../ege2/feedback'
 import { TASKS, type TaskId, type TaskVariant } from '../ege2/tasks'
 import { highlightPieces } from '../ege2/selection'
 
@@ -102,14 +103,67 @@ function DeliveryBlock({ d }: { d?: Delivery }) {
   )
 }
 
+/**
+ * «Переслушай эти слова» — то немногое, что фонемный замер показывает ученику.
+ *
+ * Замер идёт ФОНОМ и приезжает позже балла, поэтому блока сначала нет, а потом
+ * он дорисовывается. Пустой ответ — норма: сбор мог быть занят другой записью.
+ *
+ * На балл это не влияет и влиять не будет, пока нет записей, размеченных
+ * человеком: числа говорят, где звук слабее, но не говорят, ошибка это или
+ * акцент. Совет безвреден при любом ответе, снятый балл — нет.
+ */
+function WeakWords({ variantId }: { variantId?: string }) {
+  const [words, setWords] = useState<WeakWord[]>([])
+
+  useEffect(() => {
+    if (!variantId) return
+    let alive = true
+    // Две попытки: замер запускается после ответа и занимает секунды.
+    const tries = [1500, 12000]
+    const timers = tries.map((ms) =>
+      setTimeout(() => {
+        void fetchWeakWords(variantId).then((w) => {
+          if (alive && w.length) setWords(w)
+        })
+      }, ms),
+    )
+    return () => {
+      alive = false
+      timers.forEach(clearTimeout)
+    }
+  }, [variantId])
+
+  if (!words.length) return null
+  return (
+    <div className="card2 resblock">
+      <p className="resblock__title">Переслушай эти слова</p>
+      <div className="weakwords">
+        {words.map((w) => (
+          <span key={`${w.ord}-${w.word}`} className="weakwords__item">
+            {w.word}
+          </span>
+        ))}
+      </div>
+      <p className="resnote">
+        Здесь звук меньше всего похож на то, что написано в тексте. Это подсказка
+        для тренировки, а <b>не ошибка и на балл она не влияет</b>: отличить
+        неверный звук от акцента система пока не умеет.
+      </p>
+    </div>
+  )
+}
+
 function ReadingResult({
   feedback,
   reference,
   dispute,
+  variantId,
 }: {
   feedback: TaskFeedback
   reference: string
   dispute: DisputeContext
+  variantId?: string
 }) {
   const pieces = useMemo(
     () => highlightPieces(reference, feedback.errors ?? []),
@@ -180,6 +234,7 @@ function ReadingResult({
       </div>
 
       <DeliveryBlock d={feedback.delivery} />
+      <WeakWords variantId={variantId} />
 
       {errors.length > 0 && (
         <div className="card2 resblock">
@@ -450,7 +505,8 @@ export function ResultView({
       )}
 
       {taskId === 39 && reference && (
-        <ReadingResult feedback={feedback} reference={reference} dispute={dispute} />
+        <ReadingResult feedback={feedback} reference={reference} dispute={dispute}
+                       variantId={variantId} />
       )}
       {taskId === 40 && (
         <ItemsResult feedback={feedback} label="ВОПРОС" dispute={dispute} />

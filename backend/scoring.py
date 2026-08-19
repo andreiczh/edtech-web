@@ -191,6 +191,18 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
         criteria, errors = [], []
         for i, it in enumerate(items[:top]):
             ok = bool(it.get("accepted"))
+            # Формы, которые методичка отвергает ПОИМЁННО, решает КОД: замер на
+            # пяти работах практикума 19.08.2026 дал 16 вердиктов из 20, и все
+            # четыре промаха — в пользу ученика, ровно на разобранных примерах
+            # («Where is your location?», «What is minimum age for students?»).
+            # Правила были в промпте, модель исполняла их через раз — третий
+            # случай в проекте, когда механическое правило переезжает в код.
+            if ok and is_dialogue:
+                why = ege_scoring.question_rejected(str(it.get("heard") or ""))
+                if why:
+                    ok = False
+                    it = {**it, "accepted": False, "reason": why}
+                    print(f"[40] вопрос {i + 1} отклонён кодом: {why}")
             heard = str(it.get("heard") or "").strip()
             correction = str(it.get("model") or "").strip()
             # Цитата, которой нет в расшифровке, до экрана НЕ доезжает: на

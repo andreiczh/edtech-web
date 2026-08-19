@@ -859,3 +859,61 @@ def score_reading(diff: dict, misread_words: int) -> tuple[int, str]:
     if misread_words:
         return 1, f"текст прочитан, замечено {misread_words} оговорки — на балл это не влияет"
     return 1, "текст прочитан полностью и без пропусков"
+
+
+# Формы вопросов, которые методичка ФИПИ (задание 2) отвергает ПОИМЁННО.
+# Правила уже были в промпте, но модель прощала их через раз: замер на пяти
+# работах практикума 19.08.2026 дал 16 вердиктов из 20, и все четыре промаха —
+# в пользу ученика, на разобранных в методичке примерах. Принцип проекта: если
+# правило механическое, исполняет его КОД, а не суждение модели.
+_Q_MEANINGLESS = (
+    # «место» вместо объекта: спрашивается, где находится ваше местоположение
+    re.compile(r"\bwhere\s+is\s+(the|your|their)\s+location\b", re.I),
+    re.compile(r"\bhow\s+much\s+is\s+the\s+price\b", re.I),
+    re.compile(r"\bhow\s+long\s+are\s+the\s+opening\s+hours\b", re.I),
+    re.compile(r"\bis\s+(the\s+)?admission\s+fee\s+free\b", re.I),
+    re.compile(r"\bcan\s+i\s+get\s+the\s+admission\s+fee\b", re.I),
+)
+# Просьба вместо прямого вопроса.
+_Q_REQUEST = (
+    re.compile(r"^\s*what\s+about\b", re.I),
+    re.compile(r"\bcould\s+you\s+tell\s+me\s+about\b", re.I),
+    re.compile(r"^\s*tell\s+me\s+about\b", re.I),
+)
+# Страдательный залог переворачивает смысл: спрашивают, чему учат САМОГО
+# ученика, а не что преподают в школе («What kind of dances are you taught?»).
+_Q_PASSIVE = re.compile(r"\bare\s+you\s+(taught|offered|given|provided)\b", re.I)
+# Определители, после которых артикль не нужен.
+_DETERMINERS = {"the", "a", "an", "your", "their", "his", "her", "its", "my",
+                "our", "this", "that", "these", "those", "any", "some"}
+
+
+def question_rejected(text: str) -> str:
+    """Почему вопрос не принимается по методичке — или пустая строка.
+
+    Только те случаи, которые методичка разбирает ПОИМЁННО и которые видны в
+    тексте без суждения. Спорное здесь не решается: сомнительный вопрос
+    проходит и достаётся модели.
+    """
+    q = str(text or "").strip()
+    if not q:
+        return ""
+    for rx in _Q_MEANINGLESS:
+        if rx.search(q):
+            return "вопрос бессмысленный: методичка разбирает эту формулировку отдельно"
+    for rx in _Q_REQUEST:
+        if rx.search(q):
+            return "это просьба, а не прямой вопрос"
+    if _Q_PASSIVE.search(q):
+        return "страдательный залог переворачивает смысл вопроса"
+    # «What is minimum age for students?», «What is tutation fee?» — отсутствие
+    # артикля меняет смысл: спрашивают о возрасте вообще, а не о минимальном
+    # возрасте в ЭТОЙ школе. Собственные имена и определители не трогаем.
+    m = re.match(r"^\s*what(?:'s|\s+is)\s+([a-z']+)", q, re.I)
+    if m:
+        first = m.group(1).lower()
+        raw = re.match(r"^\s*what(?:'s|\s+is)\s+([A-Za-z']+)", q)
+        proper = bool(raw and raw.group(1)[:1].isupper())
+        if first not in _DETERMINERS and not proper:
+            return "пропущен артикль, и это меняет смысл вопроса"
+    return ""

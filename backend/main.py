@@ -1295,6 +1295,27 @@ async def admin_shot(shot_id: str, key: str | None = None,
     })
 
 
+@app.get("/pron/weakest")
+async def pron_weakest(variant: str = "", x_device: str | None = Header(None),
+                       x_admin_key: str | None = Header(None)):
+    """«Переслушай эти слова» — единственное, что фонемный замер показывает ученику.
+
+    Отдельной ручкой, а не в ответе разбора, и это осознанно: замер идёт фоном
+    и стоит ~19 секунд на бесплатном Render, а ученик ждёт балл 2-6 секунд.
+    Прибавить замер к ожиданию значило бы испортить главное ради добавочного.
+    Экран забирает слова, когда они появятся, и дорисовывает блок.
+
+    НА БАЛЛ ЭТО НЕ ВЛИЯЕТ и влиять не будет, пока не появятся записи, размеченные
+    человеком: распределение говорит, где звук слабее, но не говорит, ошибка это
+    или акцент. Совет «переслушай» безвреден при любом ответе, снятый балл — нет.
+    """
+    await _require_account(x_device, x_admin_key)
+    if not (_storage_ok and x_device and variant):
+        return {"words": []}
+    words = await asyncio.to_thread(storage.pron_weakest, x_device, variant)
+    return {"words": words, "note": "на балл не влияет"}
+
+
 @app.get("/admin/disputes/{did}/pron")
 async def admin_dispute_pron(did: str, x_admin_key: str | None = Header(None)):
     """Арбитр спора о чтении: что слышал ЗВУК в том самом прогоне.

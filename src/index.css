@@ -1824,3 +1824,20 @@ body {
   font-size: 12px;
   color: var(--text-dim);
 }
+
+/* «Переслушай эти слова» — слабые места произношения из фонемного замера.
+   Намеренно НЕ красный: это не ошибка и на балл не влияет, а подсказка. */
+.weakwords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+.weakwords__item {
+  font-size: 14px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(120, 140, 220, 0.16);
+  border: 1px solid rgba(120, 140, 220, 0.35);
+}

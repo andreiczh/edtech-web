@@ -358,6 +358,98 @@ def run_interviews(client: OpenAI) -> tuple[int, list[str]]:
     return agree_total, notes
 
 
+# --------------------------------------------------------------------------
+# Задание 2 (наше 40): пять работ из практикума методички ФИПИ
+# --------------------------------------------------------------------------
+# Раздел II, тема 2 методички 2024 г.: скрипты ответов участников ЕГЭ с
+# вердиктом эксперта ПО КАЖДОМУ вопросу («+» принят, «-» не принят) и итоговым
+# баллом. Двадцать размеченных вердиктов — первый калибровочный набор для
+# задания 40: до 19.08.2026 его точность не мерилась вовсе.
+#
+# Скрипт склеен в одну строку ровно так, как приходит с распознавания: без
+# нумерации и разметки, чтобы замер шёл по тому же входу, что и бой.
+
+DIALOGUES = [
+    {
+        "name": "9213 фотостудия",
+        "ad": "A professional photographer for you!",
+        "points": ["location of the studio", "historical costumes",
+                   "professional make-up", "the cost of an hour's work"],
+        "script": ("Where is your studio located? There are historical costumes? "
+                   "What professional make-up do you offer? "
+                   "How much does the cost of an hour's work?"),
+        # −: вопрос 2 построен как утверждение, вопрос 4 сломан грамматически.
+        "expected_marks": [1, 0, 1, 0],
+    },
+    {
+        "name": "5471 каток",
+        "ad": "Visit our new ice rink!",
+        "points": ["location", "opening hours", "discounts for students",
+                   "coach for beginners"],
+        "script": ("Where is the ice rink located? What are the opening hours of "
+                   "the ice rink? Do you have any discounts for students? "
+                   "Is there an opportunity to hire a coach for beginners?"),
+        "expected_marks": [1, 1, 1, 1],
+    },
+    {
+        "name": "7901 выходные на озере",
+        "ad": "Family weekend on the lake!",
+        "points": ["location", "accommodation",
+                   "price for the weekend for a family of three",
+                   "fishing equipment rental"],
+        "script": ("Where is the place for family weekend located? "
+                   "Which accommodation do you offer? What is the price for the "
+                   "weekend for a family of three? Can I rent the fishing equipment?"),
+        # −: «Which» вместо «What» — неверное вопросительное слово.
+        "expected_marks": [1, 0, 1, 1],
+    },
+    {
+        "name": "8028 автошкола",
+        "ad": "The best driving school in the city!",
+        "points": ["location", "morning classes", "minimum age for students",
+                   "tuition fee"],
+        "script": ("Where is your driving school located? Do you have morning "
+                   "classes? What is minimum age for students? What is tutation fee?"),
+        # −: в обоих отсутствие артикля МЕНЯЕТ смысл; в четвёртом вдобавок
+        # фонетическая ошибка (tutation), одной её хватило бы на ноль.
+        "expected_marks": [1, 1, 0, 0],
+    },
+    {
+        "name": "0532 школа танцев",
+        "ad": "A new dance school now in your area!",
+        "points": ["location", "dances taught", "special clothes", "evening classes"],
+        "script": ("Where is your location? What kind of dances are you taught? "
+                   "Must you have special clothes for dances? "
+                   "Do you have any evening classes?"),
+        # −: «Where is your location?» бессмысленно, «are you taught» переворачивает
+        # смысл (учат ВАС), «Must you have» — не тот модальный смысл.
+        "expected_marks": [0, 0, 0, 1],
+    },
+]
+
+
+def run_dialogues(client: OpenAI) -> tuple[int, list[str]]:
+    print("\nЗАДАНИЕ 2 — вопросы к объявлению (по 1 баллу за вопрос, максимум 4)\n")
+    agree_total = 0
+    notes = []
+    for case in DIALOGUES:
+        obs = ask(client, ege_prompts.dialogue_prompt(case["ad"], case["points"]),
+                  case["script"], 900)
+        ege_scoring.flag_suspicious("dialogue", obs, case["script"])
+        fb = scoring._score_feedback("dialogue", obs, {"points": case["points"]})
+        marks = [c["score"] for c in fb["criteria"]][:4]
+        marks += [0] * (4 - len(marks))
+        want = case["expected_marks"]
+        agree = sum(1 for a, b in zip(marks, want) if a == b)
+        agree_total += agree
+        flag = "==" if marks == want else ("~~" if agree >= 3 else "!!")
+        print(f"{flag} {case['name']}: наш {marks} = {sum(marks)}/4 | "
+              f"эксперты {want} = {sum(want)}/4 | совпало вердиктов: {agree}/4")
+        if agree < 3:
+            notes.append(f"{case['name']}: совпало только {agree}/4 вердиктов")
+    return agree_total, notes
+
+
 def main() -> int:
     if not os.environ.get("LLM_API_KEY"):
         print("Нет LLM_API_KEY в backend/.env — живую сверку запустить нельзя.")
@@ -382,16 +474,18 @@ def main() -> int:
     print(f"Сверка живого разбора с экспертами ФИПИ. Модель: {MODEL}, "
           f"прогонов: {runs}\n")
 
-    exacts, closes, agrees, notes = [], [], [], []
+    exacts, closes, agrees, d_agrees, notes = [], [], [], [], []
     for r in range(runs):
         if runs > 1:
             print(f"\n{'─' * 70}\nПРОГОН {r + 1} из {runs}\n{'─' * 70}")
         exact, close, n1 = run_monologues(client, recheck)
         agree, n2 = run_interviews(client)
+        d_agree, n3 = run_dialogues(client)
+        d_agrees.append(d_agree)
         exacts.append(exact)
         closes.append(close)
         agrees.append(agree)
-        notes += n1 + n2
+        notes += n1 + n2 + n3
 
     def avg(xs: list[int]) -> float:
         return sum(xs) / len(xs)
@@ -402,9 +496,11 @@ def main() -> int:
           f"(по прогонам {exacts}), в пределах ±1 балла {avg(closes):.1f}/{total} "
           f"(по прогонам {closes})")
     print(f"Интервью: совпало {avg(agrees):.1f}/10 вердиктов (по прогонам {agrees})")
+    print(f"Вопросы (задание 40): совпало {avg(d_agrees):.1f}/20 вердиктов (по прогонам {d_agrees})")
     if runs > 1:
         print(f"Разброс между прогонами: монолог ±1 балл "
-              f"{min(closes)}-{max(closes)}, интервью {min(agrees)}-{max(agrees)}. "
+              f"{min(closes)}-{max(closes)}, интервью {min(agrees)}-{max(agrees)}, "
+              f"вопросы {min(d_agrees)}-{max(d_agrees)}. "
               "Правка, меняющая меньше этого, — не улучшение, а шум.")
     if notes:
         print("\nРасхождения, на которые стоит смотреть:")
@@ -412,7 +508,8 @@ def main() -> int:
             print("  -", n)
     # Порог намеренно мягкий: требуем не идеала, а отсутствия перекоса. Судим
     # по среднему — одиночный неудачный прогон не должен объявлять регресс.
-    ok = avg(closes) >= total - 1.5 and avg(agrees) >= 8
+    ok = (avg(closes) >= total - 1.5 and avg(agrees) >= 8
+          and avg(d_agrees) >= 17)
     print("\n" + ("ИТОГ: разбор держится рядом с экспертами." if ok
                   else "ИТОГ: расхождение великовато, промпты надо править."))
     return 0 if ok else 1

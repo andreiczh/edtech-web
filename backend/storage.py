@@ -1294,3 +1294,31 @@ def overview(month: str, msk_today: str) -> dict:
         "latency": latency,
         "results": results,
     }
+
+
+def pron_weakest(student_id: str, variant: str, limit: int = 5,
+                 threshold: float = 0.05) -> list[dict]:
+    """Самые слабые слова ПОСЛЕДНЕГО замера ученика по этому варианту.
+
+    Для экрана «переслушай эти слова». Берём только forced (эталон известен) и
+    только spoken=1: непрочитанное — это пропуск, он виден в разборе отдельно и
+    к произношению отношения не имеет.
+
+    Порог 0.05 и потолок в пять слов — не вкус, а границы методички ФИПИ по
+    заданию 1: «не более 5 фонетических ошибок». На 748 живых словах прода
+    (замер 19.08.2026) он метит в среднем 4.3 слова на чтение, то есть внутри
+    официальной границы; порог 0.35 пометил бы 8.7 и половину работ увёл за неё.
+    """
+    row = _exec("SELECT created_at FROM pron_samples WHERE student_id=?"
+                " AND variant=? AND (method='forced' OR method IS NULL)"
+                " ORDER BY created_at DESC LIMIT 1",
+                (student_id, variant[:64])).fetchone()
+    if row is None:
+        return []
+    rows = _exec("SELECT word, p_norm, ord FROM pron_samples WHERE student_id=?"
+                 " AND variant=? AND created_at=? AND spoken=1 AND p_norm<?"
+                 " ORDER BY p_norm LIMIT ?",
+                 (student_id, variant[:64], str(row[0]), float(threshold),
+                  int(limit))).fetchall()
+    return [{"word": r[0], "p_norm": round(float(r[1]), 3), "ord": int(r[2])}
+            for r in rows]
