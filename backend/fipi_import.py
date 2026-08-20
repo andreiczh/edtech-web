@@ -115,6 +115,12 @@ def classify(text: str) -> str | None:
     if re.search(r"Task\s*1\.", t) and "read this text to your friend" in t:
         return "reading"
     if re.search(r"Task\s*2\.", t) and "Study the advertisement" in t:
+        # «five direct questions» — формат до 2022 года; в ЕГЭ-2026 вопросов
+        # ЧЕТЫРЕ. Урезать пятый пункт молча нельзя: ученик читает «five»,
+        # а тренажёр спрашивает четыре (найдено 20.08.2026 — 22 таких задания
+        # успели дойти до публикации).
+        if re.search(r"ask\s+five\s+direct", t, re.I):
+            return None
         return "dialogue"
     # Задание 3 (интервью) из банка НЕ берём, хотя формат 2026 у него верный:
     # в HTML лежит только общая инструкция, а сами пять вопросов интервьюер
@@ -418,6 +424,11 @@ def draft_problems(kind: str, payload: dict) -> list[str]:
             out.append(f"пунктов {len(steps)}, а нужно 4")
         if not (payload.get("images") or []):
             out.append("нет картинки объявления")
+        # Старый формат (до 2022) с пятью вопросами: classify такие больше не
+        # пускает, но уже импортированные лежат в базе с урезанными до четырёх
+        # steps — и по числу пунктов выглядят здоровыми.
+        if re.search(r"ask\s+five\s+direct", brief, re.I):
+            out.append("формат до 2022: пять вопросов вместо четырёх")
 
     if kind == "interview":
         if len(payload.get("steps") or []) != 5:
