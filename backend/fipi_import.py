@@ -64,9 +64,31 @@ def _strip_tags(block_html: str) -> str:
     return re.sub(r"\n{2,}", "\n", s).strip()
 
 
+# Декоративный кружок с номером задания («1», «2») ФИПИ вставляет тем же
+# вызовом ShowPictureQ прямо ПЕРЕД словами «Task N.». Для нас это мусор, и
+# мусор дорогой: у чтения он становился images[0] и уезжал в зрение вместо
+# текста (модель отвечала NONE, задание выбрасывалось), у диалога сохранялся
+# вместо самого объявления, причём проверка качества этого не ловила —
+# картинка формально есть. Бьёт по 23 заданиям из 157 (разведка 20.08.2026).
+# Признак бесплатный и надёжный: сразу за вызовом идёт «Task N.».
+_BADGE_AFTER = re.compile(r"^.{0,200}?Task\s*\d", re.S)
+
+
+def _is_badge(block_html: str, call_end: int) -> bool:
+    """Кружок-номер, а не содержимое задания."""
+    tail = _strip_tags(block_html[call_end:call_end + 400])
+    return bool(_BADGE_AFTER.match(tail))
+
+
 def _images(block_html: str) -> list[str]:
     """Пути картинок задания. Ищем и обычные <img>, и вызовы ShowPictureQ."""
-    found = re.findall(r"ShowPictureQ\('([^']+)'\)", block_html)
+    found = []
+    # Кавычки бывают И одинарные, И двойные: три диалога приезжали вообще без
+    # картинки, потому что регулярка знала только одинарные.
+    for m in re.finditer(r"""ShowPictureQ\(\s*['"]([^'"]+)['"]""", block_html):
+        if _is_badge(block_html, m.end()):
+            continue
+        found.append(m.group(1))
     found += re.findall(r'<img[^>]+src="([^"]*xs3qstsrc[^"]*)"', block_html)
     out = []
     for p in found:
@@ -164,7 +186,11 @@ def parse_page(page_html: str) -> list[dict]:
             continue
         # Номер ищем в СЫРОМ блоке: он лежит в панели «СВОЙСТВА ЗАДАНИЯ»,
         # которую _strip_tags намеренно отрезает вместе с метаданными ФИПИ.
-        m = re.search(r"Номер:\s*(?:<[^>]+>\s*)*([0-9A-F]{4,8})", block)
+        # Регистр СМЕШАННЫЙ: у ФИПИ встречаются 47c6Fc, 9ee114, c5914e.
+        # Пока регулярка требовала только заглавные, 13 заданий из 157
+        # выпадали молча — `continue` ниже съедал их без единой записи в лог
+        # (найдено разведкой банка 20.08.2026).
+        m = re.search(r"Номер:\s*(?:<[^>]+>\s*)*([0-9A-Fa-f]{4,8})", block)
         fipi_id = m.group(1) if m else ""
         if not fipi_id:
             continue
@@ -241,7 +267,14 @@ def fetch_page(client, page: int, pagesize: int = 20) -> str:
     `client` — httpx.Client снаружи: так вызывающий сам решает про таймауты,
     проверку сертификата и паузы между запросами.
     """
-    r = client.get(BANK, params={"proj": PROJ, "page": page, "pagesize": pagesize})
+    # search=1 включает фильтрацию, qkind=ILI_STD_FULL оставляет только задания
+    # с развёрнутым ответом. Вся устная часть приезжает ОДНИМ запросом на 2 МБ
+    # вместо двадцати пяти на 18 МБ — чужому серверу легче в девять раз.
+    # По разделу («Говорение») фильтровать НЕЛЬЗЯ: 13 заданий на чтение вслух
+    # размечены у ФИПИ мимо раздела, двенадцать из них — под «грамматику»
+    # (проверено разведкой 20.08.2026).
+    r = client.get(BANK, params={"proj": PROJ, "page": page, "pagesize": pagesize,
+                                 "search": 1, "qkind": "ILI_STD_FULL"})
     r.raise_for_status()
     return r.content.decode("cp1251", errors="replace")
 

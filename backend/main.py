@@ -1565,7 +1565,10 @@ async def admin_fipi_import(body: dict = Body(default={}),
     if _FIPI_JOB["state"] == "running":
         raise HTTPException(status_code=409, detail="Импорт уже идёт.")
     pages = max(1, min(int(body.get("pages") or 25), 40))
-    pagesize = max(10, min(int(body.get("pagesize") or 100), 100))
+    # Потолок 500, а не 100: с фильтром qkind=ILI_STD_FULL вся устная часть
+    # (377 заданий) приезжает ОДНОЙ страницей, и это один запрос вместо
+    # двадцати пяти. Сервер ФИПИ 300 и 500 принимает без урезания.
+    pagesize = max(10, min(int(body.get("pagesize") or 500), 500))
     limit = max(0, int(body.get("limit") or 0))
     asyncio.create_task(asyncio.to_thread(_fipi_import_job, pages, pagesize, limit))
     return {"started": True, "pages": pages, "pagesize": pagesize, "limit": limit}
