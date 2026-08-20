@@ -432,7 +432,22 @@ _INTERVIEW_RULES = (
     "hot this summer.» — REJECTED: «It located» is a grammatical error, and the question "
     "asked about summers in general, not this particular summer.\n"
     "Being strict here is correct: in this task most answers of an average student are "
-    "rejected, and pretending otherwise would mislead the student about the real exam."
+    "rejected, and pretending otherwise would mislead the student about the real exam.\n\n"
+    "THE MARK IS HOLISTIC AND ONE SLIP SINKS THE ANSWER. Fluency does not "
+    "compensate: a long, natural-sounding answer with ONE elementary error is "
+    "still 0. When torn between «sounds fine overall» and «there is a slip», "
+    "the slip wins. Watch specifically for the three slips real examiners "
+    "catch and models forgive:\n"
+    "- a missing linking verb: «my mom always busy», «the weather hot in "
+    "summer» — REJECTED however fluent the rest is;\n"
+    "- subject-verb agreement: «our city need more buses», «he go to school» — "
+    "REJECTED;\n"
+    "- an answer that ignores the QUESTION WORD: asked «how often», answered "
+    "with places; asked about being photographed, answered about taking "
+    "photos; asked «what would you change about X», answered about something "
+    "other than X — REJECTED even when every sentence is grammatical. Before "
+    "accepting, restate to yourself what EXACTLY was asked and check the "
+    "answer addresses that, not a neighbouring topic."
 )
 
 

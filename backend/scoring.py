@@ -203,6 +203,19 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
                     ok = False
                     it = {**it, "accepted": False, "reason": why}
                     print(f"[40] вопрос {i + 1} отклонён кодом: {why}")
+            # Интервью: минимум две ПОЛНЫЕ фразы — счёт ведёт код (замер
+            # 19.08.2026: 25/30, все промахи — зачтённые обрывки). Правило
+            # применяется только к развёрнутой цитате (от шести слов): короткая
+            # может быть усечением модели, и такие уже уходят на второй проход
+            # через flag_suspicious. Отнять балл из-за НАШЕГО усечения нельзя.
+            if ok and not is_dialogue:
+                heard_q = str(it.get("heard") or "")
+                if len(heard_q.split()) >= 6:
+                    why = ege_scoring.answer_too_short(heard_q)
+                    if why:
+                        ok = False
+                        it = {**it, "accepted": False, "reason": why}
+                        print(f"[41] ответ {i + 1} отклонён кодом: {why}")
             heard = str(it.get("heard") or "").strip()
             correction = str(it.get("model") or "").strip()
             # Цитата, которой нет в расшифровке, до экрана НЕ доезжает: на

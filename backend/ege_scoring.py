@@ -924,3 +924,94 @@ def question_rejected(text: str) -> str:
         if first not in _DETERMINERS and not proper:
             return "пропущен артикль, и это меняет смысл вопроса"
     return ""
+
+
+# --------------------------------------------------------------------------
+# Задание 3 (наше 41): счёт полных фраз в ответе
+# --------------------------------------------------------------------------
+# Методичка требует минимум ДВЕ полные фразы и прямо перечисляет, что фразой
+# не является: «Not many», «Sure», «Quite warm», «In the village» — обрывки без
+# сказуемого. Правило стояло в промпте, и модель исполняла его через раз:
+# замер 19.08.2026 на шести работах дал 25 вердиктов из 30, и все пять
+# промахов — в пользу ученика. Пятый случай в проекте, когда механическое
+# правило приходится переносить в КОД.
+#
+# Глаголы уровня A1-A2 плюс связки и модальные: список закрытый и намеренно
+# широкий. Ошибиться здесь можно в две стороны, и они НЕ равноценны: назвать
+# фразой обрывок — мягкость на один ответ, назвать обрывком настоящую фразу —
+# отнятый балл у того, кто ответил верно. Поэтому короткая фраза без глагола
+# из списка считается обрывком, а длинная — фразой ВСЕГДА, даже если глагол
+# нам незнаком.
+_A2_VERBS = {
+    "am", "is", "are", "was", "were", "be", "been", "being", "'s", "'re", "'m",
+    "have", "has", "had", "do", "does", "did", "can", "could", "will", "would",
+    "shall", "should", "may", "might", "must", "need", "used",
+    "like", "likes", "liked", "love", "loves", "loved", "hate", "hates",
+    "prefer", "prefers", "preferred", "want", "wants", "wanted", "think",
+    "thinks", "thought", "know", "knows", "knew", "live", "lives", "lived",
+    "go", "goes", "went", "come", "comes", "came", "get", "gets", "got",
+    "make", "makes", "made", "take", "takes", "took", "give", "gives", "gave",
+    "see", "sees", "saw", "read", "reads", "spend", "spends", "spent",
+    "play", "plays", "played", "study", "studies", "studied", "work", "works",
+    "worked", "help", "helps", "helped", "enjoy", "enjoys", "enjoyed",
+    "visit", "visits", "visited", "travel", "travels", "travelled", "traveled",
+    "watch", "watches", "watched", "listen", "listens", "eat", "eats", "ate",
+    "drink", "drinks", "buy", "buys", "bought", "find", "finds", "found",
+    "feel", "feels", "felt", "become", "becomes", "became", "seem", "seems",
+    "look", "looks", "looked", "say", "says", "said", "tell", "tells", "told",
+    "ask", "asks", "asked", "answer", "answers", "start", "starts", "started",
+    "finish", "finishes", "learn", "learns", "learned", "learnt", "try",
+    "tries", "tried", "keep", "keeps", "kept", "let", "put", "puts", "run",
+    "runs", "ran", "walk", "walks", "walked", "swim", "swims", "swam",
+    "remember", "remembers", "choose", "chooses", "chose", "believe",
+    "believes", "hope", "hopes", "wish", "wishes", "consider", "considers",
+    "cost", "costs", "last", "lasts", "depend", "depends", "improve",
+    "improves", "develop", "develops", "teach", "teaches", "taught",
+}
+# Короче этого фраза без знакомого глагола считается обрывком. Пять токенов —
+# порог из самих примеров методички: «Somewhere far from big cities» (пять
+# слов) она называет неполным предложением.
+_FRAGMENT_MAX = 5
+
+
+def count_phrases(answer: str) -> int:
+    """Сколько ПОЛНЫХ фраз в ответе ученика (методичка, задание 3).
+
+    Фразой считается предложение со сказуемым. Обрывки («Quite warm»,
+    «In the village», «Joan Rowling») не в счёт — методичка перечисляет их
+    поимённо. Повтор той же фразы второй фразой не становится.
+    """
+    text = re.sub(r"\s+", " ", str(answer or "")).strip()
+    if not text:
+        return 0
+    seen: set[str] = set()
+    total = 0
+    for raw in re.split(r"[.!?]+", text):
+        words = re.findall(r"[A-Za-z']+", raw)
+        if not words:
+            continue
+        low = [w.lower() for w in words]
+        has_verb = any(w in _A2_VERBS for w in low) or any(
+            w.endswith("'s") or w.endswith("'re") or w.endswith("'m") for w in low)
+        if len(words) <= _FRAGMENT_MAX and not has_verb:
+            continue                      # обрывок
+        key = " ".join(low)
+        if key in seen:
+            continue                      # та же фраза дважды — одна фраза
+        seen.add(key)
+        total += 1
+    return total
+
+
+def answer_too_short(answer: str) -> str:
+    """Причина отказа по объёму — или пустая строка.
+
+    Отдельной функцией, а не проверкой на месте: причина уезжает ученику на
+    экран, и она обязана быть человеческой.
+    """
+    n = count_phrases(answer)
+    if n == 0:
+        return "в ответе нет ни одной полной фразы — только обрывки"
+    if n == 1:
+        return "нужно минимум две полные фразы, здесь одна"
+    return ""

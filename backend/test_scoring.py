@@ -310,3 +310,40 @@ check(scoring.FALLBACK_MONOLOGUE_BRIEF[:20] in p_mono,
 print("\nВсе проверки прошли: сборка разбора." if failed == 0
       else f"\nПРОВАЛЕНО проверок: {failed}")
 sys.exit(0 if failed == 0 else 1)
+
+# ------------------------------------------------ интервью: счёт фраз кодом
+# Замер 19.08.2026: 25/30 вердиктов, все промахи — зачтённые обрывки. Счёт
+# полных фраз переехал в код (шестое механическое правило).
+
+PHRASES = [
+    ("In Troitsk. It's a part of Moscow. Quite warm.", 1),
+    ("It's green. There is rivers.", 2),
+    ("I live with my parents. I've got an elder sister called Masha.", 2),
+    ("Somewhere far from big cities. Maybe on the Maldives.", 0),
+    ("Joan Rowling. I like her stories very much.", 1),
+    # Эксперт читает двояко («два неполных» или «неверная форма») — в обоих
+    # чтениях меньше двух полных фраз, вердикт одинаковый.
+    ("Quite big. Many animals living here.", 0),
+    ("Kaluga is an industrial city. It is famous for the State Space Museum.", 2),
+]
+for text, want in PHRASES:
+    got = ege_scoring.count_phrases(text)
+    check(got == want, f"фразы: {text[:44]}… = {want}", f"насчитано {got}")
+
+check(ege_scoring.answer_too_short("In Troitsk. Quite warm.") != "",
+      "обрывочный ответ получает человеческую причину отказа")
+check(ege_scoring.answer_too_short(
+    "I live in Moscow. It is a big city.") == "",
+      "две полные фразы проходят без придирок")
+
+fb_iv = scoring._score_feedback("interview", {"answers": [
+    {"accepted": True, "heard": "In Troitsk. It's a part of Moscow. Quite warm."},
+    {"accepted": True, "heard": "I live with my parents. I've got an elder sister called Masha."},
+    {"accepted": True, "heard": "Somewhere far from big cities. Maybe on the Maldives."},
+    {"accepted": True, "heard": "I am"},
+    {"accepted": False, "heard": ""},
+]}, {"questions": ["a", "b", "c", "d", "e"]})
+marks_iv = [c["score"] for c in fb_iv["criteria"]]
+check(marks_iv == [0, 1, 0, 1, 0],
+      "интервью: обрывки валит код, усечённые цитаты не тронуты",
+      f"вердикты {marks_iv}")
