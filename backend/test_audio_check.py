@@ -126,6 +126,45 @@ check("длинная РЕЧЬ с парой слов — по-прежнему 
 check("темп считается от секунд речи, а не от длины файла",
       abs(audio_check.speech_seconds(task41) - 12.0) < 0.01)
 
+# --- шумный микрофон (20.08.2026, архив ФИПИ, работа 4596) ---------------
+#
+# Пол микрофона 0.03 — ВЫШЕ абсолютного порога громкости 0.01, и до починки
+# вся запись считалась речью: 29 слов на 79 «секунд речи» = 22 сл/мин, и
+# здоровый ответ на №40 отвергался как сбой распознавания. Порог для темпа
+# теперь поднимается над шумом (медиана кадров × множитель).
+def noisy_dialogue(seconds: float, bursts: int) -> np.ndarray:
+    """Шумная комната; ученик коротко говорит bursts раз, остальное — паузы."""
+    out = noise(seconds, 0.03)
+    step = int(SR * seconds) // bursts
+    for i in range(bursts):
+        s = i * step
+        out[s: s + SR * 3] += rng.normal(0, 0.12, SR * 3)
+    return out
+
+noisy40 = audio_check.inspect(wav(noisy_dialogue(80.0, 4)), ".wav")
+check("шумный микрофон: паузы не считаются речью",
+      noisy40["speech_ratio_robust"] < 0.3 < noisy40["speech_ratio"],
+      f"({noisy40})")
+check("№40 с шумным микрофоном — не провал распознавания",
+      not audio_check.recognition_failed(noisy40, " ".join(["word"] * 27)))
+check("шумный микрофон не превращается в «тишину»",
+      audio_check.silence_reason(noisy40) is None)
+check("а настоящий сбой на шумном микрофоне ловится: речи много, слов два",
+      audio_check.recognition_failed(noisy40, "two words"))
+
+# Сплошная речь с тем же шумом пола: медиана внутри речи, секунды речи
+# занижаются — темп только растёт, ложного отказа нет.
+noisy_read = audio_check.inspect(
+    wav(speech(60.0) * 0.4 + noise(60.0, 0.03)), ".wav")
+check("сплошное чтение с шумным микрофоном — не провал",
+      not audio_check.recognition_failed(noisy_read, " ".join(["word"] * 140)),
+      f"({noisy_read})")
+
+# Старый снимок info без нового поля не роняет проверку.
+check("info без speech_ratio_robust работает по-старому",
+      abs(audio_check.speech_seconds({"ok": True, "seconds": 10.0,
+                                      "speech_ratio": 0.5}) - 5.0) < 0.01)
+
 # --- мусор на входе -------------------------------------------------------
 check("битые байты не роняют осмотр",
       audio_check.inspect(b"not audio at all", ".webm").get("ok") is False)

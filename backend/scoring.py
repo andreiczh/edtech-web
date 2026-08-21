@@ -46,7 +46,8 @@ def _feedback_prompt(kind: str, payload: dict, transcript: str,
     if kind == "dialogue":
         points = [str(p) for p in (payload.get("points") or [])]
         ad = str(payload.get("ad") or "")
-        return ege_prompts.dialogue_prompt(ad, points) + extra, {"points": points}
+        return ege_prompts.dialogue_prompt(ad, points) + extra, {"points": points,
+                                                                 "ad": ad}
     if kind == "interview":
         questions = [str(q) for q in (payload.get("questions") or [])]
         return ege_prompts.interview_prompt(questions) + extra, {"questions": questions}
@@ -198,11 +199,24 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
             # Правила были в промпте, модель исполняла их через раз — третий
             # случай в проекте, когда механическое правило переезжает в код.
             if ok and is_dialogue:
-                why = ege_scoring.question_rejected(str(it.get("heard") or ""))
+                why = ege_scoring.question_rejected(str(it.get("heard") or ""),
+                                                    str(ctx.get("ad") or ""))
                 if why:
                     ok = False
                     it = {**it, "accepted": False, "reason": why}
                     print(f"[40] вопрос {i + 1} отклонён кодом: {why}")
+            # Обратное направление: модель отклонила за «повествовательный
+            # порядок слов», а вопрос начинается со вспомогательного глагола —
+            # причина самоопровергается, отказ снят (работа 0487 из архива
+            # ФИПИ: «Do you have opportunity...» шёл как «утверждение»).
+            # Пункт с выдуманной цитатой не спасаем: неизвестно, что звучало.
+            if (ok is False and is_dialogue and not it.get("quote_missing")
+                    and ege_scoring.rejection_refuted(
+                        str(it.get("heard") or ""), str(it.get("reason") or ""))):
+                ok = True
+                it = {**it, "accepted": True, "reason": ""}
+                print(f"[40] отказ по вопросу {i + 1} снят кодом: "
+                      f"порядок слов вопросительный")
             # Интервью: минимум две ПОЛНЫЕ фразы — счёт ведёт код (замер
             # 19.08.2026: 25/30, все промахи — зачтённые обрывки). Правило
             # применяется только к развёрнутой цитате (от шести слов): короткая

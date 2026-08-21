@@ -205,3 +205,187 @@ READING_AUDIO = [
 def reading_cases() -> list[dict]:
     """Записи чтения, для которых файл реально лежит на диске."""
     return [c for c in READING_AUDIO if os.path.exists(path(c["audio"]))]
+
+
+# --------------------------------------------------------------------------
+# Задание 2 (наше 40): четыре прямых вопроса к объявлению.
+# Вердикты экспертов — методичка 2026, стр. 62-69, поимённо по вопросам.
+# Тексты заданий в PDF нарисованы картинками; расшифрованы вручную 21.08.2026
+# (страницы 63-69), у 9213 текст лежал в самой странице.
+# --------------------------------------------------------------------------
+DIALOGUE_AUDIO = [
+    {
+        "work": "0051", "audio": "task2_7_0051.ogg",
+        # Вопрос 1 отклонён: «a grocery store» вместо «the» — вопрос не о ТОМ
+        # магазине. Наш конвейер этого НЕ ВИДИТ: Voxtral нормализует артикль
+        # в «the» (проверено 21.08.2026 прямым запросом) — ограничение STT.
+        "expert": [0, 1, 1, 1],
+        "ad": "Freshness you can taste!",
+        "points": ["location", "opening hours", "kind of fruits sold",
+                   "delivery service"],
+    },
+    {
+        "work": "4596", "audio": "task2_8_4596.ogg",
+        "expert": [1, 1, 1, 1],
+        "ad": "The best clinic in town!",
+        "points": ["location", "public transport", "dentist",
+                   "family discounts"],
+    },
+    {
+        "work": "5563", "audio": "task2_9_5563.ogg",
+        # Вопрос 1 отклонён: последняя попытка не закончена («Where is…?»).
+        # Фальстарт и обрыв Voxtral вырезает — тоже невидимо для нас.
+        "expert": [0, 1, 1, 1],
+        "ad": "All the flowers of the world!",
+        "points": ["location", "cost of delivery",
+                   "special occasion decorations", "potted flowers"],
+    },
+    {
+        "work": "0487", "audio": "task2_10_0487.mp3",
+        # Вопрос 4 отклонён: лексическая ошибка «employ a coach».
+        "expert": [1, 1, 1, 0],
+        "ad": "Join our volleyball club!",
+        "points": ["location", "special clothes", "opportunity to play inside",
+                   "coach for beginners"],
+    },
+    {
+        "work": "3775", "audio": "task2_11_3775.mp3",
+        "expert": [1, 1, 1, 1],
+        "ad": "Join our hockey club!",
+        "points": ["location", "minimum age", "type of ice rink",
+                   "special equipment needed"],
+    },
+    {
+        "work": "9377", "audio": "task2_12_9377.mp3",
+        # Вопрос 3 отклонён: «in that motorcycle club» — вопрос о ДРУГОМ клубе,
+        # сбой коммуникации. С 21.08.2026 это ловит код
+        # (ege_scoring.question_rejected, правило «that + предмет объявления»).
+        "expert": [1, 1, 0, 1],
+        "ad": "Welcome to our motorcycle club!",
+        "points": ["location", "special clothes", "coach", "competitions"],
+    },
+    {
+        "work": "9213", "audio": "task2_13_9213.mp3",
+        # Вопрос 2: «There are historical costumes?» — повествовательный
+        # порядок; вопрос 4: «How much does the cost…» — сломанная форма.
+        "expert": [1, 0, 1, 0],
+        "ad": "A professional photographer for you!",
+        "points": ["location of the studio", "historical costumes",
+                   "professional make-up", "the cost of an hour's work"],
+    },
+]
+
+
+# --------------------------------------------------------------------------
+# Задание 4 (наше 42): монолог-голосовое. Вердикты (К1, К2, К3) — методичка
+# 2026, стр. 93-113. Шкала 2026: 4+3+3=10. У записи task4_19_9213 разбора в
+# методичке НЕТ (ЗАДАНИЕ 19 отсутствует) — в манифест не входит.
+#
+# В brief важна ФОРМА глагола мнения: у 5563 план требует «you prefer»
+# (эксперт валит «I'd prefer» как неверную форму), у остальных — «you'd
+# prefer». Перепутать — сломать правило verb_form_matches.
+# --------------------------------------------------------------------------
+_MONO_BRIEF = (
+    "Task 4. Imagine that you and your friend are doing a school project "
+    "“{topic}”. You have found some photos to illustrate it but for "
+    "technical reasons you cannot send them now. Leave a voice message to "
+    "your friend explaining your choice of the photos and sharing some ideas "
+    "about the project. In 2.5 minutes be ready to: explain the choice of the "
+    "illustrations for the project by briefly describing them and noting the "
+    "differences; mention the advantages (1–2) of the two {thing}; "
+    "mention the disadvantages (1–2) of the two {thing}; express your "
+    "opinion on the subject of the project – which of these {thing} "
+    "{prefer} and why. You will speak for not more than 3 minutes "
+    "(12–15 sentences). You have to talk continuously."
+)
+
+
+def _mono_brief(topic: str, thing: str, prefer: str = "you’d prefer") -> str:
+    return _MONO_BRIEF.format(topic=topic, thing=thing, prefer=prefer)
+
+
+MONOLOGUE_AUDIO = [
+    {
+        "work": "5563", "audio": "task4_13_5563.ogg",
+        # Аспекты эксперта: ±, −, ±, −  →  К1=0, и нуль обнуляет всё.
+        "expert": (0, 0, 0),
+        "brief": _mono_brief("The games people like", "types of games",
+                             "you prefer"),
+        "photoFacts": [
+            "A girl is playing video games alone at home",
+            "Two people, probably a mother and her daughter, are playing "
+            "chess (a table game) together at home",
+        ],
+    },
+    {
+        "work": "4596", "audio": "task4_14_4596.ogg",
+        # Аспекты: +, ±, ±, ±  →  К1=2; логика 3 ошибки → К2=2; язык → К3=2.
+        "expert": (2, 2, 2),
+        "brief": _mono_brief("Ideal weekend", "ways of spending the weekend"),
+        "photoFacts": [
+            "A woman wearing headphones is listening to music and relaxing "
+            "in her living room with a cat at her side",
+            "Three women are riding bicycles along a road in the countryside",
+        ],
+    },
+    {
+        "work": "0051", "audio": "task4_15_0051.ogg",
+        # Аспекты: −, ±, +, ±  →  К1=1. Работа у самого обрыва: качнуть один
+        # вердикт — и вся оценка падает с 4 до 0 (см. DECISIONS §6.9).
+        "expert": (1, 2, 1),
+        "brief": _mono_brief("The best moments with grandparents",
+                             "ways of spending time with grandparents"),
+        "photoFacts": [
+            "A boy is playing chess with his grandfather at home; the "
+            "grandmother and a young woman who may be the mother or sister "
+            "are nearby",
+            "Grandparents and children are walking together outdoors in the "
+            "mountains in winter",
+        ],
+    },
+    {
+        "work": "5471", "audio": "task4_16_5471.mp3",
+        # Все аспекты +, организация 3, но 11 языковых ошибок → К3=0.
+        "expert": (4, 3, 0),
+        "brief": _mono_brief("Hobbies", "hobbies"),
+        "photoFacts": [
+            "A woman is kneeling on the ground outdoors, planting a young "
+            "tree",
+            "A man is cooking in the kitchen and filming the process with a "
+            "camera",
+        ],
+    },
+    {
+        "work": "3775", "audio": "task4_17_3775.mp3",
+        # Аспекты: ±, ±, −, +  →  К1=1; более 8 языковых ошибок → К3=0.
+        "expert": (1, 2, 0),
+        "brief": _mono_brief("Volunteering", "types of volunteering"),
+        "photoFacts": [
+            "Two girls are picking up trash outdoors",
+            "A smiling woman is looking after a dog, apparently at an animal "
+            "shelter",
+        ],
+    },
+    {
+        "work": "9377", "audio": "task4_18_9377.mp3",
+        # Аспекты: ±, ±, ±, +  →  К1=2; 9 языковых ошибок → К3=0.
+        "expert": (2, 2, 0),
+        "brief": _mono_brief("Sports", "kinds of sport"),
+        "photoFacts": [
+            "A group of teenagers wearing T-shirts are playing volleyball in "
+            "summer, they look happy",
+            "Two ice hockey teams are playing against each other in winter, "
+            "the players look focused",
+        ],
+    },
+]
+
+
+def dialogue_cases() -> list[dict]:
+    """Записи задания 2, для которых файл реально лежит на диске."""
+    return [c for c in DIALOGUE_AUDIO if os.path.exists(path(c["audio"]))]
+
+
+def monologue_cases() -> list[dict]:
+    """Записи задания 4, для которых файл реально лежит на диске."""
+    return [c for c in MONOLOGUE_AUDIO if os.path.exists(path(c["audio"]))]

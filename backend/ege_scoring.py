@@ -893,7 +893,7 @@ _DETERMINERS = {"the", "a", "an", "your", "their", "his", "her", "its", "my",
                 "our", "this", "that", "these", "those", "any", "some"}
 
 
-def question_rejected(text: str) -> str:
+def question_rejected(text: str, ad: str = "") -> str:
     """Почему вопрос не принимается по методичке — или пустая строка.
 
     Только те случаи, которые методичка разбирает ПОИМЁННО и которые видны в
@@ -913,6 +913,19 @@ def question_rejected(text: str) -> str:
         return "страдательный залог переворачивает смысл вопроса"
     if _Q_WHICH.match(q):
         return "нужен «what», а не «which»: выбирать не из чего"
+    # «Do you have any coach in THAT motorcycle club?» — указательное that
+    # перед предметом объявления значит, что спрашивают о каком-то ДРУГОМ
+    # месте, а не у его представителя. Методичка 2026 (работа 9377) фиксирует
+    # это как сбой коммуникации. Правило срабатывает только когда предмет
+    # назван в объявлении дословно: без этой привязки «that» безобиден
+    # («on that day», «in that case»).
+    if ad:
+        low_ad = re.sub(r"\s+", " ", str(ad)).lower()
+        for m in re.finditer(r"\bthat\s+([a-z]+(?:\s+[a-z]+)?)", q.lower()):
+            words = m.group(1).split()
+            if any(" ".join(words[:n]) in low_ad for n in (2, 1)):
+                return ("«that» указывает на другое место — вопрос задан не "
+                        "хозяину объявления")
     # «What is minimum age for students?», «What is tutation fee?» — отсутствие
     # артикля меняет смысл: спрашивают о возрасте вообще, а не о минимальном
     # возрасте в ЭТОЙ школе. Собственные имена и определители не трогаем.
@@ -924,6 +937,33 @@ def question_rejected(text: str) -> str:
         if first not in _DETERMINERS and not proper:
             return "пропущен артикль, и это меняет смысл вопроса"
     return ""
+
+
+# Вопрос НЕ может быть повествованием, если начинается со вспомогательного
+# глагола и подлежащего — это и есть инверсия прямого вопроса.
+_AUX_FIRST = re.compile(
+    r"^\s*(do|does|did|can|could|will|would|shall|should|may|might|must|"
+    r"is|are|am|was|were|have|has|had)\s+[a-z]", re.I)
+# Слова в причине отказа, означающие претензию именно к порядку слов.
+_ORDER_REASON = re.compile(
+    r"утвержден|повествоват|порядок\s+слов|word\s+order|statement", re.I)
+
+
+def rejection_refuted(question: str, reason: str) -> bool:
+    """Отказ модели опровергается кодом: причина — «повествовательный порядок
+    слов», а вопрос начинается со вспомогательного глагола, то есть инверсия
+    прямого вопроса НАЛИЦО.
+
+    Живой случай (архив ФИПИ, работа 0487): «Do you have opportunity to play
+    inside?» отклонён моделью как «не вопрос, а утверждение» — эксперт вопрос
+    принял. Направление правила намеренно узкое: снимается только отказ с
+    самоопровергающейся причиной; отказ за просьбу, лексику или смысл не
+    трогаем.
+    """
+    r = str(reason or "")
+    if not r or "просьб" in r.lower() or "request" in r.lower():
+        return False
+    return bool(_ORDER_REASON.search(r) and _AUX_FIRST.match(str(question or "")))
 
 
 # --------------------------------------------------------------------------

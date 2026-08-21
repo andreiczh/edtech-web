@@ -307,10 +307,6 @@ p_mono, _ = scoring._feedback_prompt("monologue", {}, "t")
 check(scoring.FALLBACK_MONOLOGUE_BRIEF[:20] in p_mono,
       "промпт: у монолога без текста задания подставляется запасной")
 
-print("\nВсе проверки прошли: сборка разбора." if failed == 0
-      else f"\nПРОВАЛЕНО проверок: {failed}")
-sys.exit(0 if failed == 0 else 1)
-
 # ------------------------------------------------ интервью: счёт фраз кодом
 # Замер 19.08.2026: 25/30 вердиктов, все промахи — зачтённые обрывки. Счёт
 # полных фраз переехал в код (шестое механическое правило).
@@ -347,3 +343,51 @@ marks_iv = [c["score"] for c in fb_iv["criteria"]]
 check(marks_iv == [0, 1, 0, 1, 0],
       "интервью: обрывки валит код, усечённые цитаты не тронуты",
       f"вердикты {marks_iv}")
+
+# --------------------------------- задание 40: правила из живых записей ФИПИ
+# Архив 2026, работа 9377: «that motorcycle club» у представителя клуба —
+# вопрос о ДРУГОМ клубе, эксперт фиксирует сбой коммуникации.
+check(ege_scoring.question_rejected(
+    "Do you have any coach in that motorcycle club?",
+    "Welcome to our motorcycle club!") != "",
+      "«that» + предмет объявления отклоняется кодом")
+check(ege_scoring.question_rejected(
+    "Do you have any competitions in the motorcycle club?",
+    "Welcome to our motorcycle club!") == "",
+      "«the» + предмет объявления проходит")
+check(ege_scoring.question_rejected(
+    "Can I come on that day?", "Join our hockey club!") == "",
+      "безобидное «that» без привязки к объявлению не трогаем")
+
+# Работа 0487: «Do you have opportunity to play inside?» модель отклонила как
+# «утверждение» — порядок слов вопросительный, отказ самоопровергается.
+check(ege_scoring.rejection_refuted(
+    "Do you have opportunity to play inside?",
+    "не вопрос, а утверждение: do you have"),
+      "отказ «это утверждение» на вопросе с инверсией снимается")
+check(not ege_scoring.rejection_refuted(
+    "There are historical costumes?", "нарушен порядок слов прямого вопроса"),
+      "повествовательный порядок без инверсии остаётся отклонённым")
+check(not ege_scoring.rejection_refuted(
+    "Could you tell me about the price?", "это просьба, а не прямой вопрос"),
+      "отказ за просьбу не трогаем")
+check(not ege_scoring.rejection_refuted(
+    "How much does the cost of an hour's work?", "нарушен порядок слов"),
+      "wh-вопрос со сломанной грамматикой не спасаем")
+
+fb_dlg = scoring._score_feedback("dialogue", {"questions": [
+    {"accepted": True, "heard": "Do you have any coach in that motorcycle club?"},
+    {"accepted": False, "heard": "Do you have opportunity to play inside?",
+     "reason": "не вопрос, а утверждение"},
+    {"accepted": True, "heard": "Where is your motorcycle club located?"},
+    {"accepted": True, "heard": "Do you have any competitions in the club?"},
+]}, {"points": ["coach", "inside", "location", "competitions"],
+     "ad": "Welcome to our motorcycle club!"})
+marks_dlg = [c["score"] for c in fb_dlg["criteria"]]
+check(marks_dlg == [0, 1, 1, 1],
+      "диалог: «that» валит код, ложное «утверждение» снимает код",
+      f"вердикты {marks_dlg}")
+
+print("\nВсе проверки прошли: сборка разбора." if failed == 0
+      else f"\nПРОВАЛЕНО проверок: {failed}")
+sys.exit(0 if failed == 0 else 1)

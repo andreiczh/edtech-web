@@ -52,6 +52,16 @@ _MIN_WPM = 25
 # нормальный ответ на «yes or no».
 _WPM_MIN_SPEECH_SECONDS = 8.0
 
+# Для темпа порог громкости ПОДНИМАЕТСЯ вместе с шумом комнаты: во столько раз
+# кадр должен быть громче медианного, чтобы считаться речью. У записи с шумным
+# микрофоном (архив ФИПИ, работа 4596: пол 0.034 при пороге 0.01) весь файл
+# считался речью, 29 слов на 79 «секунд речи» давали 22 сл/мин — и здоровый
+# ответ отвергался как провал распознавания. Медиана кадров в записях с паузами
+# (40/41 — ученик большую часть времени думает) — это и есть шум пола; на
+# сплошной речи медиана оказывается ВНУТРИ речи, секунды речи занижаются, темп
+# завышается — то есть ложных отказов множитель не добавляет ни там, ни там.
+_NOISE_MULT = 2.0
+
 
 def to_pcm(data: bytes, ext: str = ".webm") -> np.ndarray | None:
     """Байты записи -> моно float32 16 кГц. None, если декодировать не вышло.
@@ -99,10 +109,17 @@ def inspect(data: bytes, ext: str = ".webm") -> dict:
 
     frames = pcm[: len(pcm) // step * step].reshape(-1, step)
     rms = np.sqrt((frames ** 2).mean(axis=1))
+    # Два счёта речи с разными порогами — потому что у проверок разные цены
+    # ошибки. Абсолютный порог (для silence_reason) от шума только РАСТЁТ, то
+    # есть ошибается в сторону «речь есть» — в пользу ученика. Адаптивный (для
+    # recognition_failed) вычитает шум комнаты, иначе на шумном микрофоне
+    # паузы считаются речью и здоровый ответ объявляется сбоем распознавания.
+    loud_thr = max(_LOUD_RMS, _NOISE_MULT * float(np.median(rms)))
     return {
         "ok": True,
         "seconds": round(len(pcm) / sr, 2),
         "speech_ratio": round(float((rms > _LOUD_RMS).mean()), 4),
+        "speech_ratio_robust": round(float((rms > loud_thr).mean()), 4),
     }
 
 
@@ -123,9 +140,15 @@ def silence_reason(info: dict) -> str | None:
 
 
 def speech_seconds(info: dict) -> float:
-    """Сколько в записи РЕЧИ, а не тишины. Доля громких кадров × длительность."""
-    return (float(info.get("seconds") or 0.0)
-            * float(info.get("speech_ratio") or 0.0))
+    """Сколько в записи РЕЧИ, а не тишины и не шума комнаты.
+
+    Берётся адаптивная доля (порог поднят над шумом пола); у записей, снятых
+    до появления этого поля, — обычная.
+    """
+    ratio = info.get("speech_ratio_robust")
+    if ratio is None:
+        ratio = info.get("speech_ratio") or 0.0
+    return float(info.get("seconds") or 0.0) * float(ratio)
 
 
 def recognition_failed(info: dict, transcript: str) -> bool:
