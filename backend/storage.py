@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import threading
 import uuid
@@ -673,6 +674,27 @@ def task_exists(source: str, source_id: str) -> bool:
         return False
     return _exec("SELECT 1 FROM tasks WHERE source=? AND source_id=? LIMIT 1",
                  (source, source_id)).fetchone() is not None
+
+
+def task_active_by_prefix(prefix: str) -> dict | None:
+    """Опубликованное задание по НАЧАЛУ id. Нужно озвучке слова (`/speak`).
+
+    Фронт зовёт серверные варианты `39-x<первые 8 знаков uuid>` — полного id у
+    него нет, и по этому огрызку сервер обязан найти задание сам, иначе
+    сверять слово будет не с чем. Префикс проверяется регуляркой ДО запроса:
+    в LIKE попадают `%` и `_`, и подставлять туда чужую строку нельзя.
+    Неоднозначный префикс (нашлось больше одного) — это не задание, а совпадение
+    первых знаков; такое честнее считать ненайденным.
+    """
+    p = str(prefix or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{6,32}", p):
+        return None
+    rows = _exec("SELECT id, task_no, kind, payload FROM tasks"
+                 " WHERE active=1 AND id LIKE ? LIMIT 2", (p + "%",)).fetchall()
+    if len(rows) != 1:
+        return None
+    r = rows[0]
+    return {"id": r[0], "task_no": r[1], "kind": r[2], "payload": r[3]}
 
 
 def tasks_drafts() -> list[dict]:

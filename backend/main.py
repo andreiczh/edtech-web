@@ -53,6 +53,7 @@ import ege_prompts
 import ege_scoring
 import disputes
 import fipi_import
+import speak_check
 import storage
 
 load_dotenv()
@@ -126,6 +127,7 @@ app.add_middleware(GZipExceptStreams, minimum_size=500)
 # Собеседники (голос + характер) вынесены в personas.py — это чистые данные
 # без зависимостей от main; здесь только импорт.
 from personas import (  # noqa: E402 — после настройки окружения, как и прочие
+    DEFAULT_EMOTION,
     DEFAULT_PERSONA,
     MAX_HEAT,
     PERSONAS,
@@ -3766,19 +3768,70 @@ async def talk_stream(audio: UploadFile = File(...),
     )
 
 
+# Серверный вариант задания фронт зовёт «39-x<8 знаков uuid>», встроенный —
+# «39-1». Ловим только первый: у второго текста на сервере нет.
+_REMOTE_VARIANT_RE = re.compile(r"^\d{2}-x([0-9a-fA-F]{6,32})$")
+
+
+async def _check_word_against_task(text: str, variant: str) -> None:
+    """Слово обязано быть в тексте задания — если этот текст у нас есть.
+
+    Три исхода, и молчаливый пропуск среди них законный:
+      * вариант серверный и слово в его эталоне — тихо пропускаем;
+      * вариант серверный, а слова в эталоне нет — 422, озвучивать нечего;
+      * вариант встроенный или база молчит — ПРОПУСКАЕМ, сверять не с чем.
+
+    Третий случай — честная граница, а не дыра, оставленная по лени: текст
+    встроенных вариантов живёт только в коде фронта, дублировать его на
+    сервере ради этой проверки дороже, чем она стоит. От свободного синтеза
+    там защищает форма запроса (`speak_check.word_problem`).
+    """
+    m = _REMOTE_VARIANT_RE.match(str(variant or "").strip())
+    if not m or not _storage_ok:
+        return
+    try:
+        task = await asyncio.to_thread(storage.task_active_by_prefix, m.group(1))
+    except Exception as e:  # noqa: BLE001
+        # База отвалилась — это НЕ повод обвинять ученика в подлоге.
+        print(f"[speak] сверка с эталоном не удалась ({type(e).__name__}) — пропускаю")
+        return
+    if not task or task.get("kind") != "reading":
+        return
+    try:
+        payload = json.loads(task.get("payload") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return
+    reference = str(payload.get("readText") or "")
+    missing = speak_check.missing_from(text, reference)
+    if missing:
+        print(f"[speak] слово вне эталона задания {task['id'][:8]}: {missing}")
+        raise HTTPException(
+            status_code=422,
+            detail="Этого слова нет в тексте задания — озвучиваю только его слова.")
+
+
 @app.post("/speak")
 async def speak(request: Request, body: dict = Body(...),
                 x_device: str | None = Header(None),
                 x_admin_key: str | None = Header(None)):
-    """Озвучить готовый текст. Нужно интервью (№41).
+    """Озвучить готовый текст. Два режима, и у них разные правила.
 
-    По формату ЕГЭ вопросы интервьюера ЗВУЧАТ, а не показываются: экзаменуемый
-    воспринимает их на слух. Мы показывали их текстом — это меняло само
-    задание, потому что убирало аудирование (замечание тестировщика 05.08.2026).
+    **Вопросы интервью (№41), режим по умолчанию.** По формату ЕГЭ вопросы
+    интервьюера ЗВУЧАТ, а не показываются: экзаменуемый воспринимает их на
+    слух. Мы показывали их текстом — это меняло само задание, потому что
+    убирало аудирование (замечание тестировщика 05.08.2026).
 
-    Озвучиваются ТОЛЬКО вопросы из банка заданий, а не произвольный текст с
-    клиента: длина ограничена, а расход идёт в тот же счётчик, что и остальная
-    озвучка. Своего вызова LLM здесь нет вовсе — только синтез.
+    **Слово из эталона (№39), `mode="word"`.** В разборе чтения ученику
+    показывают слово, которое он прочитал не так, — и до 21.08.2026 экран не
+    отвечал на главный вопрос: «а как надо?». Теперь отвечает голосом.
+
+    Что здесь проверяется, а что нет, — `speak_check`. Коротко: форму запроса
+    проверяем ВСЕГДА, сверку с текстом задания — только когда вариант лежит в
+    базе. Встроенные варианты фронта серверу неизвестны, и это не оговорка, а
+    признание границы (прежний докстринг обещал проверку, которой в коде не
+    было вовсе).
+
+    Своего вызова LLM здесь нет ни в одном режиме — только синтез.
     """
     await _require_account(x_device, x_admin_key)
     if not _rate_ok(f"say:{x_device or _client_ip(request)}", 40, 60.0):
@@ -3786,14 +3839,32 @@ async def speak(request: Request, body: dict = Body(...),
     text = str(body.get("text") or "").strip()[:400]
     if not text:
         raise HTTPException(status_code=422, detail="Нечего озвучивать.")
+
+    word_mode = str(body.get("mode") or "").strip() == "word"
+    if word_mode:
+        problem = speak_check.word_problem(text)
+        if problem:
+            raise HTTPException(status_code=422, detail=problem)
+        await _check_word_against_task(text, str(body.get("variant") or ""))
+
+    # Образец произношения говорит НЕЙТРАЛЬНЫМ голосом, а не голосом персоны.
+    # Замер 21.08.2026: одно и то же слово у cheerful тянется 2.2 с с игровой
+    # интонацией, у neutral — 0.8 с ровно. Ученику здесь нужен эталон, а не
+    # характер; злиться на слово «observed» тем более незачем.
     who = persona_of(str(body.get("persona") or ""))
+    if word_mode:
+        who = {**who, "emotion": DEFAULT_EMOTION}
     try:
         audio = await synthesize(text, who)
     except Exception as e:  # noqa: BLE001
         note_failure("tts", f"{type(e).__name__}: {str(e)[:80]}")
         raise HTTPException(status_code=502, detail=f"Озвучка не удалась: {e}")
+    # Слово из эталона кэшируется НАДОЛГО: оно не меняется никогда, а ученик
+    # жмёт «послушать» по многу раз подряд. Вопросы интервью — no-store, как
+    # было: они звучат один раз за попытку, и кэш там только мешал бы.
+    cache = "public, max-age=604800, immutable" if word_mode else "no-store"
     return Response(content=audio, media_type="audio/mpeg",
-                    headers={"Cache-Control": "no-store"})
+                    headers={"Cache-Control": cache})
 
 
 @app.post("/talk_review")

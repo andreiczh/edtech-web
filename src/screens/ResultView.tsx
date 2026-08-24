@@ -25,6 +25,48 @@ import { type Delivery, type TaskFeedback, type WeakWord, fetchWeakWords }
   from '../ege2/feedback'
 import { TASKS, type TaskId, type TaskVariant } from '../ege2/tasks'
 import { highlightPieces } from '../ege2/selection'
+import { sayWord, speakable } from '../ege2/sayWord'
+
+/**
+ * «Послушать» у слова из эталона (№39).
+ *
+ * Кнопки НЕТ, когда озвучивать нечего или нечем: у пропущенного куска, у
+ * целой фразы, у пустой цитаты. Кнопка, которая всегда отвечает отказом,
+ * хуже её отсутствия — этому в проекте уже учили немые подсветки.
+ *
+ * Отказ показывается на самой кнопке и сам гаснет: озвучка — подсказка, а не
+ * часть оценки, и ронять из-за неё модалку с ошибкой не за что.
+ */
+function SayWord({ text, variant }: { text: string; variant?: string }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'fail'>('idle')
+  const clean = (text ?? '').trim()
+  if (!clean || !speakable(clean)) return null
+
+  const play = () => {
+    if (state === 'busy') return
+    setState('busy')
+    void sayWord(clean, variant).then((ok) => {
+      setState(ok ? 'idle' : 'fail')
+      if (!ok) window.setTimeout(() => setState('idle'), 2500)
+    })
+  }
+
+  return (
+    <button
+      type="button"
+      className={`sayword sayword--${state}`}
+      onClick={play}
+      disabled={state === 'busy'}
+      title={state === 'fail' ? 'Озвучить не вышло' : `Послушать «${clean}»`}
+      aria-label={`Послушать, как читается «${clean}»`}
+    >
+      {state === 'fail' ? '✕' : '🔊'}
+      <span className="sayword__cap">
+        {state === 'busy' ? 'звучит…' : state === 'fail' ? 'не вышло' : 'послушать'}
+      </span>
+    </button>
+  )
+}
 
 /* Кольцо с баллом. Заполняется долей набранного — это первое, что ищет глаз. */
 function ScoreRing({ score, max }: { score: number; max: number }) {
@@ -142,6 +184,9 @@ function WeakWords({ variantId }: { variantId?: string }) {
         {words.map((w) => (
           <span key={`${w.ord}-${w.word}`} className="weakwords__item">
             {w.word}
+            {/* Блок называется «Переслушай эти слова», а переслушать их до
+                21.08.2026 было негде — только прочитать. Теперь есть чем. */}
+            <SayWord text={w.word} variant={variantId} />
           </span>
         ))}
       </div>
@@ -225,6 +270,7 @@ function ReadingResult({
         {openPiece && (
           <p className="hlnote">
             <b>«{openPiece}»</b> — {explainOf(openPiece) ?? 'разбор не оставил пояснения к этому куску'}
+            <SayWord text={openPiece} variant={variantId} />
           </p>
         )}
         <p className="resnote">
@@ -246,7 +292,10 @@ function ReadingResult({
               </div>
               <div className="pair__side">
                 <span className="pair__label">в тексте</span>
-                <span className="pair__right">{e.correction}</span>
+                <span className="pair__right">
+                  {e.correction}
+                  <SayWord text={e.correction} variant={variantId} />
+                </span>
               </div>
               {e.explanation && <p className="pair__why">{e.explanation}</p>}
               <ErrorDisagree base={dispute} quote={e.quote} correction={e.correction} />
