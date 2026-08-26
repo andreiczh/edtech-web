@@ -2566,6 +2566,51 @@ async def _keep_awake_loop():
                       f"({type(e).__name__}), неудач подряд: {fails}")
 
 
+async def _storage_wake_counters(tag: str) -> None:
+    """Хвост включения памяти, общий для старта и поздней попытки: поднять
+    из базы дневные лимиты и сверить месячный бюджет. Строго ПОСЛЕ выставления
+    _storage_ok: _budget_sync_bg без него — no-op."""
+    try:
+        day = storage.msk_day()
+        counts = await asyncio.to_thread(storage.voice_counts, day)
+        _VOICE_DAY.update(day=day, counts=counts)
+        if counts:
+            print(f"[{tag}] дневные лимиты восстановлены: {len(counts)} учеников")
+    except Exception as e:  # noqa: BLE001
+        print(f"[{tag}] счётчики дня не поднялись ({type(e).__name__}) — с нуля")
+    if MONTHLY_LLM_BUDGET > 0:
+        _BUDGET["synced"] = time.monotonic()
+        _budget_sync_bg()
+
+
+async def _storage_retry_loop() -> None:
+    """База не ответила на старте — пробуем включить память, пока не получится.
+
+    Ловит ровно случай 26.08.2026: Neon спал в момент буста деплоя, ensure_schema
+    упал, и _storage_ok оставался False до ручного рестарта — все /me/* отвечали
+    503 при давно проснувшейся базе. Пауза растёт 5с → 60с и дальше не растёт:
+    попытка стоит одно соединение, и сама попытка коннекта будит спящий Neon.
+    Шлюз _require_account этот цикл НЕ трогает: пока память выключена, он
+    работает fail-open как работал, цикл только возвращает флаг на место."""
+    global _storage_ok
+    delay, attempt = 5.0, 0
+    while not _storage_ok:
+        await asyncio.sleep(delay)
+        attempt += 1
+        try:
+            await asyncio.to_thread(storage.ensure_schema)
+        except Exception as e:  # noqa: BLE001
+            print(f"[storage] память всё ещё недоступна (попытка {attempt}, "
+                  f"{type(e).__name__}) — следующая через {min(delay * 2, 60):.0f}с")
+            delay = min(delay * 2, 60.0)
+            continue
+        _storage_ok = True
+        print(f"[storage] память включилась с попытки {attempt}: {storage.describe()}")
+        notify_owner("storage", f"Память включилась сама с попытки {attempt} "
+                                f"({storage.describe()}) — на старте база не отвечала.")
+        await _storage_wake_counters("storage")
+
+
 @app.on_event("startup")
 async def _warmup():
     # Локальные модели греем ТОЛЬКО если распознаём локально. Иначе не грузим их
@@ -2615,25 +2660,15 @@ async def _warmup():
                   "живёт до ближайшего деплоя. Для постоянной — DATABASE_URL (Neon).")
     except Exception as e:  # noqa: BLE001
         _storage_ok = False
-        print(f"[startup] память НЕдоступна ({type(e).__name__}: {e}) — работаю без неё")
+        # Одна неудача на старте — больше не приговор до рестарта: дальше
+        # пробует фоновый цикл, он же поднимет счётчики и бюджет.
+        print(f"[startup] память НЕдоступна ({type(e).__name__}: {e}) — пробую дальше фоном")
+        asyncio.create_task(_storage_retry_loop())
 
-    # Дневные лимиты переживают деплой: поднимаем сегодняшние счётчики из базы.
+    # Дневные лимиты и месячный бюджет переживают деплой: поднимаем из базы
+    # сразу, не дожидаясь ленивого триггера в _check_voice_rate.
     if _storage_ok:
-        try:
-            day = storage.msk_day()
-            counts = await asyncio.to_thread(storage.voice_counts, day)
-            _VOICE_DAY.update(day=day, counts=counts)
-            if counts:
-                print(f"[startup] дневные лимиты восстановлены: {len(counts)} учеников")
-        except Exception as e:  # noqa: BLE001
-            print(f"[startup] счётчики дня не поднялись ({type(e).__name__}) — с нуля")
-
-    # Месячный бюджет: после рестарта память процесса пустая, а месяц — нет.
-    # Сверяемся с базой сразу, не дожидаясь ленивого триггера в _check_voice_rate.
-    # Строго ПОСЛЕ включения памяти: _budget_sync_bg без _storage_ok — no-op.
-    if MONTHLY_LLM_BUDGET > 0:
-        _BUDGET["synced"] = time.monotonic()
-        _budget_sync_bg()
+        await _storage_wake_counters("startup")
 
     print("[startup] Сервер принимает запросы.")
     # Старт процесса = деплой или рестарт после падения — владельцу видно оба.
