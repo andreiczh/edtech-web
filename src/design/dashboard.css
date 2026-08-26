@@ -153,14 +153,15 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 16px clamp(20px, 3vw, 52px);
+  gap: 16px clamp(28px, 4.5vw, 72px);
   padding: 0 8px;
   min-height: 0;
 }
 .flamebig {
   position: relative;
-  width: clamp(104px, 18vh, 150px);
+  width: clamp(118px, 19vh, 150px);
   flex: 0 0 auto;
+  margin-right: 14px;
 }
 .flamebig svg {
   width: 100%;
@@ -173,8 +174,8 @@
 }
 .streakbadge {
   position: absolute;
-  top: -6px;
-  right: -14px;
+  top: -16px;
+  right: -34px;
   z-index: 5;
   display: flex;
   align-items: center;
@@ -391,6 +392,33 @@
   display: block;
 }
 
+.dash__chart-empty {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #ede9fb;
+}
+.dash__chart-empty svg {
+  width: min(300px, 60%);
+  height: auto;
+  opacity: 0.9;
+}
+.dash__chart-empty p {
+  margin: 0;
+  max-width: 36ch;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--card-ink-dim);
+}
+.app[data-mode='dark'] .dash__chart-empty {
+  color: rgba(140, 115, 255, 0.16);
+}
+
 /* тёмный тултип графика */
 .dashtt {
   position: fixed;
@@ -437,7 +465,6 @@
   display: flex;
   flex-direction: column;
   gap: clamp(2px, 0.6vh, 6px);
-  justify-content: center;
   box-shadow: var(--shadow-card);
   background: linear-gradient(150deg, #ffe4ef, #ffddeb);
   overflow: hidden;
@@ -498,7 +525,7 @@
   color: rgba(242, 240, 248, 0.6);
 }
 .actioncard__go {
-  margin-top: clamp(6px, 1.4vh, 14px);
+  margin-top: auto;
   align-self: flex-start;
   flex: 0 0 auto;
   display: inline-flex;

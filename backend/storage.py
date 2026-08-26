@@ -1078,8 +1078,12 @@ def dispute_resolve(did: str, status: str, verdict: str, verdict_score: int,
 
 # Таблицы, входящие в дамп. task_images — отдельным флагом: base64-картинки
 # весят мегабайты, а меняются только при импорте.
+# invites, pron_samples, voice_daily и meta добавлены 27.08.2026: старый список
+# молча терял коды доступа и копилку произношения — вскрылось, когда Neon встал
+# на паузу и бэкап оказался единственной копией данных.
 _BACKUP_TABLES = ("students", "accounts", "results", "mistakes", "digests",
-                  "tasks", "usage_daily", "activity_days", "settings", "disputes")
+                  "tasks", "usage_daily", "activity_days", "settings", "disputes",
+                  "invites", "pron_samples", "voice_daily", "meta")
 
 
 def dump_all(with_images: bool = False) -> dict:
@@ -1098,6 +1102,54 @@ def dump_all(with_images: bool = False) -> dict:
         cur = _exec(f"SELECT * FROM {t}")  # noqa: S608 — имена из белого списка
         cols = [d[0] for d in cur.description]
         out[t] = [dict(zip(cols, row)) for row in cur.fetchall()]
+    return out
+
+
+
+# Бинарные колонки: в JSON-бэкапе они лежат base64-строками (так их кодирует
+# FastAPI при выгрузке), при восстановлении декодируем обратно в байты.
+_B64_COLUMNS = {("task_images", "data"), ("dispute_shots", "data")}
+
+_COLUMN_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def restore_all(tables: dict, force: bool = False) -> dict:
+    """Восстановление из JSON-бэкапа /admin/backup — в ПУСТУЮ базу.
+
+    Сценарий: Neon встал на паузу (квота), данные живут только в ночном дампе
+    на ноуте владельца; создаётся свежий проект — и дамп заливается сюда.
+    Защита по построению: если в базе уже есть аккаунты, восстановление
+    отклоняется (force=True снимает проверку — для сознательной перезаливки).
+    Строки кладутся как есть; конфликт первичного ключа роняет таблицу целиком
+    — это желаемое поведение: молча пропущенная половина бэкапа хуже ошибки.
+    """
+    known = set(_BACKUP_TABLES) | {"task_images", "dispute_shots"}
+    if not force:
+        (n,) = _exec("SELECT COUNT(*) FROM accounts").fetchone()
+        if n:
+            raise ValueError(
+                f"В базе уже {n} аккаунтов — восстановление только в пустую "
+                "базу (или force=1, если перезаливка сознательная).")
+    import base64
+
+    out: dict = {}
+    for t, rows in tables.items():
+        if t not in known or not isinstance(rows, list) or not rows:
+            continue
+        cols = [c for c in rows[0] if _COLUMN_RE.match(str(c))]
+        if not cols:
+            continue
+        sql = (f"INSERT INTO {t} ({', '.join(cols)}) "  # noqa: S608 — имена из белого списка
+               f"VALUES ({', '.join('?' * len(cols))})")
+        for row in rows:
+            vals = []
+            for c in cols:
+                v = row.get(c)
+                if (t, c) in _B64_COLUMNS and isinstance(v, str):
+                    v = base64.b64decode(v)
+                vals.append(v)
+            _exec(sql, tuple(vals))
+        out[t] = len(rows)
     return out
 
 

@@ -407,9 +407,14 @@ export function HomeScreen({
         {stats ? (
           <WeekChart week={stats.week} />
         ) : (
-          <p className="dash__chart-sub" style={{ marginTop: 24 }}>
-            Статистика появится после первого занятия — сервер считает дни сам.
-          </p>
+          <div className="dash__chart-empty">
+            <svg viewBox="0 0 320 90" aria-hidden="true">
+              {[26, 44, 18, 58, 36, 70, 30].map((h, i) => (
+                <rect key={i} x={8 + i * 46} y={82 - h} width="30" height={h} rx="9" fill="currentColor" />
+              ))}
+            </svg>
+            <p>Статистика появится после первого занятия — сервер считает дни сам.</p>
+          </div>
         )}
       </div>
 

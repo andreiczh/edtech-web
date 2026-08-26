@@ -1743,10 +1743,8 @@ def _registration_state() -> str:
     """Открыта ли регистрация — видно без админ-ключа, но БЕЗ самих кодов."""
     db = 0
     if _storage_ok:
-        try:
-            db = storage.invites_count()
-        except Exception:  # noqa: BLE001
-            db = -1
+        _health_db_refresh()
+        db = max(0, _HEALTH_DB["invites"])
     if db > 0:
         return f"по кодам ({db} в базе)"
     if INVITE_CODES:
@@ -1876,6 +1874,7 @@ async def admin_invite_add(body: dict = Body(...),
                                  str(body.get("note") or "").strip()[:120], max_uses)
     if not ok:
         raise HTTPException(status_code=409, detail="Такой код уже есть.")
+    _HEALTH_DB["at"] = 0.0  # число кодов в /health обновится сразу
     return {"code": code, "max_uses": max_uses}
 
 
@@ -1888,6 +1887,7 @@ async def admin_invite_toggle(code: str, body: dict = Body(default={}),
     active = bool(body.get("active"))
     if not await asyncio.to_thread(storage.invite_set_active, code, active):
         raise HTTPException(status_code=404, detail="Код не найден.")
+    _HEALTH_DB["at"] = 0.0  # число кодов в /health обновится сразу
     return {"code": code, "active": active}
 
 
@@ -1914,6 +1914,29 @@ async def admin_backup(images: int = 0,
         print(f"[backup] отметка о выгрузке не записалась ({type(e).__name__})")
     return {"created_at": datetime.now(timezone.utc).isoformat(),
             "storage": storage.describe(), "tables": data}
+
+
+@app.post("/admin/restore")
+async def admin_restore(body: dict = Body(...),
+                        force: int = 0,
+                        x_admin_key: str | None = Header(None)):
+    """Заливка JSON-бэкапа в ПУСТУЮ базу (см. storage.restore_all).
+
+    Появился 27.08.2026, когда Neon поставил проект на паузу за квоту и
+    единственной копией данных остался ночной дамп на ноуте владельца.
+    Запуск с ноута: .\.venv\Scripts\python.exe restore.py"""
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    tables = body.get("tables") or {}
+    if not tables:
+        raise HTTPException(status_code=400, detail="В теле нет tables — это не бэкап.")
+    try:
+        counts = await asyncio.to_thread(storage.restore_all, tables, bool(force))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    _HEALTH_DB["at"] = 0.0  # число кодов и расход в /health пересчитаются
+    return {"restored": counts, "rows": sum(counts.values())}
 
 
 @app.post("/admin/reset_password")
@@ -2560,7 +2583,10 @@ async def _keep_awake_loop():
             continue
         try:
             async with httpx.AsyncClient(timeout=30, trust_env=False) as cl:
-                await cl.get(KEEP_AWAKE_URL.rstrip("/") + "/health")
+                # Именно /ping: он не трогает базу. Пинг в /health будил Neon
+                # каждые 10 минут, и 100 бесплатных CU-часов сгорели за 26
+                # дней (26.08.2026, проект встал на паузу до конца месяца).
+                await cl.get(KEEP_AWAKE_URL.rstrip("/") + "/ping")
             if fails:
                 print(f"[keep-awake] снова отвечает (было {fails} неудач подряд)")
             fails = 0
@@ -2728,6 +2754,41 @@ def _tts_health() -> str:
     return f"edge-tts:{TTS_VOICE}"
 
 
+@app.get("/ping")
+def ping():
+    """Пульс для keep-awake и внешних мониторов: ноль обращений к базе.
+
+    Держит бодрым только САМ сервис (Render). База должна засыпать, когда
+    учеников нет, — иначе Neon сжигает месячную квоту compute-часов фоном.
+    """
+    return {"ok": True}
+
+
+# Поля /health, требующие базы, живут в часовом кэше: диагностику человек
+# открывает изредка, и ради неё можно разбудить Neon раз в час, но не каждые
+# десять минут фоновым пингом (так сгорела квота августа-2026).
+_HEALTH_DB = {"at": 0.0, "usage": {}, "invites": -1}
+_HEALTH_DB_TTL = 3600.0
+
+
+def _health_db_refresh() -> None:
+    if not _storage_ok:
+        return
+    now = time.monotonic()
+    if _HEALTH_DB["at"] and now - _HEALTH_DB["at"] < _HEALTH_DB_TTL:
+        return
+    _HEALTH_DB["at"] = now
+    try:
+        report = storage.usage_report(1)
+        _HEALTH_DB["usage"] = next(iter(report.values()), {}) if report else {}
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        _HEALTH_DB["invites"] = storage.invites_count()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 @app.get("/health")
 def health():
     return {
@@ -2786,11 +2847,8 @@ def _storage_health() -> str:
 def _usage_today() -> dict:
     if not _storage_ok:
         return {}
-    try:
-        report = storage.usage_report(1)
-        return next(iter(report.values()), {}) if report else {}
-    except Exception:  # noqa: BLE001
-        return {}
+    _health_db_refresh()
+    return _HEALTH_DB["usage"]
 
 
 @app.post("/talk")
