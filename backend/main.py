@@ -2566,6 +2566,51 @@ async def _keep_awake_loop():
                       f"({type(e).__name__}), неудач подряд: {fails}")
 
 
+async def _storage_reconnect(first_delay: float = 30.0) -> None:
+    """База не ответила на старте — пробуем фоном, пока не оживёт.
+
+    Neon умеет засыпать, и если буст деплоя совпал со сном, одноразовая
+    проверка выключала память до СЛЕДУЮЩЕГО деплоя: кабинет, статистика и
+    календарь отдавали 503, хотя база просыпалась через минуту (видели
+    вживую 26.08.2026). Пауза растёт вдвое до десяти минут — мёртвую базу
+    долбить незачем, а проснувшуюся подхватим быстро.
+    """
+    global _storage_ok
+    delay = first_delay
+    while not _storage_ok:
+        await asyncio.sleep(delay)
+        try:
+            await asyncio.to_thread(storage.ensure_schema)
+        except Exception as e:  # noqa: BLE001
+            print(f"[storage] база всё ещё недоступна ({type(e).__name__}: {e})")
+            delay = min(delay * 2, 600.0)
+            continue
+        _storage_ok = True
+        print(f"[storage] база ожила — память включена: {storage.describe()}")
+        # Последний алерт владельцу был «Память: ВЫКЛЮЧЕНА» — без этой строки
+        # он так и висел бы ложью до следующего деплоя.
+        notify_owner("storage", "База ожила после неудачного старта — память снова включена.")
+        # Всё, что старт делает ПОСЛЕ включения памяти, — здесь тоже:
+        # иначе дневные лимиты и месячный бюджет останутся пустыми до рестарта.
+        try:
+            day = storage.msk_day()
+            counts = await asyncio.to_thread(storage.voice_counts, day)
+            # Слияние по максимуму, НЕ замена (отличие от старта): за простой
+            # память копила реплики, которых в базе нет, — замена словаря
+            # откатила бы дневной лимит назад.
+            if _VOICE_DAY.get("day") == day:
+                for k, v in (_VOICE_DAY.get("counts") or {}).items():
+                    counts[k] = max(counts.get(k, 0), v)
+            _VOICE_DAY.update(day=day, counts=counts)
+            if counts:
+                print(f"[storage] дневные лимиты восстановлены: {len(counts)} учеников")
+        except Exception as e:  # noqa: BLE001
+            print(f"[storage] счётчики дня не поднялись ({type(e).__name__}) — с нуля")
+        if MONTHLY_LLM_BUDGET > 0:
+            _BUDGET["synced"] = time.monotonic()
+            _budget_sync_bg()
+
+
 @app.on_event("startup")
 async def _warmup():
     # Локальные модели греем ТОЛЬКО если распознаём локально. Иначе не грузим их
@@ -2616,6 +2661,8 @@ async def _warmup():
     except Exception as e:  # noqa: BLE001
         _storage_ok = False
         print(f"[startup] память НЕдоступна ({type(e).__name__}: {e}) — работаю без неё")
+        # Не навсегда: фоном пробуем снова, пока база не ответит.
+        asyncio.create_task(_storage_reconnect())
 
     # Дневные лимиты переживают деплой: поднимаем сегодняшние счётчики из базы.
     if _storage_ok:
