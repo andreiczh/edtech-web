@@ -1,11 +1,13 @@
 /**
- * Личный кабинет: аккаунт, стрик и XP, настройки.
+ * Личный кабинет — макет из утверждённого прототипа (фото-канон владельца).
  *
- * Честность данных — как в статистике: числа приходят с сервера (/me/stats),
- * а пока их нет, экран показывает прочерки, но не выдумывает. Настройки
- * применяются мгновенно (локальный стор) и уезжают на аккаунт дебаунсом.
+ * Вся прежняя логика сохранена: смена ника генерацией, подтверждение 18+ у
+ * взрослой персоны, мгновенное применение настроек с дебаунс-отправкой на
+ * аккаунт. Числа живые (/me/stats, включая новую «лучшую серию»); пока сервер
+ * молчит — прочерки, не выдумки. «Среднего времени занятия» из прототипа нет:
+ * система не замеряет длительность, вместо него честные реплики разговора.
  */
-import { useCallback, useEffect, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import {
   changeNickname,
@@ -18,39 +20,10 @@ import {
   type Persona,
 } from '../account/me'
 import { applyNickname, currentUser, logout, randomNickname } from '../auth/auth'
-import { ConfirmDialog, Pill, SegmentedTabs } from '../design/ui'
+import { ConfirmDialog } from '../design/ui'
 
-const BLOCK: CSSProperties = { width: 'min(100%, 940px)' }
-
-const EXAM_LABEL: Record<string, string> = {
-  ege: 'Готовлюсь к ЕГЭ',
-  oge: 'Готовлюсь к ОГЭ',
-  other: 'Занимаюсь для себя',
-}
-
-const WEEKDAY = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб']
-
-/* Огонёк стрика: гаснет (contour), пока сегодня ещё не занимался. */
-function Flame({ lit }: { lit: boolean }) {
-  return (
-    <svg className={`flame${lit ? ' flame--lit' : ''}`} viewBox="0 0 24 24" aria-hidden="true">
-      <path
-        d="M12 2c.6 3.2-.9 4.9-2.6 6.7C7.6 10.6 6 12.4 6 15a6 6 0 0 0 12 0c0-2.2-1-3.9-2.2-5.4-.4 1.1-1 1.9-1.9 2.5.3-2.9-.5-6.6-1.9-8.1z"
-        fill="currentColor"
-      />
-    </svg>
-  )
-}
-
-/**
- * Выбор собеседника. Список приходит с сервера (GET /personas) и здесь НЕ
- * дублируется: голос и характер — серверная сущность, фронт рисует что дали.
- * Сервер молчит или список пуст — блок просто не показывается, а разговор идёт
- * на персоне по умолчанию.
- */
 /* Согласие на «взрослую» персону: разовое, живёт в этом браузере. Намеренно
-   НЕ в настройках аккаунта — согласие даёт человек за конкретным экраном, и
-   переносить его на телефон, за которым может сидеть кто-то другой, неверно. */
+   НЕ в настройках аккаунта — согласие даёт человек за конкретным экраном. */
 const ADULT_OK_KEY = 'pingo.adultOk.v1'
 
 function adultAccepted(id: string): boolean {
@@ -70,101 +43,26 @@ function rememberAdultAccepted(id: string) {
   }
 }
 
-function PersonaPicker() {
-  const settings = useSettings()
-  const [personas, setPersonas] = useState<Persona[]>([])
-  /** Персона, которую выбрали, но она требует подтверждения возраста. */
-  const [confirming, setConfirming] = useState<Persona | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    void fetchPersonas().then((p) => alive && setPersonas(p))
-    return () => {
-      alive = false
-    }
-  }, [])
-
-  if (personas.length === 0) return null
-
-  /* Признак «взрослой» приходит с СЕРВЕРА: даже если фронт устарел и не знает
-     про новую персону с матом, сервер пометит её, и подтверждение появится. */
-  const choose = (p: Persona) => {
-    if (p.adult && !adultAccepted(p.id)) {
-      setConfirming(p)
-      return
-    }
-    updateSettings({ persona: p.id })
-  }
-
-  return (
-    <div className="card2 card2--ghost glass settings" style={BLOCK}>
-      <div className="settings__text" style={{ marginBottom: 12 }}>
-        <span className="settings__name">Собеседник</span>
-        <span className="settings__hint">
-          С кем говоришь в режиме Conversation. Меняется на лету — следующая
-          реплика уже прозвучит новым голосом.
-        </span>
-      </div>
-
-      <div className="personas" role="radiogroup" aria-label="Выбор собеседника">
-        {personas.map((p) => {
-          const active = settings.persona === p.id
-          return (
-            <button
-              key={p.id}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              className={`persona${active ? ' persona--on' : ''}`}
-              onClick={() => choose(p)}
-            >
-              <span className="persona__top">
-                <span className="persona__name">{p.label}</span>
-                {active ? (
-                  <span className="persona__mark">выбран</span>
-                ) : (
-                  p.adult && <span className="persona__mark persona__mark--adult">18+</span>
-                )}
-              </span>
-              <span className="persona__desc">{p.description}</span>
-            </button>
-          )
-        })}
-      </div>
-
-      {confirming && (
-        <ConfirmDialog
-          title={`${confirming.label} — точно включаем?`}
-          body={confirming.warning || 'Этот собеседник говорит грубо.'}
-          stay="Не надо"
-          leave="Мне есть 18, включить"
-          onStay={() => setConfirming(null)}
-          onLeave={() => {
-            rememberAdultAccepted(confirming.id)
-            updateSettings({ persona: confirming.id })
-            setConfirming(null)
-          }}
-        />
-      )}
-    </div>
-  )
-}
+/* Эмодзи персоны — по её цветовой семье (контракт theme: blue/green/red). */
+const PERSONA_EMOJI: Record<string, string> = { blue: '😊', green: '🧘', red: '😈' }
 
 export function ProfileScreen({
-  onOpenStats,
+  onOpenStats: _onOpenStats,
   onLogout,
-  onClose,
+  onClose: _onClose,
 }: {
-  onOpenStats: () => void
+  onOpenStats?: () => void
   onLogout: () => void
-  /** Закрыть экран профиля (НЕ выход из аккаунта — тот отдельной кнопкой). */
-  onClose: () => void
+  onClose?: () => void
 }) {
   const settings = useSettings()
   const user = currentUser()
 
   const [stats, setStats] = useState<MeStats | null>(null)
   const [statsFailed, setStatsFailed] = useState(false)
+  const [personas, setPersonas] = useState<Persona[]>([])
+  const [confirming, setConfirming] = useState<Persona | null>(null)
+
   useEffect(() => {
     let alive = true
     void fetchMeStats().then((s) => {
@@ -172,13 +70,12 @@ export function ProfileScreen({
       setStats(s)
       setStatsFailed(s === null)
     })
+    void fetchPersonas().then((p) => alive && setPersonas(p))
     return () => {
       alive = false
     }
   }, [])
 
-  /* Смена ника: имя только генерируется — как при регистрации. После смены
-     показываем напоминание: ник это логин, его надо записать. */
   const [nick, setNick] = useState(user?.nickname ?? '')
   const [nickBusy, setNickBusy] = useState(false)
   const [nickChanged, setNickChanged] = useState(false)
@@ -201,198 +98,239 @@ export function ProfileScreen({
 
   const doLogout = useCallback(() => {
     logout()
-    resetSettings() // тема и громкость — часть аккаунта, чужим не наследуются
+    resetSettings()
     onLogout()
   }, [onLogout])
 
+  const choosePersona = (p: Persona) => {
+    if (p.adult && !adultAccepted(p.id)) {
+      setConfirming(p)
+      return
+    }
+    updateSettings({ persona: p.id })
+  }
+
   const streak = stats?.streak
   const level = stats?.level
-  const week = stats?.week
-  const maxWeekXp = week ? Math.max(1, ...week.map((d) => d.xp)) : 1
   const dash = statsFailed ? '—' : stats ? null : '…'
+  const currentPersona = personas.find((p) => p.id === settings.persona)
 
   return (
-    <div className="screenbody">
-      <div
-        className="screen__body scroll-soft scroll-soft--onDark"
-        style={{ overflowY: 'auto', justifyContent: 'safe center', padding: '8px 10px' }}
-      >
-        {/* ------------------------------------------------------ Аккаунт */}
-        <div className="card2 card2--ghost glass profilehead" style={BLOCK}>
-          <div className="profilehead__id">
-            <span className="profilehead__avatar" aria-hidden="true">
-              {(nick.match(/[A-Z]/g) ?? ['?']).slice(0, 2).join('')}
-            </span>
-            <span className="profilehead__names">
-              <span className="profilehead__nick">{nick || 'Гость'}</span>
-              <span className="profilehead__role">
-                {EXAM_LABEL[user?.exam ?? ''] ?? 'Аккаунт'}
-                {level && ` · ${level.name}`}
-              </span>
-            </span>
-          </div>
-          <div className="profilehead__actions">
-            <Pill onClick={onChangeNick} disabled={nickBusy} title="Сгенерировать новый никнейм">
-              {nickBusy ? 'Меняю…' : 'Сменить ник'}
-            </Pill>
-            <Pill onClick={doLogout} quiet>
-              Выйти
-            </Pill>
-          </div>
-          {nickChanged && (
-            <p className="profilehead__note">
-              Ник — это твой логин. Запиши новый: <b>{nick}</b> (пароль прежний).
-            </p>
-          )}
-          {nickError && <p className="profilehead__note profilehead__note--err">{nickError}</p>}
-        </div>
+    <div className="profpage">
+      <h1 className="dash__hello" style={{ marginBottom: 18 }}>
+        Личный кабинет
+      </h1>
 
-        {/* --------------------------------------------------- Стрик и XP */}
-        <div className="profilegrid" style={BLOCK}>
-          <div className="card2 card2--ghost glass profilecell" title="Дни занятий подряд. Один пропущенный день в неделю стрик не сжигает — это заморозка.">
-            <Flame lit={Boolean(streak?.active_today)} />
-            <div className="statrow__value">{streak ? streak.days : dash}</div>
-            <div className="statrow__label">DAY STREAK</div>
-            <span className="profilecell__sub">
-              {streak
-                ? streak.active_today
-                  ? 'сегодня засчитан'
-                  : 'позанимайся — день ещё не засчитан'
-                : statsFailed
-                  ? 'нет связи с сервером'
-                  : 'считаем…'}
-            </span>
-            {streak && (
-              <span className="profilecell__sub">
-                {streak.freeze_available
-                  ? '❄ заморозка на этой неделе цела'
-                  : '❄ заморозка недели потрачена'}
+      <div className="profpage__grid">
+        <div className="profpage__main">
+          {/* --------------------------------------------------- Профиль */}
+          <div className="calcard">
+            <div className="profhead">
+              <span className="profhead__ava" aria-hidden="true">
+                {(nick.match(/[A-Z]/g) ?? ['?']).slice(0, 2).join('')}
               </span>
-            )}
-          </div>
-
-          <div className="card2 card2--ghost glass profilecell" title="XP даёт сервер: за реплики разговора (первые 30 в день), за решённые варианты (плюс балл разбора) и за законченные серии.">
-            <div className="statrow__value">
-              {level ? level.level : dash}
-              <span className="statrow__unit"> lvl</span>
-            </div>
-            <div className="statrow__label">{level ? level.name.toUpperCase() : 'УРОВЕНЬ'}</div>
-            {level ? (
-              <>
-                <div className="xpbar" aria-hidden="true">
-                  <div className="xpbar__fill" style={{ width: `${Math.round(level.progress * 100)}%` }} />
+              <div className="profhead__info">
+                <div className="profhead__row">
+                  <b className="profhead__nick">{nick || 'Гость'}</b>
+                  <button
+                    type="button"
+                    className="profhead__regen"
+                    onClick={() => void onChangeNick()}
+                    disabled={nickBusy}
+                    title="Сгенерировать новый ник"
+                  >
+                    ⟳ {nickBusy ? 'меняю…' : 'новый ник'}
+                  </button>
                 </div>
-                <span className="profilecell__sub">
-                  {level.xp - level.level_start} / {level.next_at - level.level_start} XP до
-                  следующего
+                <span className="profhead__lvl">
+                  {level ? `Уровень ${level.level} · ${level.name}` : (dash ?? 'считаю…')}
                 </span>
-              </>
-            ) : (
-              <span className="profilecell__sub">
-                {statsFailed ? 'нет связи с сервером' : 'считаем…'}
-              </span>
+                {level && (
+                  <>
+                    <div className="profhead__xpbar" aria-hidden="true">
+                      <i style={{ width: `${Math.round(level.progress * 100)}%` }} />
+                    </div>
+                    <span className="profhead__xp">
+                      {level.xp - level.level_start} / {level.next_at - level.level_start} XP до
+                      уровня {level.level + 1}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+            {nickChanged && (
+              <p className="profnote">
+                Ник — это твой логин. Запиши новый: <b>{nick}</b> (пароль прежний).
+              </p>
             )}
+            {nickError && <p className="profnote profnote--err">{nickError}</p>}
+
+            <div className="profstats">
+              <div>
+                <span>Лучшая серия</span>
+                <b>{streak ? `${streak.best} ${streak.best === 1 ? 'день' : 'дней'}` : dash}</b>
+              </div>
+              <div>
+                <span>Занятий</span>
+                <b>{stats ? stats.totals.tasks : dash}</b>
+              </div>
+              <div>
+                <span>Реплик</span>
+                <b>{stats ? stats.totals.replies : dash}</b>
+              </div>
+              <div>
+                <span>Экзамен</span>
+                <b>{user?.exam === 'oge' ? 'ОГЭ' : 'ЕГЭ'}</b>
+              </div>
+            </div>
           </div>
 
-          <div className="card2 card2--ghost glass profilecell" title="XP по дням за последнюю неделю.">
-            {week ? (
-              <div className="weekbars" role="img" aria-label="Занятия за неделю">
-                {week.map((d) => (
-                  <div className="weekbars__col" key={d.day} title={`${d.day}: ${d.xp} XP`}>
-                    <div
-                      className={`weekbars__bar${d.actions > 0 ? ' weekbars__bar--on' : ''}`}
-                      style={{ height: `${8 + Math.round((d.xp / maxWeekXp) * 64)}%` }}
-                    />
-                    <span className="weekbars__day">{WEEKDAY[new Date(d.day + 'T12:00:00').getDay()]}</span>
-                  </div>
+          {/* -------------------------------------------------- Настройки */}
+          <div className="calcard">
+            <p className="calcard__title" style={{ marginBottom: 6 }}>
+              Настройки
+            </p>
+
+            <div className="setrow2">
+              <div className="setrow2__t">
+                <b>Тема</b>
+                <span>следует за аккаунтом на всех устройствах</span>
+              </div>
+              <div className="calseg">
+                {(['light', 'dark', 'auto'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className={settings.theme === t ? 'calseg--on' : ''}
+                    onClick={() => updateSettings({ theme: t })}
+                  >
+                    {t === 'light' ? 'Светлая' : t === 'dark' ? 'Тёмная' : 'Авто'}
+                  </button>
                 ))}
               </div>
-            ) : (
-              <div className="statrow__value">{dash}</div>
+            </div>
+
+            <div className="setrow2">
+              <div className="setrow2__t">
+                <b>Громкость голоса</b>
+                <span>
+                  {settings.volume === 0
+                    ? 'звук выключен'
+                    : `громкость ответов собеседника и озвучки · ${Math.round(settings.volume * 100)}%`}
+                </span>
+              </div>
+              <input
+                className="slider"
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={settings.volume}
+                onChange={(e) => updateSettings({ volume: Number(e.target.value) })}
+                aria-label="Громкость голоса ИИ"
+              />
+            </div>
+
+            <div className="setrow2">
+              <div className="setrow2__t">
+                <b>Текст в разговоре</b>
+                <span>показывать реплики текстом под голосом</span>
+              </div>
+              <button
+                type="button"
+                className={`switch${settings.showText ? ' switch--on' : ''}`}
+                role="switch"
+                aria-checked={settings.showText}
+                aria-label="Показывать текст ответа"
+                onClick={() => updateSettings({ showText: !settings.showText })}
+              >
+                <span className="switch__thumb" />
+              </button>
+            </div>
+
+            {personas.length > 0 && (
+              <div className="setrow2">
+                <div className="setrow2__t">
+                  <b>Собеседник по умолчанию</b>
+                  <span>{currentPersona ? currentPersona.label : 'характер в разговорной практике'}</span>
+                </div>
+                <div className="calseg" role="radiogroup" aria-label="Собеседник">
+                  {personas.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={settings.persona === p.id}
+                      className={settings.persona === p.id ? 'calseg--on' : ''}
+                      onClick={() => choosePersona(p)}
+                      title={p.label + (p.adult ? ' (18+)' : '')}
+                    >
+                      {PERSONA_EMOJI[p.theme] ?? '🤖'}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
-            <div className="statrow__label">НЕДЕЛЯ</div>
-            <span className="profilecell__sub">
-              {stats
-                ? `всего: ${stats.totals.replies} реплик · ${stats.totals.tasks} заданий · ${stats.totals.xp} XP`
-                : statsFailed
-                  ? 'нет связи с сервером'
-                  : 'считаем…'}
-            </span>
+
+            <div className="setrow2">
+              <div className="setrow2__t">
+                <b>Экзамен</b>
+                <span>набор заданий и шкалы</span>
+              </div>
+              <div className="calseg">
+                <button type="button" className="calseg--on">
+                  ЕГЭ
+                </button>
+                <button type="button" disabled title="Скоро">
+                  ОГЭ
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* ------------------------------------------------- Собеседник */}
-        <PersonaPicker />
-
-        {/* ---------------------------------------------------- Настройки */}
-        <div className="card2 card2--ghost glass settings" style={BLOCK}>
-          <div className="settings__row">
-            <div className="settings__text">
-              <span className="settings__name">Тема</span>
-              <span className="settings__hint">
-                {settings.theme === 'dark'
-                  ? 'Фон в цвет собеседника'
-                  : 'Светлый нейтральный фон'}
-              </span>
-            </div>
-            <SegmentedTabs
-              tabs={[
-                { id: 'dark', label: 'Цветная' },
-                { id: 'light', label: 'Стандарт' },
-              ]}
-              active={settings.theme}
-              onTab={(id) => updateSettings({ theme: id as 'dark' | 'light' })}
-            />
+        {/* ------------------------------------------------ Правая колонка */}
+        <div className="profpage__side">
+          <div className="profstreak">
+            <span className="profstreak__ic">🔥</span>
+            <b>Стрик {streak ? streak.days : (dash ?? '…')} {streak && streak.days === 1 ? 'день' : 'дней'}</b>
+            <p>
+              {streak
+                ? streak.active_today
+                  ? 'Сегодня зачтено — серия живёт. Возвращайся завтра.'
+                  : 'Загляни до полуночи по Москве — серия продлится.'
+                : statsFailed
+                  ? 'Нет связи с сервером.'
+                  : 'Считаю…'}
+            </p>
           </div>
-
-          <div className="settings__row">
-            <div className="settings__text">
-              <span className="settings__name">Громкость голоса</span>
-              <span className="settings__hint">
-                {settings.volume === 0 ? 'звук выключен' : `${Math.round(settings.volume * 100)}%`}
-              </span>
-            </div>
-            <input
-              className="slider"
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={settings.volume}
-              onChange={(e) => updateSettings({ volume: Number(e.target.value) })}
-              aria-label="Громкость голоса ИИ"
-            />
-          </div>
-
-          <div className="settings__row">
-            <div className="settings__text">
-              <span className="settings__name">Текст ответа в Conversation</span>
-              <span className="settings__hint">
-                {settings.showText ? 'аудио + текст' : 'чисто аудио, как в живом разговоре'}
-              </span>
-            </div>
-            <button
-              type="button"
-              className={`switch${settings.showText ? ' switch--on' : ''}`}
-              role="switch"
-              aria-checked={settings.showText}
-              aria-label="Показывать текст ответа"
-              onClick={() => updateSettings({ showText: !settings.showText })}
-            >
-              <span className="switch__thumb" />
+          <div className="calcard">
+            <p className="calside__eyebrow">Аккаунт</p>
+            <p className="profnote" style={{ margin: '0 0 12px' }}>
+              Ник + пароль, почты нет. Пароль знаешь только ты — потерял, попроси сброс у
+              владельца.
+            </p>
+            <button type="button" className="proflogout" onClick={doLogout}>
+              Выйти из аккаунта
             </button>
           </div>
         </div>
       </div>
 
-      {/* «Назад» слева, как во всех экранах второго уровня. Не путать с «Выйти»
-          наверху: та кнопка выходит из АККАУНТА, эта — просто закрывает профиль. */}
-      <div className="rowbetween">
-        <Pill onClick={onClose}>← Назад</Pill>
-        <Pill accent onClick={onOpenStats}>
-          Статистика ЕГЭ →
-        </Pill>
-      </div>
+      {confirming && (
+        <ConfirmDialog
+          title={`${confirming.label} — точно включаем?`}
+          body={confirming.warning || 'Этот собеседник говорит грубо.'}
+          stay="Не надо"
+          leave="Мне есть 18, включить"
+          onStay={() => setConfirming(null)}
+          onLeave={() => {
+            rememberAdultAccepted(confirming.id)
+            updateSettings({ persona: confirming.id })
+            setConfirming(null)
+          }}
+        />
+      )}
     </div>
   )
 }

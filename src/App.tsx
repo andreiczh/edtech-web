@@ -29,7 +29,8 @@ import {
   type TaskId,
 } from './ege2/tasks'
 import { AdminScreen } from './screens/AdminScreen'
-import { LoginScreen, RegisterScreen, WelcomeScreen } from './screens/AuthScreens'
+import { CalendarScreen } from './screens/CalendarScreen'
+import { IntroScreen, LoginScreen, RegisterScreen } from './screens/AuthScreens'
 import { ConversationScreen } from './screens/ConversationScreen'
 import { EgeMenuScreen } from './screens/EgeMenuScreen'
 import { HomeScreen } from './screens/HomeScreen'
@@ -39,10 +40,11 @@ import { StatsScreen } from './screens/StatsScreen'
 
 type Route =
   | { name: 'welcome' }
-  | { name: 'register' }
+  | { name: 'intro' }
   | { name: 'login' }
   | { name: 'admin' }
   | { name: 'home' }
+  | { name: 'calendar' }
   | { name: 'conversation' }
   | { name: 'ege' }
   | { name: 'stats' }
@@ -58,7 +60,7 @@ function initialRoute(): Route {
 }
 
 /* Иконки рейла — один набор, один stroke (правило брифа). */
-function RailIcon({ kind }: { kind: 'home' | 'trainer' | 'stats' | 'settings' | 'sun' | 'moon' }) {
+function RailIcon({ kind }: { kind: 'home' | 'calendar' | 'stats' | 'settings' | 'sun' | 'moon' }) {
   const paths: Record<string, ReactNode> = {
     home: (
       <>
@@ -66,10 +68,10 @@ function RailIcon({ kind }: { kind: 'home' | 'trainer' | 'stats' | 'settings' | 
         <path d="M10 20v-5.5h4V20" />
       </>
     ),
-    trainer: (
+    calendar: (
       <>
-        <rect x="9" y="2.5" width="6" height="12" rx="3" />
-        <path d="M5 11a7 7 0 0 0 14 0M12 18v3.5M8.5 21.5h7" />
+        <rect x="3.5" y="5" width="17" height="16" rx="3" />
+        <path d="M8 3v4M16 3v4M3.5 10.5h17" />
       </>
     ),
     stats: <path d="M5 20v-6M12 20V9M19 20V4" />,
@@ -100,6 +102,16 @@ export default function App() {
   /* Тема (тёмная/светлая) — настройка кабинета, применяется атрибутом на
      корневом .app: CSS-переменные переопределяются одним селектором. */
   const { theme } = useSettings()
+  const [sysDark, setSysDark] = useState(
+    () => window.matchMedia('(prefers-color-scheme: dark)').matches,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const cb = (e: MediaQueryListEvent) => setSysDark(e.matches)
+    mq.addEventListener('change', cb)
+    return () => mq.removeEventListener('change', cb)
+  }, [])
+  const mode = theme === 'auto' ? (sysDark ? 'dark' : 'light') : theme
   // Характер собеседника задаёт АКЦЕНТ (бегунок, полоса опыта, главные
   // кнопки) — фон в новом дизайне всегда молочный, см. theme-new.css.
   const paint = useCurrentPersona()?.theme ?? 'blue'
@@ -122,6 +134,14 @@ export default function App() {
     void syncServerProgress(identityId())
     void syncSettingsFromServer()
     setRoute({ name: 'home' })
+  }, [])
+
+  /* После регистрации — интро «что тебя ждёт внутри» (фото-канон), после
+     входа существующего аккаунта — сразу дашборд. */
+  const enterAfterRegister = useCallback((_u: AuthUser) => {
+    void syncServerProgress(identityId())
+    void syncSettingsFromServer()
+    setRoute({ name: 'intro' })
   }, [])
 
   const goHome = useCallback(() => setRoute({ name: 'home' }), [])
@@ -160,21 +180,18 @@ export default function App() {
   // Экраны входа и админка — отдельные полноэкранные состояния вне каркаса.
   if (route.name === 'welcome') {
     return (
-      <WelcomeScreen
-        onStart={() => setRoute({ name: 'register' })}
-        onLogin={() => setRoute({ name: 'login' })}
-      />
+      <RegisterScreen onDone={enterAfterRegister} onLogin={() => setRoute({ name: 'login' })} />
     )
   }
-  if (route.name === 'register') {
-    return <RegisterScreen onDone={enterApp} />
+  if (route.name === 'intro') {
+    return <IntroScreen onGo={() => setRoute({ name: 'home' })} />
   }
   if (route.name === 'login') {
-    return <LoginScreen onDone={enterApp} onRegister={() => setRoute({ name: 'register' })} />
+    return <LoginScreen onDone={enterApp} onRegister={() => setRoute({ name: 'welcome' })} />
   }
   if (route.name === 'admin') {
     return (
-      <div className="app" data-theme={paint} data-mode={theme}>
+      <div className="app" data-theme={paint} data-mode={mode}>
         <AdminScreen
           onExit={() => {
             window.history.replaceState(null, '', window.location.pathname)
@@ -189,7 +206,7 @@ export default function App() {
   // на экзамене ничто не должно уводить из задания.
   if (route.name === 'session') {
     return (
-      <div className="app" data-theme={paint} data-mode={theme}>
+      <div className="app" data-theme={paint} data-mode={mode}>
         <div className="screenwrap" key={`session-${route.nonce}`}>
           <SessionScreen items={route.items} onExit={backToEge} onRestart={restartSession} />
         </div>
@@ -200,20 +217,20 @@ export default function App() {
   /* Актив рейла: разговор открывается с дашборда и своей кнопки не имеет —
      подсвечиваем «Главную», путь возврата очевиден. */
   const railActive =
-    route.name === 'ege' ? 'trainer'
+    route.name === 'calendar' ? 'calendar'
     : route.name === 'stats' ? 'stats'
     : route.name === 'profile' ? 'settings'
     : 'home'
 
   const RAIL: Array<{ id: typeof railActive; icon: Parameters<typeof RailIcon>[0]['kind']; title: string; go: () => void }> = [
     { id: 'home', icon: 'home', title: 'Главная', go: goHome },
-    { id: 'trainer', icon: 'trainer', title: 'Тренажёр', go: backToEge },
+    { id: 'calendar', icon: 'calendar', title: 'Календарь', go: () => setRoute({ name: 'calendar' }) },
     { id: 'stats', icon: 'stats', title: 'Статистика', go: () => setRoute({ name: 'stats' }) },
     { id: 'settings', icon: 'settings', title: 'Настройки', go: () => setRoute({ name: 'profile' }) },
   ]
 
   return (
-    <div className="app" data-theme={paint} data-mode={theme}>
+    <div className="app" data-theme={paint} data-mode={mode}>
       <div className="appgrid">
         <aside className="leftcol">
           <span className="lspacer lspacer--top" />
@@ -263,6 +280,8 @@ export default function App() {
                 onDemo={startDemo}
               />
             )}
+
+            {route.name === 'calendar' && <CalendarScreen />}
 
             {route.name === 'conversation' && <ConversationScreen onFeedback={onFeedback} />}
 

@@ -1042,7 +1042,38 @@ def _compute_streak(active: set[str], today_str: str) -> dict:
         "days": streak,
         "active_today": today_str in active,
         "freeze_available": today.isocalendar()[:2] not in bridged,
+        "best": _best_streak(active),
     }
+
+
+def _best_streak(active: set[str]) -> int:
+    """Длиннейшая серия за всю историю — с теми же правилами заморозки:
+    один пропуск на ISO-неделю мостится, второй рвёт. Считается проходом по
+    датам от старых к новым; объём — сотни дней, скорость не вопрос."""
+    if not active:
+        return 0
+    days = sorted(date.fromisoformat(d) for d in active)
+    best = cur_len = 1
+    used_weeks: set[tuple[int, int]] = set()
+    prev = days[0]
+    for d in days[1:]:
+        gap = (d - prev).days
+        if gap == 1:
+            cur_len += 1
+        elif gap == 2:
+            wk = (prev + timedelta(days=1)).isocalendar()[:2]
+            if wk in used_weeks:
+                cur_len = 1
+                used_weeks = set()
+            else:
+                used_weeks.add(wk)
+                cur_len += 1
+        else:
+            cur_len = 1
+            used_weeks = set()
+        best = max(best, cur_len)
+        prev = d
+    return best
 
 
 @app.get("/me/stats")
@@ -1063,10 +1094,13 @@ async def me_stats(x_device: str | None = Header(None),
         d = by_day.get(key)
         week.append({"day": key, "xp": d["xp"] if d else 0,
                      "actions": d["replies"] + d["tasks"] if d else 0})
+    horizon = (today - timedelta(days=62)).isoformat()
     return {
         "level": _level_info(summary["xp_total"]),
         "streak": _compute_streak(active, summary["today"]),
         "week": week,
+        "today": summary["today"],
+        "active_days": sorted(d for d in active if d >= horizon),
         "totals": {"replies": summary["replies_total"],
                    "tasks": summary["tasks_total"],
                    "xp": summary["xp_total"]},
@@ -1079,7 +1113,7 @@ def _sanitize_settings(raw: dict) -> dict:
     """Белый список настроек: чужие ключи и дикие значения в базу не попадают.
     Настройки следуют за аккаунтом между устройствами, как и память."""
     out: dict = {}
-    if raw.get("theme") in ("dark", "light"):
+    if raw.get("theme") in ("dark", "light", "auto"):
         out["theme"] = raw["theme"]
     vol = raw.get("volume")
     if isinstance(vol, (int, float)) and not isinstance(vol, bool) and 0 <= vol <= 1:

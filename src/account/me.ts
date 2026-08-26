@@ -19,7 +19,7 @@ const KEY = 'pingo.settings.v1'
 /* -------------------------------------------------------------- Настройки */
 
 export interface Settings {
-  theme: 'dark' | 'light'
+  theme: 'dark' | 'light' | 'auto'
   volume: number // 0..1 — громкость голоса ИИ
   showText: boolean // показывать ли текст ответа в Conversation
   /** id собеседника из каталога сервера (GET /personas). Здесь это просто
@@ -40,7 +40,7 @@ export const DEFAULT_SETTINGS: Settings = {
 function normalize(raw: unknown): Settings {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   return {
-    theme: r.theme === 'light' ? 'light' : 'dark',
+    theme: r.theme === 'light' || r.theme === 'auto' ? r.theme : 'dark',
     volume:
       typeof r.volume === 'number' && r.volume >= 0 && r.volume <= 1
         ? Math.round(r.volume * 100) / 100
@@ -238,8 +238,10 @@ export interface MeStats {
     next_at: number
     progress: number
   }
-  streak: { days: number; active_today: boolean; freeze_available: boolean }
+  streak: { days: number; active_today: boolean; freeze_available: boolean; best: number }
   week: Array<{ day: string; xp: number; actions: number }>
+  today: string
+  active_days: string[]
   totals: { replies: number; tasks: number; xp: number }
 }
 
@@ -267,6 +269,7 @@ export interface KindAnalytics {
 
 export interface MeAnalytics {
   kinds: Record<string, KindAnalytics>
+  history: Array<{ d: string; k: string; p: number }>
   mistakes: {
     total: number
     by_cat: Array<{ cat: string; n: number; example: { quote: string; correction: string } | null }>

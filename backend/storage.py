@@ -1116,12 +1116,17 @@ def analytics_summary(student_id: str) -> dict:
         " WHERE student_id=? ORDER BY created_at ASC", (student_id,)).fetchall()
 
     kinds: dict = {}
-    for kind, score, mx, _at in rows:
+    history = []
+    for kind, score, mx, at in rows:
         if not mx:
             continue
         k = kinds.setdefault(kind, {"attempts": 0, "pcts": []})
         k["attempts"] += 1
-        k["pcts"].append(100.0 * (score or 0) / mx)
+        pct = 100.0 * (score or 0) / mx
+        k["pcts"].append(pct)
+        # История для графика прогресса: день + тип + процент. Объём — сотни
+        # строк на ученика, агрегирует фронт (неделя/месяц/год из одного ряда).
+        history.append({"d": str(at)[:10], "k": kind, "p": round(pct)})
 
     out_kinds = {}
     for kind, k in kinds.items():
@@ -1168,6 +1173,7 @@ def analytics_summary(student_id: str) -> dict:
     cats = sorted(
         ({"cat": c, **v} for c, v in by_cat.items()), key=lambda x: -x["n"])[:6]
     return {"kinds": out_kinds,
+            "history": history[-400:],
             "mistakes": {"total": len(mrows), "by_cat": cats, "repeats": top_repeats}}
 
 

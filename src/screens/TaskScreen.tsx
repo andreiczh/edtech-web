@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 import { useCurrentPersona } from '../account/me'
-import { ConfirmDialog, CountdownBar, Mascot, Pill } from '../design/ui'
+import { ConfirmDialog, CountdownBar, Pill } from '../design/ui'
 import { askAloud } from '../ege2/askAloud'
 import { requestTaskFeedback, type TaskFeedback } from '../ege2/feedback'
 import { TASKS, feedbackPayload, type TaskId, type TaskVariant } from '../ege2/tasks'
@@ -411,9 +411,7 @@ export function TaskScreen({
                   )}
                   <TaskImages srcs={variant.images} alt={variant.imageCaption} maxHeight="min(30vh, 260px)" />
                 </div>
-              ) : (
-                <Mascot />
-              )}
+              ) : null}
             </div>
 
             {micError && <p className="dialog__err">{micError}</p>}
@@ -432,7 +430,6 @@ export function TaskScreen({
             {variant.images && (
               <TaskImages srcs={variant.images} alt={variant.imageCaption} maxHeight="min(30vh, 280px)" />
             )}
-            <Mascot />
           </div>
         )}
 
@@ -454,7 +451,6 @@ export function TaskScreen({
             {variant.images && (
               <TaskImages srcs={variant.images} alt={variant.imageCaption} maxHeight="min(38vh, 340px)" />
             )}
-            {!variant.readText && !variant.images && <Mascot />}
 
             {/* Пункты плана обязаны быть перед глазами ВО ВРЕМЯ ответа, а не
                 только на подготовке: по ним человек и говорит, и по ним же его

@@ -326,17 +326,12 @@ export function HomeScreen({
           <span className="streakbadge">
             <span className="sp">✨</span>
             <span>
-              {level ? (
-                <>
-                  Уровень {level.level}
-                  <b>{level.name}</b>
-                </>
-              ) : (
-                <>
-                  Стрик
-                  <b>каждый день +1</b>
-                </>
-              )}
+              Лучшая серия
+              <b>
+                {stats
+                  ? `${stats.streak.best} ${stats.streak.best === 1 ? 'день' : 'дней'}`
+                  : '—'}
+              </b>
             </span>
           </span>
         </div>

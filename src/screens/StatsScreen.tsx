@@ -1,515 +1,324 @@
 /**
- * Экран статистики (фото 6 макета): вкладки STATS и MISTAKES.
+ * Прогресс — экран из утверждённого прототипа (фото-канон владельца).
  *
- * ЧЕСТНОСТЬ ДАННЫХ — главное решение этого файла: показываем только то, что
- * где-то реально записано, а если сервер недоступен — прочерк, не выдумку.
- *   - DAY STREAK — с сервера (/me/stats): дни занятий пишутся в базу;
- *   - прогресс по вариантам и последний разбор — localStorage + серверная
- *     синхронизация отметок.
+ * Все числа живые:
+ *  - тайлы — /me/stats (лучшая серия теперь считает сервер) и /me/analytics;
+ *  - график «Успешность по заданиям» — history из /me/analytics: серия на
+ *    каждую работу (день, тип, процент), агрегация по периодам на фронте;
+ *  - «По заданиям» и «Частые ошибки» — kinds и mistakes из /me/analytics.
+ *
+ * «Время за неделю» из прототипа не переносим: система не замеряет длительность
+ * занятий, а выдуманная цифра хуже отсутствующей. Вместо него — реальный XP.
  */
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-import { fetchMeAnalytics, fetchMeStats, type MeAnalytics, type MeStats } from '../account/me'
-import { Pill } from '../design/ui'
 import {
-  TASKS,
-  TASK_ORDER,
-  loadTaskFeedback,
-  taskProgress,
-  type StoredFeedback,
-  type TaskId,
-} from '../ege2/tasks'
-
-/* -------------------------------------------------------------- Раскладка */
-
-const NARROW_QUERY = '(max-width: 720px)'
-
-/** На узком экране список заданий в MISTAKES уезжает наверх и становится
- *  горизонтальным. Медиазапросы живут в ui.css, а инлайновым стилям остаётся
- *  только спросить ширину у браузера. */
-function useNarrow(): boolean {
-  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW_QUERY).matches)
-  useEffect(() => {
-    const mq = window.matchMedia(NARROW_QUERY)
-    const sync = () => setNarrow(mq.matches)
-    sync()
-    mq.addEventListener('change', sync)
-    return () => mq.removeEventListener('change', sync)
-  }, [])
-  return narrow
-}
-
-/* Содержимое выше экрана телефона, а `.app` режет переполнение — прокрутка
-   обязана быть внутри тела. 'safe center': при переполнении обычный center
-   срезает верх, и доскроллить до него нечем. padding — чтобы подъём карточек
-   на ховере не резался краем контейнера. */
-const BODY: CSSProperties = {
-  overflowY: 'auto',
-  justifyContent: 'safe center',
-  padding: '8px 10px',
-}
-
-const BLOCK: CSSProperties = { width: 'min(100%, 940px)' }
-
-const TABS_ROW: CSSProperties = {
-  display: 'flex',
-  justifyContent: 'center',
-  gap: 8,
-  flexShrink: 0,
-}
-
-const CHIPS: CSSProperties = {
-  ...BLOCK,
-  display: 'flex',
-  flexWrap: 'wrap',
-  justifyContent: 'center',
-  gap: 'clamp(8px, 1.4vw, 16px)',
-}
-
-const CHIP: CSSProperties = {
-  flex: '1 1 150px',
-  maxWidth: 220,
-  gap: 4,
-  padding: 'clamp(10px, 1.4vw, 16px)',
-}
-
-const BADGE_BASE: CSSProperties = {
-  display: 'inline-block',
-  marginTop: 6,
-  padding: '1px 8px',
-  borderRadius: 999,
-  fontSize: 10,
-  fontWeight: 800,
-  letterSpacing: '0.08em',
-}
-
-const BADGE_DEMO: CSSProperties = {
-  ...BADGE_BASE,
-  border: '1px dashed var(--text-dim)',
-  color: 'var(--text-dim)',
-}
-
-const BADGE_REAL: CSSProperties = {
-  ...BADGE_BASE,
-  border: '1px solid var(--orb-2)',
-  color: 'var(--text)',
-}
-
-/* ------------------------------------------------------------ Вкладка STATS */
-
-function StatItem({
-  value,
-  unit,
-  label,
-  demo,
-  title,
-}: {
-  value: string
-  unit?: string
-  label: string
-  demo: boolean
-  title: string
-}) {
-  return (
-    <div title={title}>
-      <div className="statrow__value" style={demo ? { opacity: 0.5 } : undefined}>
-        {value}
-        {unit && <span className="statrow__unit"> {unit}</span>}
-      </div>
-      <div className="statrow__label">{label}</div>
-      <span style={demo ? BADGE_DEMO : BADGE_REAL}>{demo ? 'демо' : 'реальное'}</span>
-    </div>
-  )
-}
-
-function StatsTab({
-  progress,
-  feedback,
-  me,
-  onOpenMistakes,
-}: {
-  progress: Array<{ id: TaskId; done: number; total: number }>
-  feedback: Partial<Record<TaskId, StoredFeedback>>
-  me: MeStats | null
-  onOpenMistakes: (id: TaskId) => void
-}) {
-  const done = progress.reduce((s, p) => s + p.done, 0)
-  const total = progress.reduce((s, p) => s + p.total, 0)
-  const pct = total ? Math.round((done / total) * 100) : 0
-
-  // Средний результат — по ПОСЛЕДНЕМУ разбору каждого задания. Это реальное
-  // число, но с честной оговоркой в title: истории нет, только последний срез.
-  const graded = TASK_ORDER.map((id) => feedback[id]).filter(
-    (f): f is StoredFeedback => Boolean(f && f.max > 0),
-  )
-  const avg = graded.length
-    ? Math.round((graded.reduce((s, f) => s + f.score / f.max, 0) / graded.length) * 100)
-    : null
-
-  return (
-    <>
-      <div className="statrow" style={BLOCK}>
-        <StatItem
-          value={me ? String(me.streak.days) : '—'}
-          label="DAY STREAK"
-          demo={false}
-          title={
-            me
-              ? 'Дни занятий подряд — считает сервер по всем твоим устройствам.'
-              : 'Сервер недоступен — стрик не получен.'
-          }
-        />
-        <StatItem
-          value={`${pct}%`}
-          label="PROGRESS"
-          demo={false}
-          title={`Пройдено ${done} из ${total} вариантов по отметкам в этом браузере.`}
-        />
-        <StatItem
-          value={avg === null ? '—' : `${avg}%`}
-          label="СРЕДНИЙ БАЛЛ"
-          demo={false}
-          title={
-            avg === null
-              ? 'Появится после первой сессии с разбором.'
-              : 'Средний процент баллов по последнему разбору каждого задания.'
-          }
-        />
-      </div>
-
-      <div style={CHIPS}>
-        {progress.map(({ id, done: d, total: t }) => {
-          const fb = feedback[id]
-          return (
-            <button
-              key={id}
-              type="button"
-              className="card2 card2--button"
-              style={CHIP}
-              onClick={() => onOpenMistakes(id)}
-              title={`Задание ${id} — ${TASKS[id].label}. Открыть разбор ошибок.`}
-            >
-              <span style={{ fontSize: 'clamp(17px, 2.2vw, 24px)', fontWeight: 800, lineHeight: 1.1 }}>
-                №{id}
-              </span>
-              <span className="card2__sub">{TASKS[id].label}</span>
-              <span className="card2__sub">{`${d}/${t} вариантов`}</span>
-              <span className="card2__sub">
-                {fb ? `последний разбор: ${fb.score}/${fb.max}` : 'разбора ещё не было'}
-              </span>
-            </button>
-          )
-        })}
-      </div>
-
-      <ServerAnalytics />
-    </>
-  )
-}
-
-/* ----------------------------------------------------- Серверная аналитика */
+  fetchMeAnalytics,
+  fetchMeStats,
+  type MeAnalytics,
+  type MeStats,
+} from '../account/me'
 
 const CAT_RU: Record<string, string> = {
-  gram: 'грамматика',
-  lex: 'лексика',
-  order: 'структура вопроса',
-  missing: 'нет ответа',
-  logic: 'логика',
-  phon: 'произношение',
-  other: 'прочее',
+  gram: 'Грамматика',
+  lex: 'Лексика',
+  order: 'Структура вопроса',
+  missing: 'Нет ответа',
+  logic: 'Логика',
+  phon: 'Произношение',
+  other: 'Прочее',
 }
 
-const TREND_MARK: Record<string, { mark: string; hint: string }> = {
-  up: { mark: '↗', hint: 'последние работы лучше предыдущих' },
-  down: { mark: '↘', hint: 'последние работы слабее предыдущих' },
-  flat: { mark: '→', hint: 'без заметной динамики' },
+const KIND_RU: Record<string, string> = {
+  reading: 'Чтение вслух',
+  dialogue: 'Вопросы',
+  interview: 'Интервью',
+  monologue: 'Голосовое',
 }
 
-/**
- * Динамика балла и профиль ошибок — С СЕРВЕРА, по всем устройствам ученика.
- * Отличие от блоков выше принципиальное: там последний срез из localStorage,
- * здесь — история всех записанных разборов. Тренд появляется только когда
- * попыток достаточно для сравнения (см. analytics_summary в storage.py) —
- * стрелка по двум работам врала бы.
- */
-function ServerAnalytics() {
-  const [data, setData] = useState<MeAnalytics | null | 'loading'>('loading')
-  useEffect(() => {
-    let alive = true
-    void fetchMeAnalytics().then((d) => alive && setData(d))
-    return () => {
-      alive = false
+/* Серии графика — как на макете: чтение / вопросы и интервью / голосовое. */
+const SERIES: Array<{ label: string; kinds: string[]; color: string }> = [
+  { label: 'Чтение', kinds: ['reading'], color: '#B7A6F0' },
+  { label: 'Вопросы и интервью', kinds: ['dialogue', 'interview'], color: '#F0537F' },
+  { label: 'Голосовое сообщение', kinds: ['monologue'], color: '#2C97E0' },
+]
+
+type Range = 'week' | 'month' | 'year'
+
+/** Агрегация истории по корзинам периода: среднее по работам серии в корзине.
+    Возвращает подписи корзин и по значению (или null) на серию. */
+function aggregate(history: MeAnalytics['history'], range: Range) {
+  const now = new Date()
+  const buckets: Array<{ label: string; from: string; to: string }> = []
+  if (range === 'week') {
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now)
+      d.setDate(d.getDate() - i)
+      const iso = d.toISOString().slice(0, 10)
+      buckets.push({ label: ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'][d.getDay()], from: iso, to: iso })
     }
-  }, [])
-
-  if (data === 'loading') return null
-  if (data === null) {
-    return (
-      <div className="card2" style={BLOCK}>
-        <p style={{ margin: 0, color: 'var(--card-ink-dim)' }}>
-          Аналитика недоступна: нет связи с сервером.
-        </p>
-      </div>
-    )
+  } else {
+    const months = range === 'month' ? 6 : 12
+    for (let i = months - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const from = d.toISOString().slice(0, 7)
+      buckets.push({
+        label: ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'][d.getMonth()],
+        from,
+        to: from,
+      })
+    }
   }
+  const series = SERIES.map((s) => ({
+    ...s,
+    points: buckets.map((b) => {
+      const inBucket = history.filter((h) => {
+        const key = range === 'week' ? h.d : h.d.slice(0, 7)
+        return key >= b.from && key <= b.to && s.kinds.includes(h.k)
+      })
+      if (inBucket.length === 0) return null
+      return Math.round(inBucket.reduce((sum, h) => sum + h.p, 0) / inBucket.length)
+    }),
+  }))
+  return { labels: buckets.map((b) => b.label), series }
+}
 
-  const kindRows = TASK_ORDER.map((id) => {
-    const kind = TASKS[id].kind
-    return { id, k: data.kinds[kind] }
-  }).filter((r) => r.k && r.k.attempts > 0)
+function AreaChart({ history, range }: { history: MeAnalytics['history']; range: Range }) {
+  const { labels, series } = useMemo(() => aggregate(history, range), [history, range])
+  const W = 900
+  const H = 260
+  const padL = 46
+  const padR = 16
+  const padT = 14
+  const padB = 30
+  const n = labels.length
+  const xs = (i: number) => padL + ((W - padL - padR) * i) / Math.max(1, n - 1)
+  const ys = (v: number) => padT + (H - padB - padT) * (1 - v / 100)
 
-  const { by_cat: cats, repeats, total } = data.mistakes
-
-  if (kindRows.length === 0 && total === 0) {
+  const hasData = series.some((s) => s.points.filter((p) => p !== null).length >= 2)
+  if (!hasData) {
     return (
-      <div className="card2" style={BLOCK}>
-        <p style={{ margin: 0, color: 'var(--card-ink-dim)' }}>
-          Аналитика появится после первых разборов — реши любое задание.
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="card2" style={BLOCK}>
-      <p style={{ margin: '0 0 10px', fontWeight: 800 }}>
-        ДИНАМИКА{' '}
-        <span style={{ fontWeight: 600, color: 'var(--card-ink-dim)', fontSize: 12 }}>
-          по всем записанным разборам, на всех устройствах
-        </span>
+      <p className="statpage__empty">
+        График появится после нескольких разборов — реши пару заданий.
       </p>
-
-      {kindRows.length > 0 && (
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-          {kindRows.map(({ id, k }) => {
-            const t = TREND_MARK[k!.trend]
-            return (
-              <div
-                key={id}
-                title={`${k!.attempts} разборов записано. ${t.hint}.`}
-                style={{
-                  flex: '1 1 130px',
-                  padding: '8px 12px',
-                  borderRadius: 12,
-                  background: 'rgba(0,0,0,0.05)',
-                }}
-              >
-                <div style={{ fontWeight: 800 }}>
-                  №{id}{' '}
-                  <span style={{ fontSize: 18 }} aria-label={t.hint}>
-                    {t.mark}
-                  </span>
-                </div>
-                <div style={{ fontSize: 13, color: 'var(--card-ink-dim)' }}>
-                  средний {k!.avg_pct}% · недавние {k!.recent_pct}%
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--card-ink-dim)' }}>
-                  {k!.attempts} разб.
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {repeats.length > 0 && (
-        <>
-          <p style={{ margin: '0 0 6px', fontWeight: 800, fontSize: 14 }}>
-            ХОДЯТ ЗА ТОБОЙ{' '}
-            <span style={{ fontWeight: 600, color: 'var(--card-ink-dim)', fontSize: 12 }}>
-              одна и та же ошибка в разных работах
-            </span>
-          </p>
-          {repeats.map((r, i) => (
-            <p key={i} style={{ margin: '0 0 4px', fontSize: 14 }}>
-              <span style={{ color: '#b4485c', fontWeight: 700 }}>{r.quote}</span>
-              {' → '}
-              <span style={{ color: '#2f7d63', fontWeight: 700 }}>{r.correction || '—'}</span>
-              <span style={{ color: 'var(--card-ink-dim)' }}> ×{r.n}</span>
-            </p>
-          ))}
-        </>
-      )}
-
-      {cats.length > 0 && (
-        <p style={{ margin: repeats.length ? '10px 0 0' : 0, fontSize: 13, color: 'var(--card-ink-dim)' }}>
-          Всего ошибок записано: {total} ·{' '}
-          {cats.map((c) => `${CAT_RU[c.cat] ?? c.cat}: ${c.n}`).join(' · ')}
-        </p>
-      )}
-    </div>
-  )
-}
-
-/* --------------------------------------------------------- Вкладка MISTAKES */
-
-function MistakesTab({
-  selected,
-  onSelect,
-  feedback,
-}: {
-  selected: TaskId
-  onSelect: (id: TaskId) => void
-  feedback: Partial<Record<TaskId, StoredFeedback>>
-}) {
-  const narrow = useNarrow()
-  const fb = feedback[selected]
-
-  const layout: CSSProperties = {
-    ...BLOCK,
-    display: 'flex',
-    flexDirection: narrow ? 'column' : 'row',
-    alignItems: 'stretch',
-    gap: 'clamp(10px, 1.6vw, 18px)',
-    minHeight: 0,
+    )
   }
 
-  const list: CSSProperties = narrow
-    ? { display: 'flex', flexDirection: 'row', gap: 8, overflowX: 'auto', padding: '4px 2px 8px' }
-    : {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        flex: '0 0 clamp(130px, 18vw, 190px)',
-        padding: 4,
-      }
-
   return (
-    <div style={layout}>
-      <div style={list} role="tablist" aria-label="Задания">
-        {TASK_ORDER.map((id) => {
-          const active = id === selected
-          return (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              className="card2 card2--button"
-              style={{
-                padding: '10px 14px',
-                gap: 2,
-                flex: narrow ? '0 0 auto' : undefined,
-                opacity: active ? 1 : 0.62,
-                outline: active ? '2px solid var(--orb-2)' : undefined,
-                outlineOffset: active ? '2px' : undefined,
-              }}
-              onClick={() => onSelect(id)}
-            >
-              <span style={{ fontWeight: 800 }}>№{id}</span>
-              <span className="card2__sub">{TASKS[id].label}</span>
-            </button>
-          )
-        })}
-      </div>
-
-      <div className="card2" style={{ flex: '1 1 auto', minWidth: 0 }}>
-        <p style={{ margin: 0, fontWeight: 800 }}>
-          №{selected} · {TASKS[selected].label}
-        </p>
-
-        {fb ? (
-          <>
-            <p style={{ margin: '6px 0 12px', fontSize: '0.85em', color: 'var(--card-ink-dim)' }}>
-              Последний разбор от {new Date(fb.when).toLocaleString('ru-RU')} — {fb.score}/
-              {fb.max}. {fb.summary}
-            </p>
-            {fb.errors.length === 0 && (
-              <p style={{ margin: 0, color: 'var(--card-ink-dim)' }}>
-                Ошибок, которые стоило бы вынести отдельно, разбор не нашёл.
-              </p>
+    <svg className="statpage__area" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Успешность по заданиям">
+      {[0, 1, 2, 3, 4].map((g) => {
+        const y = padT + ((H - padB - padT) * g) / 4
+        return (
+          <g key={g}>
+            <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="var(--line)" strokeWidth="1" />
+            <text x={padL - 8} y={y + 4} textAnchor="end" fontSize="12" fill="var(--text-dim)" fontWeight="600">
+              {100 - 25 * g}%
+            </text>
+          </g>
+        )
+      })}
+      {labels.map((l, i) => (
+        <text key={i} x={xs(i)} y={H - 8} textAnchor="middle" fontSize="12" fill="var(--text-dim)" fontWeight="600">
+          {l}
+        </text>
+      ))}
+      {series.map((s) => {
+        const pts = s.points
+          .map((p, i) => (p === null ? null : `${xs(i)},${ys(p)}`))
+          .filter((p): p is string => p !== null)
+        if (pts.length === 0) return null
+        const lastIdx = s.points.reduce<number>((acc, p, i) => (p !== null ? i : acc), 0)
+        const lastVal = s.points[lastIdx] ?? null
+        return (
+          <g key={s.label}>
+            {pts.length >= 2 && (
+              <polygon
+                points={`${pts[0].split(',')[0]},${H - padB} ${pts.join(' ')} ${pts[pts.length - 1].split(',')[0]},${H - padB}`}
+                fill={s.color}
+                opacity="0.09"
+              />
             )}
-            {fb.errors.map((m, i) => (
-              <div className="mistake" key={i}>
-                <div>
-                  <span className="mistake__wrong">{m.quote}</span>{' '}
-                  <span aria-hidden="true">→</span>{' '}
-                  <span className="mistake__right">{m.correction}</span>
-                </div>
-                <div className="mistake__why">{m.explanation}</div>
-              </div>
-            ))}
-          </>
-        ) : (
-          <p style={{ margin: '6px 0 0', color: 'var(--card-ink-dim)' }}>
-            Разбора этого задания ещё не было. Пройди серию — итог последнего разбора
-            сохранится здесь (в этом браузере, базы пока нет).
-          </p>
-        )}
-      </div>
-    </div>
+            <polyline
+              points={pts.join(' ')}
+              fill="none"
+              stroke={s.color}
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {lastVal !== null && (
+              <circle cx={xs(lastIdx)} cy={ys(lastVal)} r="4" fill={s.color} stroke="var(--card-solid)" strokeWidth="2" />
+            )}
+          </g>
+        )
+      })}
+    </svg>
   )
 }
 
-/* ------------------------------------------------------------------ Экран */
+export function StatsScreen({ onBack: _onBack }: { onBack?: () => void }) {
+  const [stats, setStats] = useState<MeStats | null>(null)
+  const [analytics, setAnalytics] = useState<MeAnalytics | null>(null)
+  const [range, setRange] = useState<Range>('month')
 
-type Tab = 'stats' | 'mistakes'
-
-export function StatsScreen({ onBack }: { onBack: () => void }) {
-  const [tab, setTab] = useState<Tab>('stats')
-  const [selected, setSelected] = useState<TaskId>(42)
-
-  /* Стрик приходит с сервера; null — сервер недоступен, покажем прочерк. */
-  const [me, setMe] = useState<MeStats | null>(null)
   useEffect(() => {
     let alive = true
-    void fetchMeStats().then((s) => {
-      if (alive) setMe(s)
-    })
+    void fetchMeStats().then((s) => alive && setStats(s))
+    void fetchMeAnalytics().then((a) => alive && setAnalytics(a))
     return () => {
       alive = false
     }
   }, [])
 
-  /* Отметки и разборы пишет сессия. Обычно статистика монтируется заново после
-     возврата, но если вкладку переключали при живом экране — добираем по фокусу. */
-  const [progress, setProgress] = useState(() =>
-    TASK_ORDER.map((id) => ({ id, ...taskProgress(id) })),
-  )
-  const [feedback, setFeedback] = useState(loadTaskFeedback)
-  useEffect(() => {
-    const refresh = () => {
-      setProgress(TASK_ORDER.map((id) => ({ id, ...taskProgress(id) })))
-      setFeedback(loadTaskFeedback())
-    }
-    window.addEventListener('focus', refresh)
-    return () => window.removeEventListener('focus', refresh)
-  }, [])
+  const weekXp = stats ? stats.week.reduce((s, d) => s + d.xp, 0) : null
 
-  const openMistakes = (id: TaskId) => {
-    setSelected(id)
-    setTab('mistakes')
-  }
+  const kinds = analytics?.kinds ?? {}
+  const kindList = Object.entries(kinds)
+  const totalAttempts = kindList.reduce((s, [, k]) => s + k.attempts, 0)
+  const avgPct =
+    totalAttempts > 0
+      ? Math.round(kindList.reduce((s, [, k]) => s + k.avg_pct * k.attempts, 0) / totalAttempts)
+      : null
+  const recentPct =
+    totalAttempts > 0
+      ? Math.round(
+          kindList.reduce((s, [, k]) => s + k.recent_pct * k.attempts, 0) / totalAttempts,
+        )
+      : null
+  const deltaPct = avgPct !== null && recentPct !== null ? recentPct - avgPct : null
 
-  /* Шапку рисует App — общий каркас верхних экранов, см. комментарий там. */
+  /* «По заданиям»: recent_pct по каждому типу, слабейший подсвечен розовым. */
+  const KIND_ORDER = ['reading', 'dialogue', 'interview', 'monologue']
+  const kindRows = KIND_ORDER.filter((k) => kinds[k]?.attempts > 0).map((k) => ({
+    k,
+    pct: kinds[k].recent_pct,
+  }))
+  const weakest = kindRows.length > 1 ? kindRows.reduce((a, b) => (b.pct < a.pct ? b : a)) : null
+
+  const cats = analytics?.mistakes.by_cat ?? []
+
   return (
-    <div className="screenbody">
-      <div style={TABS_ROW}>
-        <Pill onClick={() => setTab('stats')} quiet={tab !== 'stats'} active={tab === 'stats'}>
-          STATS
-        </Pill>
-        <Pill
-          onClick={() => setTab('mistakes')}
-          quiet={tab !== 'mistakes'}
-          active={tab === 'mistakes'}
-        >
-          MISTAKES
-        </Pill>
+    <div className="statpage">
+      <h1 className="dash__hello" style={{ marginBottom: 18 }}>
+        Прогресс
+      </h1>
+
+      <div className="statpage__tiles">
+        <div className="stattile">
+          <span>XP за неделю</span>
+          <b>{weekXp ?? '—'}</b>
+          {stats && stats.streak.active_today && <i className="statchip statchip--good">сегодня зачтено</i>}
+        </div>
+        <div className="stattile">
+          <span>Средний балл</span>
+          <b>{avgPct !== null ? `${avgPct}%` : '—'}</b>
+          {deltaPct !== null && deltaPct !== 0 && (
+            <i className={`statchip ${deltaPct > 0 ? 'statchip--good' : 'statchip--bad'}`}>
+              {deltaPct > 0 ? '+' : ''}
+              {deltaPct}% последние работы
+            </i>
+          )}
+        </div>
+        <div className="stattile">
+          <span>Заданий выполнено</span>
+          <b>{stats ? stats.totals.tasks : '—'}</b>
+          {stats && <i className="statchip statchip--lav">{stats.totals.replies} реплик в разговоре</i>}
+        </div>
+        <div className="stattile">
+          <span>Лучшая серия</span>
+          <b>{stats ? `${stats.streak.best} ${stats.streak.best === 1 ? 'день' : 'дней'}` : '—'}</b>
+          {stats && <i className="statchip statchip--pink">сейчас {stats.streak.days} 🔥</i>}
+        </div>
       </div>
 
-      <div className="screen__body scroll-soft scroll-soft--onDark" style={BODY}>
-        {tab === 'stats' ? (
-          <StatsTab progress={progress} feedback={feedback} me={me} onOpenMistakes={openMistakes} />
+      <div className="calcard statpage__chartcard">
+        <div className="statpage__chart-head">
+          <div>
+            <p className="calcard__title">Успешность по заданиям</p>
+            <div className="statpage__legend">
+              {SERIES.map((s) => (
+                <span key={s.label}>
+                  <i style={{ background: s.color }} />
+                  {s.label}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="calseg">
+            {(['week', 'month', 'year'] as Range[]).map((r) => (
+              <button
+                key={r}
+                type="button"
+                className={range === r ? 'calseg--on' : ''}
+                onClick={() => setRange(r)}
+              >
+                {r === 'week' ? 'Неделя' : r === 'month' ? 'Месяц' : 'Год'}
+              </button>
+            ))}
+          </div>
+        </div>
+        {analytics ? (
+          <AreaChart history={analytics.history} range={range} />
         ) : (
-          <MistakesTab selected={selected} onSelect={setSelected} feedback={feedback} />
+          <p className="statpage__empty">Загружаю…</p>
         )}
       </div>
 
-      <div className="rowbetween">
-        <Pill onClick={onBack}>← Назад</Pill>
-        <span style={{ fontSize: 'clamp(10px, 1.1vw, 12px)', color: 'var(--text-dim)' }}>
-          Стрик и прогресс — на аккаунте, тексты разборов — в этом браузере
-        </span>
+      <div className="statpage__row">
+        <div className="calcard">
+          <p className="calcard__title" style={{ marginBottom: 12 }}>
+            По заданиям
+          </p>
+          {kindRows.length === 0 && (
+            <p className="statpage__empty">Появится после первых разборов — реши любое задание.</p>
+          )}
+          {kindRows.map(({ k, pct }, i) => (
+            <div className="kindrow" key={k}>
+              <span className="kindrow__name">
+                {i + 1} · {KIND_RU[k] ?? k}
+              </span>
+              <span className="kindrow__bar">
+                <i
+                  style={{
+                    width: `${pct}%`,
+                    background: weakest && weakest.k === k ? '#F0537F' : '#B7A6F0',
+                  }}
+                />
+              </span>
+              <b className="kindrow__pct">{pct}%</b>
+            </div>
+          ))}
+          {weakest && (
+            <p className="statpage__note">
+              {KIND_RU[weakest.k] ?? weakest.k} — твоя точка роста. Вариант на основе ошибок уже
+              собран под неё.
+            </p>
+          )}
+        </div>
+
+        <div className="calcard">
+          <p className="calcard__title" style={{ marginBottom: 12 }}>
+            Частые ошибки
+          </p>
+          {cats.length === 0 && (
+            <p className="statpage__empty">
+              Пока пусто — ошибки появятся здесь после разборов и будут повторяться в заданиях.
+            </p>
+          )}
+          {cats.slice(0, 4).map((c) => (
+            <div className="mistrow" key={c.cat}>
+              <div>
+                <b>{CAT_RU[c.cat] ?? c.cat}</b>
+                {c.example && (
+                  <span>
+                    «{c.example.quote}» → «{c.example.correction}»
+                  </span>
+                )}
+              </div>
+              <i className="mistrow__n">×{c.n}</i>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )
