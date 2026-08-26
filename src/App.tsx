@@ -1,5 +1,7 @@
 /**
- * Маршрутизация по макету SPEAKO.
+ * Маршрутизация. Каркас нового дизайна (перенос утверждённого прототипа):
+ * слева плавающий рейл навигации (Главная / Тренажёр / Статистика / Настройки)
+ * и отдельный док темы, справа контент. Стартовый экран — дашборд.
  *
  * Роутера в проекте нет и он не нужен: экранов немного, а адресная строка не
  * участвует в продукте (ссылку дают на корень). Состояние в одном месте — виден
@@ -9,12 +11,16 @@
  * вариантов этого типа (см. pickSession). DEMO — по одному варианту каждого
  * номера. Итоги показывает SessionScreen.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 
-import { syncSettingsFromServer, useCurrentPersona, useSettings } from './account/me'
+import {
+  syncSettingsFromServer,
+  updateSettings,
+  useCurrentPersona,
+  useSettings,
+} from './account/me'
 import { currentUser, identityId, type AuthUser } from './auth/auth'
 import { DisagreeModal } from './components/Disagree'
-import { TopBar, type TopTab } from './design/ui'
 import {
   pickDemoItems,
   pickSession,
@@ -26,20 +32,17 @@ import { AdminScreen } from './screens/AdminScreen'
 import { LoginScreen, RegisterScreen, WelcomeScreen } from './screens/AuthScreens'
 import { ConversationScreen } from './screens/ConversationScreen'
 import { EgeMenuScreen } from './screens/EgeMenuScreen'
+import { HomeScreen } from './screens/HomeScreen'
 import { ProfileScreen } from './screens/ProfileScreen'
 import { SessionScreen, type SessionItem } from './screens/SessionScreen'
 import { StatsScreen } from './screens/StatsScreen'
-
-const TABS: TopTab[] = [
-  { id: 'conversation', label: 'Conversation' },
-  { id: 'ege', label: 'ЕГЭ' },
-]
 
 type Route =
   | { name: 'welcome' }
   | { name: 'register' }
   | { name: 'login' }
   | { name: 'admin' }
+  | { name: 'home' }
   | { name: 'conversation' }
   | { name: 'ege' }
   | { name: 'stats' }
@@ -51,13 +54,45 @@ type Route =
 function initialRoute(): Route {
   // /?admin — скрытый вход в админку; сервер всё равно требует ADMIN_KEY.
   if (new URLSearchParams(window.location.search).has('admin')) return { name: 'admin' }
-  return currentUser() ? { name: 'conversation' } : { name: 'welcome' }
+  return currentUser() ? { name: 'home' } : { name: 'welcome' }
 }
 
-/* Отзыв уходит В КОПИЛКУ на сервере, а не письмом (05.08.2026). Почтовая
-   ссылка на телефоне открывает пустой почтовый клиент, до которого доходят
-   единицы, и владелец получал ноль отзывов при живых учениках. Теперь та же
-   форма, что и у спора с проверкой, — и всё в одном месте админки. */
+/* Иконки рейла — один набор, один stroke (правило брифа). */
+function RailIcon({ kind }: { kind: 'home' | 'trainer' | 'stats' | 'settings' | 'sun' | 'moon' }) {
+  const paths: Record<string, ReactNode> = {
+    home: (
+      <>
+        <path d="M3 11.5 12 4l9 7.5M5.5 9.7V20h13V9.7" />
+        <path d="M10 20v-5.5h4V20" />
+      </>
+    ),
+    trainer: (
+      <>
+        <rect x="9" y="2.5" width="6" height="12" rx="3" />
+        <path d="M5 11a7 7 0 0 0 14 0M12 18v3.5M8.5 21.5h7" />
+      </>
+    ),
+    stats: <path d="M5 20v-6M12 20V9M19 20V4" />,
+    settings: (
+      <>
+        <circle cx="12" cy="12" r="3.2" />
+        <path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.5a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.5h4l.4-2.5a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.06-.4.1-.8.1-1.2Z" />
+      </>
+    ),
+    sun: (
+      <>
+        <circle cx="12" cy="12" r="4.2" />
+        <path d="M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6M5 5l1.8 1.8M17.2 17.2 19 19M19 5l-1.8 1.8M6.8 17.2 5 19" />
+      </>
+    ),
+    moon: <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z" />,
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {paths[kind]}
+    </svg>
+  )
+}
 
 export default function App() {
   const [route, setRoute] = useState<Route>(initialRoute)
@@ -65,19 +100,16 @@ export default function App() {
   /* Тема (тёмная/светлая) — настройка кабинета, применяется атрибутом на
      корневом .app: CSS-переменные переопределяются одним селектором. */
   const { theme } = useSettings()
-  // Цвет всего приложения задаёт выбранный собеседник: Наставник — прежний
-  // фиолетовый, Гондон — красный, Терпеливый — зелёный. Пока каталог не
-  // приехал, держим фиолетовый: он же и умолчание, мигания не будет.
+  // Характер собеседника задаёт АКЦЕНТ (бегунок, полоса опыта, главные
+  // кнопки) — фон в новом дизайне всегда молочный, см. theme-new.css.
   const paint = useCurrentPersona()?.theme ?? 'blue'
-  // Дублируем тему на <html>: модалки уходят порталом в body, вне .app, и без
-  // этого подтверждение выхода осталось бы фиолетовым посреди зелёного экрана.
+  // Дублируем тему на <html>: модалки уходят порталом в body, вне .app.
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', paint)
   }, [paint])
 
   // Банк заданий, серверный прогресс и настройки аккаунта подтягиваются при
-  // старте и после входа: сессии вычёркивают решённое на любом устройстве,
-  // а тема и громкость следуют за аккаунтом.
+  // старте и после входа.
   useEffect(() => {
     void syncRemoteTasks()
     if (currentUser()) {
@@ -89,28 +121,10 @@ export default function App() {
   const enterApp = useCallback((_u: AuthUser) => {
     void syncServerProgress(identityId())
     void syncSettingsFromServer()
-    setRoute({ name: 'conversation' })
+    setRoute({ name: 'home' })
   }, [])
 
-  /* В кабинете бегунок вкладок остаётся там, где был до его открытия:
-     кабинет — не вкладка, и прыжок бегунка читался бы как смена раздела. */
-  const [lastTab, setLastTab] = useState<'conversation' | 'ege'>('conversation')
-  const activeTab =
-    route.name === 'conversation'
-      ? 'conversation'
-      : route.name === 'profile'
-        ? lastTab
-        : 'ege'
-
-  const onTab = useCallback((id: string) => {
-    setLastTab(id === 'conversation' ? 'conversation' : 'ege')
-    setRoute(id === 'conversation' ? { name: 'conversation' } : { name: 'ege' })
-  }, [])
-
-  const onProfile = useCallback(() => {
-    setRoute({ name: 'profile' })
-  }, [])
-
+  const goHome = useCallback(() => setRoute({ name: 'home' }), [])
   const backToEge = useCallback(() => setRoute({ name: 'ege' }), [])
 
   const startSession = useCallback((id: TaskId) => {
@@ -128,8 +142,6 @@ export default function App() {
   const restartSession = useCallback(() => {
     setRoute((r) => {
       if (r.name !== 'session') return r
-      // Пересобираем сессию заново: отметки «пройдено» уже обновились, и
-      // pickSession выдаст добор из самых давних вариантов.
       const taskId = r.items[0]?.taskId
       if (taskId === undefined) return { name: 'ege' }
       const sameTask = r.items.every((i) => i.taskId === taskId)
@@ -166,17 +178,15 @@ export default function App() {
         <AdminScreen
           onExit={() => {
             window.history.replaceState(null, '', window.location.pathname)
-            setRoute(currentUser() ? { name: 'conversation' } : { name: 'welcome' })
+            setRoute(currentUser() ? { name: 'home' } : { name: 'welcome' })
           }}
         />
       </div>
     )
   }
 
-  // Верхние экраны живут в общем каркасе: шапка с тумблером НЕ пересоздаётся
-  // при переключении вкладок — бегунок плавно едет, «шва» между Conversation и
-  // ЕГЭ нет. Кроссфейдом (ключом .swap) меняется только тело. Сессия задания —
-  // отдельный полноэкранный поток со своей шапкой и полной анимацией входа.
+  // Сессия задания — полноэкранный поток со своей шапкой, рейл не показываем:
+  // на экзамене ничто не должно уводить из задания.
   if (route.name === 'session') {
     return (
       <div className="app" data-theme={paint} data-mode={theme}>
@@ -187,31 +197,93 @@ export default function App() {
     )
   }
 
+  /* Актив рейла: разговор открывается с дашборда и своей кнопки не имеет —
+     подсвечиваем «Главную», путь возврата очевиден. */
+  const railActive =
+    route.name === 'ege' ? 'trainer'
+    : route.name === 'stats' ? 'stats'
+    : route.name === 'profile' ? 'settings'
+    : 'home'
+
+  const RAIL: Array<{ id: typeof railActive; icon: Parameters<typeof RailIcon>[0]['kind']; title: string; go: () => void }> = [
+    { id: 'home', icon: 'home', title: 'Главная', go: goHome },
+    { id: 'trainer', icon: 'trainer', title: 'Тренажёр', go: backToEge },
+    { id: 'stats', icon: 'stats', title: 'Статистика', go: () => setRoute({ name: 'stats' }) },
+    { id: 'settings', icon: 'settings', title: 'Настройки', go: () => setRoute({ name: 'profile' }) },
+  ]
+
   return (
     <div className="app" data-theme={paint} data-mode={theme}>
-      <div className="screen">
-        <TopBar tabs={TABS} active={activeTab} onTab={onTab} onProfile={onProfile} />
+      <div className="appgrid">
+        <aside className="leftcol">
+          <span className="lspacer lspacer--top" />
+          <nav className="rail" aria-label="Основная навигация">
+            {RAIL.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                className={`rail__btn${railActive === b.id ? ' rail__btn--on' : ''}`}
+                title={b.title}
+                aria-label={b.title}
+                onClick={b.go}
+              >
+                <RailIcon kind={b.icon} />
+              </button>
+            ))}
+          </nav>
+          <span className="lspacer" />
+          <div className="themedock" role="group" aria-label="Тема оформления">
+            <button
+              type="button"
+              className={`rail__btn${theme === 'light' ? ' rail__btn--on' : ''}`}
+              title="Светлая тема"
+              aria-label="Светлая тема"
+              onClick={() => updateSettings({ theme: 'light' })}
+            >
+              <RailIcon kind="sun" />
+            </button>
+            <button
+              type="button"
+              className={`rail__btn${theme === 'dark' ? ' rail__btn--on' : ''}`}
+              title="Тёмная тема"
+              aria-label="Тёмная тема"
+              onClick={() => updateSettings({ theme: 'dark' })}
+            >
+              <RailIcon kind="moon" />
+            </button>
+          </div>
+        </aside>
 
-        <div className="swap" key={route.name}>
-          {route.name === 'conversation' && <ConversationScreen onFeedback={onFeedback} />}
+        <div className="screen">
+          <div className="swap" key={route.name}>
+            {route.name === 'home' && (
+              <HomeScreen
+                onTrainer={backToEge}
+                onSpeaking={() => setRoute({ name: 'conversation' })}
+                onDemo={startDemo}
+              />
+            )}
 
-          {route.name === 'ege' && (
-            <EgeMenuScreen
-              onOpenTask={startSession}
-              onDemo={startDemo}
-              onStats={() => setRoute({ name: 'stats' })}
-            />
-          )}
+            {route.name === 'conversation' && <ConversationScreen onFeedback={onFeedback} />}
 
-          {route.name === 'stats' && <StatsScreen onBack={backToEge} />}
+            {route.name === 'ege' && (
+              <EgeMenuScreen
+                onOpenTask={startSession}
+                onDemo={startDemo}
+                onStats={() => setRoute({ name: 'stats' })}
+              />
+            )}
 
-          {route.name === 'profile' && (
-            <ProfileScreen
-              onOpenStats={() => setRoute({ name: 'stats' })}
-              onLogout={() => setRoute({ name: 'welcome' })}
-              onClose={() => setRoute({ name: 'conversation' })}
-            />
-          )}
+            {route.name === 'stats' && <StatsScreen onBack={backToEge} />}
+
+            {route.name === 'profile' && (
+              <ProfileScreen
+                onOpenStats={() => setRoute({ name: 'stats' })}
+                onLogout={() => setRoute({ name: 'welcome' })}
+                onClose={goHome}
+              />
+            )}
+          </div>
         </div>
       </div>
 

@@ -7,6 +7,7 @@ import App from './App.tsx'
 import './index.css'
 import './design/ui.css'
 import './design/theme-new.css'
+import './design/dashboard.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
