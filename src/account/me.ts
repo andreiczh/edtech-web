@@ -29,7 +29,9 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  theme: 'dark',
+  // Новый дизайн (26.08.2026) светлый по умолчанию — молочный фон из брифа.
+  // Выбор в кабинете по-прежнему уважается и приезжает с сервера.
+  theme: 'light',
   volume: 1,
   showText: true,
   persona: 'tutor',

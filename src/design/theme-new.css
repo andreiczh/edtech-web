@@ -1,0 +1,352 @@
+/**
+ * Новый визуальный язык (перенос с прототипа, 26.08.2026).
+ *
+ * Подключается ПОСЛЕДНИМ (main.tsx) и переопределяет ТОКЕНЫ старой темы —
+ * геометрия, анимации и логика экранов не тронуты, поэтому функции не могли
+ * сломаться от перекраски. Источник правды по языку — утверждённый бриф
+ * SPEAKO v2.0: молочный фон #FCFAFF, чёрно-белая база, лаванда #8C73FF как
+ * акцент, мягкие тени, радиусы 24/999, шрифт Onest.
+ *
+ * Цвет собеседника больше НЕ красит весь экран (по брифу фон почти белый и
+ * цветных больших поверхностей нет) — характер персоны остаётся в акценте:
+ * бегунок вкладок, полоса опыта, главные кнопки.
+ */
+
+/* ------------------------------------------------------------------ Шрифт */
+@font-face {
+  font-family: 'Onest';
+  src: url('/fonts/onest-latin-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+20AC, U+2122;
+}
+@font-face {
+  font-family: 'Onest';
+  src: url('/fonts/onest-latin-500.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+20AC, U+2122;
+}
+@font-face {
+  font-family: 'Onest';
+  src: url('/fonts/onest-latin-700.woff2') format('woff2');
+  font-weight: 600 700;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+20AC, U+2122;
+}
+@font-face {
+  font-family: 'Onest';
+  src: url('/fonts/onest-latin-800.woff2') format('woff2');
+  font-weight: 800 1000;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+20AC, U+2122;
+}
+@font-face {
+  font-family: 'Onest';
+  src: url('/fonts/onest-cyrillic-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Onest';
+  src: url('/fonts/onest-cyrillic-500.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* Кириллического 700 у поставщика нет — диапазон закрывает 800-й вес. */
+@font-face {
+  font-family: 'Onest';
+  src: url('/fonts/onest-cyrillic-800.woff2') format('woff2');
+  font-weight: 600 1000;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+body {
+  font-family: 'Onest', 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Базовые токены страницы: welcome и экраны входа живут ВНЕ .app, им нужен
+   тот же молочный фон и тёмные чернила. */
+:root {
+  --bg: #fcfaff;
+  --text: #121214;
+  --text-dim: #77768a;
+  --line: rgba(18, 18, 20, 0.08);
+  --mic-bg: #121214;
+  --mic-icon: #ffffff;
+  color-scheme: light;
+}
+body {
+  background:
+    radial-gradient(900px 600px at 88% -8%, rgba(140, 115, 255, 0.07), transparent 60%),
+    radial-gradient(700px 500px at -6% 104%, rgba(240, 83, 127, 0.045), transparent 55%),
+    var(--bg);
+}
+
+/* ------------------------------------------------- Светлая тема (основная) */
+/* Все три персонные темы получают ОДИН молочный фон — цвет персоны уходит в
+   акцентные переменные ниже, а не в заливку экрана. */
+.app,
+.app[data-theme='blue'],
+.app[data-theme='green'],
+.app[data-theme='red'] {
+  --bg: #fcfaff;
+  --sidebar-bg: #f6f4fb;
+  --sky-1: #fdfcff;
+  --sky-2: #fcfaff;
+  --sky-3: #f5f2fb;
+
+  --text: #121214;
+  --text-dim: #77768a;
+  --line: rgba(18, 18, 20, 0.08);
+
+  --card: rgba(255, 255, 255, 0.94);
+  --card-solid: #ffffff;
+  --card-glass: rgba(255, 255, 255, 0.88);
+  --card-ink: #17151d;
+  --card-ink-dim: #77768a;
+
+  --pill: rgba(255, 255, 255, 0.82);
+  --pill-strong: rgba(255, 255, 255, 0.95);
+  --seg-bg: rgba(18, 18, 20, 0.05);
+
+  /* активная вкладка — чёрная pill (бриф: актив = чёрная плашка) */
+  --thumb-1: #1c1a22;
+  --thumb-2: #121214;
+
+  --glass-line: rgba(18, 18, 20, 0.07);
+  --glass-blur: 24px;
+  --glass-sat: 130%;
+
+  --shadow-card: 0 20px 50px rgba(30, 30, 50, 0.07), 0 2px 8px rgba(30, 30, 50, 0.04);
+  --shadow-card-lifted: 0 26px 60px rgba(30, 30, 50, 0.1), 0 3px 10px rgba(30, 30, 50, 0.05);
+  --shadow-press: 0 3px 8px rgba(30, 30, 50, 0.1);
+
+  --r-card: 24px;
+
+  --mic-bg: #121214;
+  --mic-icon: #ffffff;
+
+  color-scheme: light;
+}
+
+/* Акцент персоны: лаванда у Наставника, зелёный у Терпеливого, тёплый красный
+   у Гондона. Живёт в акцентных элементах, не в фоне. */
+.app,
+.app[data-theme='blue'] {
+  --accent-1: #9b84ff;
+  --accent-2: #8c73ff;
+}
+.app[data-theme='green'] {
+  --accent-1: #3f9e7e;
+  --accent-2: #2f8f6f;
+}
+.app[data-theme='red'] {
+  --accent-1: #d4715c;
+  --accent-2: #c9553f;
+}
+
+/* Фон приложения: почти белый, два едва заметных световых пятна — по брифу
+   ничего предметного. Перебивает радиальный градиент старого слоя. */
+.app,
+.app[data-theme='blue'],
+.app[data-theme='green'],
+.app[data-theme='red'] {
+  background:
+    radial-gradient(900px 600px at 88% -8%, rgba(140, 115, 255, 0.07), transparent 60%),
+    radial-gradient(700px 500px at -6% 104%, rgba(240, 83, 127, 0.045), transparent 55%),
+    var(--bg);
+}
+
+/* --------------------------------------------------- Тёмная тема (новая) */
+.app[data-mode='dark'],
+.app[data-mode='dark'][data-theme='blue'],
+.app[data-mode='dark'][data-theme='green'],
+.app[data-mode='dark'][data-theme='red'] {
+  --bg: #131118;
+  --sidebar-bg: #1d1b26;
+  --sky-1: #17151f;
+  --sky-2: #131118;
+  --sky-3: #100e15;
+
+  --text: #f2f0f8;
+  --text-dim: #9c97b0;
+  --line: rgba(242, 240, 248, 0.09);
+
+  --card: rgba(29, 27, 38, 0.94);
+  --card-solid: #1d1b26;
+  --card-glass: rgba(29, 27, 38, 0.88);
+  --card-ink: #f2f0f8;
+  --card-ink-dim: #9c97b0;
+
+  --pill: rgba(255, 255, 255, 0.07);
+  --pill-strong: rgba(255, 255, 255, 0.12);
+  --seg-bg: rgba(255, 255, 255, 0.06);
+
+  --thumb-1: #f6f4fb;
+  --thumb-2: #eceaf4;
+
+  --glass-line: rgba(242, 240, 248, 0.09);
+
+  --shadow-card: 0 20px 50px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-card-lifted: 0 26px 60px rgba(0, 0, 0, 0.5), 0 3px 10px rgba(0, 0, 0, 0.3);
+  --shadow-press: 0 3px 8px rgba(0, 0, 0, 0.35);
+
+  --mic-bg: #f2f0f8;
+  --mic-icon: #121214;
+
+  color-scheme: dark;
+  background:
+    radial-gradient(900px 600px at 88% -8%, rgba(140, 115, 255, 0.08), transparent 60%),
+    var(--bg);
+}
+
+/* -------------------------------------------------- Точечные переопределения */
+
+/* Подпись активной вкладки на чёрном бегунке — белая; в тёмной теме бегунок
+   светлый — подпись чёрная. */
+.app .tab2--active,
+.app[data-mode='light'] .tab2--active {
+  color: #ffffff;
+}
+.app[data-mode='dark'] .tab2--active {
+  color: #121214;
+}
+
+/* Внутренние световые грани стекла на белом фоне не нужны — остаётся
+   волосяная рамка и мягкая тень. */
+.app .glass,
+.app .card2 {
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--glass-line);
+}
+.app .segmented {
+  box-shadow: none;
+  border: 1px solid var(--glass-line);
+}
+.app .segmented__thumb {
+  box-shadow: 0 6px 16px rgba(18, 18, 20, 0.22);
+}
+.app[data-mode='dark'] .segmented__thumb {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+}
+
+/* Главная кнопка экрана — чёрная pill с белым текстом (бриф). В тёмной теме —
+   светлая с тёмным текстом. */
+.app .pill--accent {
+  background: linear-gradient(180deg, #1c1a22, #121214);
+  color: #ffffff;
+  border-color: transparent;
+}
+.app[data-mode='dark'] .pill--accent {
+  background: linear-gradient(180deg, #f6f4fb, #eceaf4);
+  color: #121214;
+}
+
+/* Полоса отсчёта и опыт — лавандовый акцент персоны уже в --accent-*. */
+
+/* Светлый режим старого слоя перебивается тем же набором токенов, что и база:
+   правило ниже существует, чтобы старый блок .app[data-mode='light'] из ui.css
+   не вернул фиолетовые чернила. */
+.app[data-mode='light'] {
+  --text: #121214;
+  --text-dim: #77768a;
+  --pill: rgba(255, 255, 255, 0.82);
+  --pill-strong: rgba(255, 255, 255, 0.95);
+  --glass-line: rgba(18, 18, 20, 0.07);
+  --shadow-card: 0 20px 50px rgba(30, 30, 50, 0.07), 0 2px 8px rgba(30, 30, 50, 0.04);
+  --shadow-card-lifted: 0 26px 60px rgba(30, 30, 50, 0.1), 0 3px 10px rgba(30, 30, 50, 0.05);
+  --shadow-press: 0 3px 8px rgba(30, 30, 50, 0.1);
+  --mic-bg: #121214;
+  background:
+    radial-gradient(900px 600px at 88% -8%, rgba(140, 115, 255, 0.07), transparent 60%),
+    radial-gradient(700px 500px at -6% 104%, rgba(240, 83, 127, 0.045), transparent 55%),
+    var(--bg);
+}
+
+/* Заголовки — плотный жирный гротеск нового языка. */
+.app h1,
+.app h2 {
+  letter-spacing: -0.5px;
+}
+
+/* ------------------------------------------------- Экраны входа (вне .app) */
+/* Старый макет входа: фиолетовая панель с «жёсткой» тенью-смещением. Новый
+   язык: белая карточка, мягкая тень, чёрная главная кнопка. */
+.authpage {
+  background: transparent; /* фон даёт body — молочный с пятнами света */
+  color: var(--text);
+}
+.auth-title {
+  color: var(--text);
+  letter-spacing: -1px;
+}
+.auth-sub {
+  color: var(--text-dim);
+}
+.auth-panel {
+  background: #ffffff;
+  box-shadow: 0 20px 50px rgba(30, 30, 50, 0.08), 0 2px 8px rgba(30, 30, 50, 0.04);
+  border: 1px solid rgba(18, 18, 20, 0.07);
+  border-radius: 24px;
+}
+.auth-input {
+  background: #f6f4fb;
+  border-color: rgba(18, 18, 20, 0.08);
+  box-shadow: none;
+  color: var(--text);
+}
+.auth-input--static {
+  color: var(--text);
+}
+.auth-input:focus-visible {
+  outline: 2px solid #8c73ff;
+}
+.auth-chip {
+  background: #f6f4fb;
+  border-color: rgba(18, 18, 20, 0.08);
+  color: var(--text-dim);
+  box-shadow: none;
+}
+.auth-chip--active {
+  background: #efeaff;
+  color: #121214;
+  outline: 2px solid #8c73ff;
+}
+.auth-btn {
+  background: #121214;
+  color: #ffffff;
+  box-shadow: 0 8px 20px rgba(18, 18, 20, 0.2);
+}
+.auth-btn--ghost {
+  background: #ffffff;
+  color: #121214;
+  border: 1px solid rgba(18, 18, 20, 0.12);
+  box-shadow: 0 8px 20px rgba(30, 30, 50, 0.06);
+}
+.auth-btn:active:not(:disabled),
+.auth-chip:active {
+  transform: translateY(1px);
+  box-shadow: 0 3px 8px rgba(18, 18, 20, 0.18);
+}
+.auth-soon__card {
+  background: rgba(18, 18, 20, 0.92);
+}
+
+/* Найдено обходом светлых текстов на молочном фоне (26.08.2026): */
+/* аватар кабинета — пастель нового языка, тёмные инициалы */
+.app .profilehead__avatar {
+  background: linear-gradient(135deg, #efeaff, #ffddeb);
+  color: #121214;
+}
+/* метка «выбран» у персоны была светло-лавандовой под тёмный фон */
+.app .persona__mark {
+  color: #8c73ff;
+}
+.app .persona__mark--adult {
+  color: #c9553f;
+}
