@@ -417,6 +417,11 @@ async def transcribe_remote(data: bytes, filename: str = "speech.webm") -> str:
 
 
 _storage_ok = False
+# Состояние фоновой переподключалки — наружу в /health. Пока поле знало одно
+# слово «выключена», отличить мёртвую базу от сборки БЕЗ повтора было нельзя:
+# 26.08.2026 на это ушло десять минут гаданий по проду. Наружу отдаём тип
+# ошибки и счётчик — ни хоста, ни пароля, ни строки подключения в них нет.
+_STORAGE_RETRY: dict = {"attempts": 0, "error": "", "next_at": 0.0}
 
 # ------------------------------------------------------- Входной шлюз API
 #
@@ -2578,12 +2583,15 @@ async def _storage_reconnect(first_delay: float = 30.0) -> None:
     global _storage_ok
     delay = first_delay
     while not _storage_ok:
+        _STORAGE_RETRY["next_at"] = time.monotonic() + delay
         await asyncio.sleep(delay)
         try:
             await asyncio.to_thread(storage.ensure_schema)
         except Exception as e:  # noqa: BLE001
             print(f"[storage] база всё ещё недоступна ({type(e).__name__}: {e})")
             delay = min(delay * 2, 600.0)
+            _STORAGE_RETRY.update(attempts=_STORAGE_RETRY["attempts"] + 1,
+                                  error=type(e).__name__)
             continue
         _storage_ok = True
         print(f"[storage] база ожила — память включена: {storage.describe()}")
@@ -2743,7 +2751,7 @@ def health():
         "llm_base": LLM_BASE_URL,
         "llm_model": LLM_MODEL,
         "llm_key": bool(os.environ.get("LLM_API_KEY")),
-        "memory": storage.describe() if _storage_ok else "выключена",
+        "memory": _storage_health(),
         # Показываем ТОЛЬКО число кодов, не сами коды. «закрыта» здесь — не
         # ошибка, а сигнал владельцу: задай INVITE_CODES в панели Render.
         "registration": _registration_state(),
@@ -2753,6 +2761,26 @@ def health():
         # Месячный бюджет вызовов LLM: mode normal/eco/low/empty (см. _BUDGET).
         "budget_month": _budget_state(),
     }
+
+
+def _storage_health() -> str:
+    """Что с памятью и жив ли фоновый повтор — одной строкой.
+
+    Три разных состояния раньше выглядели одинаково («выключена»): база мертва
+    надолго, база вот-вот подхватится повтором, сервер крутит сборку вообще без
+    повтора. Владельцу они требуют РАЗНЫХ действий, поэтому и ответы разные.
+    """
+    if _storage_ok:
+        return storage.describe()
+    if not _STORAGE_RETRY["next_at"]:
+        # Повтор не запущен: либо старт прошёл удачно и база отвалилась позже,
+        # либо это сборка до 26.08.2026, где повтора не было вовсе.
+        return "выключена (фоновый повтор не запущен)"
+    left = max(0, round(_STORAGE_RETRY["next_at"] - time.monotonic()))
+    if not _STORAGE_RETRY["attempts"]:
+        return f"выключена, первая попытка через {left}с"
+    return (f"выключена: попыток подряд {_STORAGE_RETRY['attempts']}, "
+            f"последняя ошибка {_STORAGE_RETRY['error']}, следующая через {left}с")
 
 
 def _usage_today() -> dict:

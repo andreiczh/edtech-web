@@ -70,6 +70,31 @@ check(main._VOICE_DAY["counts"].get("dev-2") == 2,
       "ученик, которого база не видела, не потерян",
       str(main._VOICE_DAY.get("counts")))
 
+# ------------------------------------------------- /health не врёт про память
+check(main._STORAGE_RETRY["attempts"] == 2,
+      "две неудачи посчитаны для /health", str(main._STORAGE_RETRY))
+check(main._STORAGE_RETRY["error"] == "ConnectionError",
+      "тип последней ошибки запомнен", str(main._STORAGE_RETRY))
+check("sqlite" in main._storage_health(),
+      "живая база: /health показывает хранилище", main._storage_health())
+
+# Сборка БЕЗ повтора и база, отвалившаяся после удачного старта, — это «повтор
+# не запущен», а не «сейчас переподключаемся»: путать их и значит гадать.
+saved_ok, saved_retry = main._storage_ok, dict(main._STORAGE_RETRY)
+main._storage_ok = False
+main._STORAGE_RETRY.update(attempts=0, error="", next_at=0.0)
+check("не запущен" in main._storage_health(),
+      "повтор не запущен — так и написано", main._storage_health())
+main._STORAGE_RETRY.update(attempts=0, error="", next_at=main.time.monotonic() + 30)
+check("первая попытка через" in main._storage_health(),
+      "повтор запланирован — видно, через сколько", main._storage_health())
+main._STORAGE_RETRY.update(attempts=4, error="OperationalError",
+                           next_at=main.time.monotonic() + 120)
+h = main._storage_health()
+check("4" in h and "OperationalError" in h,
+      "идут попытки — видно счётчик и ошибку", h)
+main._storage_ok, _ = saved_ok, main._STORAGE_RETRY.update(**saved_retry)
+
 # ------------------------------------------------- уже живая база: мгновенный выход
 calls["n"] = 0
 main._storage_ok = True
