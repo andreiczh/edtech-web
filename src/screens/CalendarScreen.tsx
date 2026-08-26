@@ -99,7 +99,7 @@ export function CalendarScreen() {
 
   return (
     <div className="calpage">
-      <h1 className="dash__hello" style={{ marginBottom: 18 }}>
+      <h1 className="dash__hello" style={{ marginBottom: 10 }}>
         Календарь занятий
       </h1>
       <div className="calpage__grid">

@@ -117,7 +117,7 @@ export function ProfileScreen({
 
   return (
     <div className="profpage">
-      <h1 className="dash__hello" style={{ marginBottom: 18 }}>
+      <h1 className="dash__hello" style={{ marginBottom: 10 }}>
         Личный кабинет
       </h1>
 

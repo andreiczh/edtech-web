@@ -85,7 +85,7 @@ function aggregate(history: MeAnalytics['history'], range: Range) {
 
 function AreaChart({ history, range }: { history: MeAnalytics['history']; range: Range }) {
   const { labels, series } = useMemo(() => aggregate(history, range), [history, range])
-  const W = 900
+  const W = 1200
   const H = 260
   const padL = 46
   const padR = 16
@@ -199,7 +199,7 @@ export function StatsScreen({ onBack: _onBack }: { onBack?: () => void }) {
 
   return (
     <div className="statpage">
-      <h1 className="dash__hello" style={{ marginBottom: 18 }}>
+      <h1 className="dash__hello" style={{ marginBottom: 10 }}>
         Прогресс
       </h1>
 
@@ -258,7 +258,7 @@ export function StatsScreen({ onBack: _onBack }: { onBack?: () => void }) {
           </div>
         </div>
         {analytics ? (
-          <AreaChart history={analytics.history} range={range} />
+          <AreaChart history={analytics.history ?? []} range={range} />
         ) : (
           <p className="statpage__empty">Загружаю…</p>
         )}

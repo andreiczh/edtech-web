@@ -1190,12 +1190,12 @@ async def me_analytics(x_device: str | None = Header(None),
     Это же сырьё для решения «что решать дальше»."""
     await _require_account(x_device, x_admin_key)
     if not (_storage_ok and x_device):
-        return {"kinds": {}, "mistakes": {"total": 0, "by_cat": [], "repeats": []}}
+        return {"kinds": {}, "history": [], "mistakes": {"total": 0, "by_cat": [], "repeats": []}}
     try:
         return await asyncio.to_thread(storage.analytics_summary, x_device)
     except Exception as e:  # noqa: BLE001
         print(f"[analytics] не собралась ({type(e).__name__}) — отдаю пустую")
-        return {"kinds": {}, "mistakes": {"total": 0, "by_cat": [], "repeats": []}}
+        return {"kinds": {}, "history": [], "mistakes": {"total": 0, "by_cat": [], "repeats": []}}
 
 
 @app.post("/me/nickname")
