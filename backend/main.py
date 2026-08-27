@@ -54,6 +54,7 @@ import ege_scoring
 import disputes
 import fipi_import
 import speak_check
+import phoneme
 import storage
 
 load_dotenv()
@@ -1411,7 +1412,12 @@ async def admin_pronunciation(raw: int = 0,
         # только слова заданий и числа при них.
         return {"samples": await asyncio.to_thread(storage.pron_raw, 20000)}
     stats = await asyncio.to_thread(storage.pron_stats)
-    return {"stats": stats, "collecting": PRON_COLLECT and not _pron_disabled,
+    return {"stats": stats,
+            # Ступень 2 отдельным разделом: у неё другой смысл чисел —
+            # не распределение порога, а счёт явлений (межзубный, долгота).
+            "phoneme": (storage.pron_phoneme_stats() if _storage_ok else {}),
+            "phoneme_ready": phoneme.available(),
+            "collecting": PRON_COLLECT and not _pron_disabled,
             "model": os.environ.get("GOP_MODEL", "base.en"),
             "done_this_process": _pron_done}
 
@@ -3228,6 +3234,21 @@ PRON_TALK_EVERY = int(os.environ.get("PRON_TALK_EVERY", "4"))
 # см. /pron/weakest). Сбор при этом продолжается: числа копятся, а
 # показывать их станет чем, когда появится фонемная ступень.
 PRON_SHOW = os.environ.get("PRON_SHOW", "0").strip() not in ("0", "false", "no")
+
+# СТУПЕНЬ 2 (фонемная). Включается наличием PHONEME_MODEL_URL — пока владелец
+# не выложил веса, её просто нет, и всё работает как раньше.
+# Бюджет общий со ступенью 1: обе ступени фоновые, и вместе они не должны
+# занимать процессор дольше, чем длится сама запись.
+PHONEME_BUDGET_SEC = float(os.environ.get("PHONEME_BUDGET_SEC", "120"))
+# Сколько самых слабых слов разбирать пофонемно. Каждое слово — вырезка ~1 с,
+# на бесплатном Render это 5-7 с процессора.
+PHONEME_WORDS = int(os.environ.get("PHONEME_WORDS", "5"))
+# Полный декод записи — ЕДИНСТВЕННОЕ, что разделило баллы эксперта (§6.28), но
+# он стоит 4-6 минут на бесплатном Render. Поэтому не на каждую работу, а на
+# каждую N-ю: 0 — выключено, 10 — примерно раз в десять чтений. Метрика копится
+# медленно, зато сервис не душится.
+PHONEME_FULL_EVERY = int(os.environ.get("PHONEME_FULL_EVERY", "0"))
+_phoneme_seen = 0
 _pron_talk_seen = 0
 # Считаем СТРОГО ПО ОДНОЙ записи за раз. На 0.1 vCPU (Render) параллельный
 # разбор двух чтений отнял бы процессор у живых запросов остальных учеников.
@@ -3302,6 +3323,15 @@ def _collect_pron_bg(device: str | None, kind: str, variant: str, data: bytes,
             print(f"[pron] {kind}/{method}: {n} слов за {spent:.1f} с "
                   f"(покрыто {res['covered']}/{res['of']}, медиана {res['median']})")
             _track_latency("pron_gop", spent)
+            # СТУПЕНЬ 2. GOP отвечает «подтверждает ли звук это слово» и на
+            # живой речи вердикт эксперта не предсказывает (§6.24): whisper
+            # устойчив к акценту, а эксперт судит акцент. Фонемная модель
+            # называет САМ звук — и на тех же семи записях разделила баллы.
+            # Идём только по САМЫМ СЛАБЫМ словам: полный декод записи стоит
+            # минуты на бесплатном Render, вырезка ~1 с — секунды.
+            if method == "forced" and phoneme.available():
+                _phoneme_pass(pcm, res, device, kind, variant,
+                              spent_before=spent, reference=reference)
             # Громкий отказ вместо тихого тормоза: если на этой машине замер
             # съедает больше отведённого, выключаемся до перезапуска и говорим
             # об этом. Иначе фоновая задача незаметно душила бы весь сервис.
@@ -3315,6 +3345,70 @@ def _collect_pron_bg(device: str | None, kind: str, variant: str, data: bytes,
             _pron_gate.release()
 
     threading.Thread(target=work, daemon=True, name="pron-collect").start()
+
+
+def _phoneme_pass(pcm, gop_result: dict, device: str, kind: str, variant: str,
+                  spent_before: float = 0.0, reference: str = "") -> None:
+    """Ступень 2 по слабым словам: что должно было прозвучать и что прозвучало.
+
+    Вызывается ИЗ фоновой задачи, после того как ученик получил разбор. Всё
+    внутри try: калибровка не имеет права ломать основной путь, а модель может
+    просто не скачаться.
+
+    Whisper выгружается перед проходом и грузится заново при следующем замере:
+    держать резидентно обе модели в 512 МБ Render нельзя (замер §6.20 — пик
+    ~360 МБ по очереди против ~465 МБ вместе), а перезагрузка стоит 1.6 с
+    фоновой задаче, которой никто не ждёт.
+    """
+    import gop  # локально, как и в фоновом сборе: на Render разбор может быть
+                # выключен вовсе, и тянуть whisper в память при импорте незачем
+
+    left = max(0.0, PHONEME_BUDGET_SEC - spent_before)
+    if left < 5:
+        print(f"[phoneme] бюджет уже съеден ступенью 1 ({spent_before:.0f} с) — пропуск")
+        return
+    try:
+        weak = gop.weakest(gop_result, limit=PHONEME_WORDS)
+        weak = [w for w in weak if w.get("spoken", 1)]  # не читал — не произношение
+        if not weak:
+            return
+        gop.unload()
+        t0 = time.time()
+        rows = phoneme.diagnose_words(pcm, weak, budget_sec=left)
+        spent = time.time() - t0
+        if not rows:
+            return
+        # p_norm ступени 2 — доля совпавших фонем: одно число в тех же
+        # границах 0..1, что у ступени 1. Различает их method, не колонка.
+        for r in rows:
+            r["p_norm"] = r["match"]
+            r["p"] = 0.0
+            r["spoken"] = 1
+        n = storage.pron_add(device, kind, variant, rows, "phoneme-base39", "phoneme")
+        summary = phoneme.summary(rows)
+        print(f"[phoneme] {n} слов за {spent:.1f} с, подмен {summary.get('subs', 0)}, "
+              f"критичных {summary.get('critical', 0)} {summary.get('by_kind', {})}")
+        _track_latency("pron_phoneme", spent)
+
+        # Выборочный полный декод: дорогой, но единственный, кто разделяет балл.
+        global _phoneme_seen
+        _phoneme_seen += 1
+        if PHONEME_FULL_EVERY and _phoneme_seen % PHONEME_FULL_EVERY == 0 and reference:
+            whole = phoneme.whole_record(pcm, reference, budget_sec=left)
+            if whole.get("ok"):
+                storage.pron_add(device, kind, variant, [{
+                    "word": "*запись целиком*", "p": 0.0, "p_norm": whole["match"],
+                    "dur": len(pcm) / 16000.0, "spoken": 1,
+                    "expected": f"{whole['phones']} фонем",
+                    "heard": f"{whole['pct']}% расхождений",
+                    "subs": whole["subs"], "drops": whole["drops"],
+                }], "phoneme-base39", "phoneme_full")
+                print(f"[phoneme] полный декод: {whole['pct']}% расхождений "
+                      f"за {whole['seconds']} с")
+    except Exception as e:  # noqa: BLE001 — фоновая калибровка не критична
+        print(f"[phoneme] проход сорвался ({type(e).__name__}: {str(e)[:90]})")
+    finally:
+        phoneme.unload()
 
 
 async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,

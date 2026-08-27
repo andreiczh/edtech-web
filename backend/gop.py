@@ -68,6 +68,15 @@ def _load():
     return _model
 
 
+def unload() -> None:
+    """Отпустить модель. Нужна ступени 2: держать резидентно и whisper, и
+    фонемную модель в 512 МБ бесплатного Render нельзя (§6.20), а обратная
+    загрузка с диска стоит 1.6 с — фоновой задаче это ничего не стоит."""
+    global _model
+    with _lock:
+        _model = None
+
+
 def _tokenizer(model):
     from faster_whisper.tokenizer import Tokenizer
     return Tokenizer(model.hf_tokenizer, model.model.is_multilingual,

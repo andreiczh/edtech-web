@@ -242,6 +242,12 @@ def ensure_schema() -> None:
     # ли ученик произнести слово (spoken): пропущенный кусок текста ложится
     # нулями, неотличимыми от «произнёс ужасно», — см. pron_stats.
     _add_columns("pron_samples", ("method TEXT", "spoken INTEGER"))
+    # Ступень 2 (фонемная, method='phoneme'): что слово ДОЛЖНО было звучать и
+    # что прозвучало. Строки — цепочки ARPA через пробел, счётчики отдельно,
+    # чтобы сводку можно было считать в SQL, а не разбором строк.
+    _add_columns("pron_samples", ("expected TEXT", "heard TEXT",
+                                  "subs INTEGER", "drops INTEGER",
+                                  "critical TEXT"))
     _add_columns("disputes", (
         "target TEXT", "target_key TEXT", "target_label TEXT", "reason TEXT",
         "claim_score INTEGER", "said TEXT", "context TEXT",
@@ -812,13 +818,25 @@ def pron_add(student_id: str, kind: str, variant: str, words: list[dict],
     now = _now()
     n = 0
     for i, w in enumerate(words):
+        # Ступень 2 кладёт долю совпавших фонем в p_norm: одно число, по
+        # которому потом выбирается порог, живёт в той же колонке и тех же
+        # границах 0..1, что и показатель ступени 1. Смешать их нельзя —
+        # различает method, см. pron_stats.
+        crit = w.get("critical") or []
+        crit_s = ",".join(str(c.get("kind", "")) for c in crit) if crit else None
         _exec("INSERT INTO pron_samples(id, student_id, kind, variant, word, ord,"
-              " p, p_norm, dur, model, method, spoken, created_at)"
-              " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              " p, p_norm, dur, model, method, spoken, expected, heard, subs,"
+              " drops, critical, created_at)"
+              " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
               (str(uuid.uuid4()), student_id, kind, variant[:64],
                str(w.get("word") or "")[:40], i, float(w.get("p") or 0.0),
                float(w.get("p_norm") or 0.0), float(w.get("dur") or 0.0),
-               model[:32], method[:16], int(w.get("spoken", 1)), now))
+               model[:32], method[:16], int(w.get("spoken", 1)),
+               (str(w.get("expected"))[:120] if w.get("expected") else None),
+               (str(w.get("heard"))[:120] if w.get("heard") else None),
+               (int(w["subs"]) if w.get("subs") is not None else None),
+               (int(w["drops"]) if w.get("drops") is not None else None),
+               crit_s, now))
         n += 1
     return n
 
@@ -904,6 +922,45 @@ def pron_stats() -> dict:
                           f"SELECT word, p_norm, kind FROM pron_samples"  # noqa: S608
                           f" WHERE {cond} ORDER BY p_norm LIMIT 12").fetchall()]
         out["by_method"][method] = d
+    return out
+
+
+def pron_phoneme_stats() -> dict:
+    """Сводка ступени 2: какие звуки подменяются и как часто.
+
+    Отдельно от pron_stats намеренно. Там распределение ОДНОГО показателя, по
+    которому ищется порог; здесь — счёт ЯВЛЕНИЙ (межзубный, долгота, v/w),
+    потому что эксперт задания 1 считает именно их, а не абстрактную близость.
+    """
+    out: dict = {"words": 0, "records": 0, "by_kind": {}, "worst_words": [],
+                 "top_subs": []}
+    row = _exec("SELECT COUNT(*), COUNT(DISTINCT variant) FROM pron_samples"
+                " WHERE method='phoneme'").fetchone()
+    out["words"] = int(row[0] or 0)
+    out["records"] = int(row[1] or 0)
+    if not out["words"]:
+        return out
+
+    for (crit,) in _exec("SELECT critical FROM pron_samples"
+                         " WHERE method='phoneme' AND critical IS NOT NULL"
+                         " AND critical <> ''").fetchall():
+        for kind in str(crit).split(","):
+            kind = kind.strip()
+            if kind:
+                out["by_kind"][kind] = out["by_kind"].get(kind, 0) + 1
+
+    out["worst_words"] = [
+        {"word": r[0], "expected": r[1], "heard": r[2], "match": round(float(r[3]), 3)}
+        for r in _exec("SELECT word, expected, heard, p_norm FROM pron_samples"
+                       " WHERE method='phoneme' ORDER BY p_norm LIMIT 15").fetchall()]
+
+    # Какие слова чаще прочих оказываются слабыми — подсказка, что включать
+    # в тренировку, когда порог наконец будет выбран.
+    out["top_subs"] = [
+        {"word": r[0], "n": int(r[1]), "avg_match": round(float(r[2] or 0), 3)}
+        for r in _exec("SELECT word, COUNT(*), AVG(p_norm) FROM pron_samples"
+                       " WHERE method='phoneme' GROUP BY word"
+                       " HAVING COUNT(*) > 1 ORDER BY AVG(p_norm) LIMIT 15").fetchall()]
     return out
 
 

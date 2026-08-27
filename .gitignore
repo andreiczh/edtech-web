@@ -20,3 +20,8 @@ __pycache__/
 
 # Pamyat ob oshibkah: lokalnaya SQLite-baza i ee WAL-faily. Dannye uchenikov, ne kod.
 backend/pingo.db*
+
+# Веса фонемной ступени 2: 123 МБ int8-ONNX + словарь CMUdict качаются по
+# PHONEME_MODEL_URL в этот кэш. В git им нельзя ни по весу, ни по лицензии
+# (у модели её нет вовсе, см. DECISIONS §6.28).
+backend/.models/
