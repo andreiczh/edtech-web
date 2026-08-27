@@ -21,6 +21,8 @@ import glob
 import json
 import os
 import sys
+import time
+import urllib.error
 import urllib.request
 
 URL = os.environ.get(
@@ -28,6 +30,11 @@ URL = os.environ.get(
     "https://pingo-ai-dpd9.onrender.com/admin/restore")
 BACKUP_DIR = os.path.join(os.path.expanduser("~"), "pingo-backups")
 TIMEOUT_SEC = 300
+# Дамп с картинками — 5+ МБ, и одним куском он не доезжает: TLS рвётся
+# посреди тела (SSL: UNEXPECTED_EOF_WHILE_READING, поймано 27.08.2026 на
+# первой же настоящей заливке). Режем на порции около мегабайта.
+CHUNK_BYTES = 1_000_000
+RETRIES = 3
 
 
 def _admin_key() -> str:
@@ -43,6 +50,44 @@ def _admin_key() -> str:
     except OSError:
         pass
     return ""
+
+
+def _chunks(tables: dict) -> list:
+    """Режем дамп на порции ~CHUNK_BYTES: строки одной таблицы не склеиваем
+    с соседними произвольно — просто набираем, пока порция не потяжелеет."""
+    out, cur, cur_bytes = [], {}, 0
+    for t, rows in tables.items():
+        for row in rows:
+            size = len(json.dumps(row, ensure_ascii=False).encode("utf-8"))
+            if cur_bytes + size > CHUNK_BYTES and cur:
+                out.append(cur)
+                cur, cur_bytes = {}, 0
+            cur.setdefault(t, []).append(row)
+            cur_bytes += size
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _post(tables: dict, key: str, force: bool) -> dict:
+    url = URL + ("?force=1" if force else "")
+    data = json.dumps({"tables": tables}).encode("utf-8")
+    last = None
+    for attempt in range(1, RETRIES + 1):
+        req = urllib.request.Request(
+            url, data=data,
+            headers={"Content-Type": "application/json", "X-Admin-Key": key},
+            method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError:
+            raise  # ответ сервера — не сетевая беда, повтор не поможет
+        except Exception as e:  # noqa: BLE001 — обрыв TLS/сети: пробуем ещё
+            last = e
+            print(f"    сеть подвела ({type(e).__name__}), попытка {attempt} из {RETRIES}")
+            time.sleep(3 * attempt)
+    raise last
 
 
 def main() -> int:
@@ -66,24 +111,31 @@ def main() -> int:
     print(f"Дамп: {os.path.basename(path)} от {dump.get('created_at', '?')}")
     print("Строк по таблицам:", {t: len(r) for t, r in tables.items()})
 
-    req = urllib.request.Request(
-        URL,
-        data=json.dumps({"tables": tables}).encode("utf-8"),
-        headers={"Content-Type": "application/json", "X-Admin-Key": key},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")[:300]
-        print(f"Сервер ответил {e.code}: {detail}")
-        if e.code == 409:
-            print("База не пустая. Если перезаливка сознательная — добавь ?force=1 к URL.")
-        return 1
+    parts = _chunks(tables)
+    print(f"Порций: {len(parts)}")
 
-    print("Восстановлено:", body.get("restored"))
-    print(f"Всего строк: {body.get('rows')}")
+    total = 0
+    for n, part in enumerate(parts, 1):
+        what = ", ".join(f"{t} {len(r)} стр." for t, r in part.items())
+        print(f"  [{n}/{len(parts)}] {what}")
+        try:
+            # Пустоту базы проверяет ТОЛЬКО первая порция: дальше она уже не
+            # пуста нашими же строками, и force здесь — не обход защиты.
+            body = _post(part, key, force=(n > 1))
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", errors="replace")[:300]
+            print(f"Сервер ответил {e.code}: {detail}")
+            if e.code == 409:
+                print("База не пустая — восстановление отменено, ничего не залито.")
+            return 1
+        except Exception as e:  # noqa: BLE001
+            print(f"Порция {n} не доехала: {type(e).__name__}: {e}")
+            print("Часть строк уже залита; повторный запуск упрётся в 409 — "
+                  "чистить базу и начинать заново.")
+            return 1
+        total += body.get("rows", 0)
+
+    print(f"Готово. Всего строк: {total}")
     return 0
 
 
