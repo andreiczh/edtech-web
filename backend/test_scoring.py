@@ -265,14 +265,13 @@ mono_obs_rescue = {
 }
 fb_resc = scoring._score_feedback(
     "monologue", mono_obs_rescue,
-    {"transcript": "Philomach. I want to tell you about two photos. "
-                   "That's all, bye!"})
+    {"transcript": "Philomach. I want to tell you about two photos. In the first photo I can see a girl reading a book. In the second photo I can see two boys playing football. Both photos show hobbies. The first hobby is quiet. The second hobby is active. Reading develops imagination. Sport makes you healthy. Reading can be lonely. Sport can be dangerous. I prefer reading because it is calm. It helps me relax. That's all, bye!"})
 check(fb_resc["criteria"][1]["score"] == 3,
       "организация не падает из-за съеденного распознаванием обращения",
       f"балл {fb_resc['criteria'][1]['score']}")
 fb_nores = scoring._score_feedback(
     "monologue", mono_obs_rescue,
-    {"transcript": "I want to tell you about two photos. That's all, bye!"})
+    {"transcript": "I want to tell you about two photos. In the first photo I can see a girl reading a book. In the second photo I can see two boys playing football. Both photos show hobbies. The first hobby is quiet. The second hobby is active. Reading develops imagination. Sport makes you healthy. Reading can be lonely. Sport can be dangerous. I prefer reading because it is calm. It helps me relax. That's all, bye!"})
 check(fb_nores["criteria"][1]["score"] == 1,
       "настоящее отсутствие обращения по-прежнему роняет организацию",
       f"балл {fb_nores['criteria'][1]['score']}")

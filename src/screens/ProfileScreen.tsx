@@ -331,6 +331,11 @@ export function ProfileScreen({
               Ник + пароль, почты нет. Пароль знаешь только ты — потерял, попроси сброс у
               владельца.
             </p>
+            <p className="profnote" style={{ margin: '0 0 12px' }}>
+              <a href="/privacy.html" target="_blank" rel="noreferrer">
+                Как хранятся твои данные
+              </a>
+            </p>
             <button type="button" className="proflogout" onClick={doLogout}>
               Выйти из аккаунта
             </button>

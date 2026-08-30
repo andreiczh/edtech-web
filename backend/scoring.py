@@ -276,7 +276,24 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
                 "errors": errors, "criteria": criteria}
 
     # monologue: модель отвечает признаками «да/нет», вердикты выводит шкала
-    aspects = ege_scoring.aspect_verdicts(obs.get("aspects") or [])
+    # Форма глагола мнения (аспект 4) — КОДОМ из самой речи (30.08.2026).
+    # Правило verb_form_matches стояло с §6.26, но работало вхолостую: модель
+    # цитировала формы через раз, и «I'd prefer» на план «you prefer» проходил
+    # незамеченным — ровно за это эксперт обнулил работу из методички. Теперь
+    # обе формы ищет регэксп: план — в brief задания, мнение — в транскрипте;
+    # пустая находка оставляет цитату модели, ложных срабатываний нет.
+    raw_aspects = [dict(c) if isinstance(c, dict) else c
+                   for c in (obs.get("aspects") or [])]
+    _speech_form = ege_scoring.opinion_form_from_speech(
+        str(ctx.get("transcript") or ""))
+    _plan_form = ege_scoring.plan_form_from_brief(str(ctx.get("brief") or ""))
+    for c in raw_aspects:
+        if isinstance(c, dict) and int(c.get("n") or 0) == 4:
+            if _speech_form:
+                c["student_verb_form"] = _speech_form
+            if _plan_form:
+                c["plan_verb_form"] = _plan_form
+    aspects = ege_scoring.aspect_verdicts(raw_aspects)
     # Ошибки без опоры в речи ученика вон ДО подсчёта (05.08.2026): их число
     # напрямую решает баллы за организацию и за язык, а проверить их ученику
     # нечем. Выдуманная цитата и цитата, которой нет вовсе, несправедливы
@@ -291,10 +308,19 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
     lang = ege_scoring.drop_unsupported(
         obs.get("lang_errors") or [], transcript, need_quote=True)
     grave = sum(1 for e in lang if e.get("grave"))
-    try:
-        phrases = int(obs.get("phrases") or 0)
-    except (TypeError, ValueError):
-        phrases = 0
+    # Объём — КОДОМ, не мнением модели (30.08.2026): модельное «фраз: N»
+    # гуляло от 0 до 15 на одной работе, а объём решает балл ступенями
+    # (7 и меньше — ноль за всё задание): на живом прогоне прода сбойный
+    # счёт обнулил нормальный ответ. count_phrases детерминирован, на
+    # восьми работах ФИПИ совпал с ожиданиями (короткая работа эксперта
+    # с нулём — 6 фраз, полные — 12-18). Модельное число — запасной путь
+    # на случай пустого транскрипта в ctx.
+    phrases = ege_scoring.count_phrases(transcript)
+    if not phrases:
+        try:
+            phrases = int(obs.get("phrases") or 0)
+        except (TypeError, ValueError):
+            phrases = 0
 
     # Обращение к другу — самое короткое место ответа и потому самое хрупкое:
     # одно искажённое распознаванием слово стоило ученику двух баллов по

@@ -170,6 +170,30 @@ def merge_two_passes(first: dict, second: dict) -> dict:
     return out
 
 
+def opinion_form_from_speech(transcript: str) -> str:
+    """Фраза мнения из САМОЙ РЕЧИ — кодом, не цитатой модели.
+
+    Форма глагола в аспекте 4 решает вердикт (план «you prefer» против ответа
+    «I'd prefer» — неточный аспект), а модель цитировала формы через раз, и
+    правило verb_form_matches работало вхолостую. Регэксп находит первую
+    конструкцию мнения в транскрипте; пустая строка — мнения не нашли, решение
+    остаётся за цитатой модели.
+    """
+    m = re.search(
+        r"\bI(?:'d| would| will|'ll)?\s+(?:definitely\s+|personally\s+)?"
+        r"(?:prefer(?:red)?|choose|chose|pick(?:ed)?|rather)\b[^.!?]{0,40}",
+        str(transcript or ""), re.IGNORECASE)
+    return m.group(0).strip() if m else ""
+
+
+def plan_form_from_brief(brief: str) -> str:
+    """Форма мнения, которую требует ПЛАН задания, — из текста brief кодом."""
+    m = re.search(
+        r"\byou(?:'d| would)?\s+prefer(?:red)?\b",
+        str(brief or ""), re.IGNORECASE)
+    return m.group(0).strip() if m else ""
+
+
 def aspect_verdicts(checks: list[dict]) -> list[dict]:
     """Вердикты по четырём аспектам из простых признаков «да/нет».
 

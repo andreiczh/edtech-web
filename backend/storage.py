@@ -1072,6 +1072,83 @@ def corpus_delete(cid: str) -> bool:
     return bool(getattr(cur, "rowcount", 0))
 
 
+def funnel_summary(days: int = 14) -> dict:
+    """Воронка запуска из УЖЕ собираемых данных — без единого нового события.
+
+    Вопросы, на которые она отвечает (и на которые нечем было ответить
+    30.08.2026, за два дня до MVP): сколько зарегистрировавшихся дошло до
+    первого разбора, как быстро, сколько вернулось назавтра и где люди
+    отваливаются. Всё считается из accounts + results + activity_days:
+    новых таблиц и событий с фронта не нужно, а значит, воронка честна задним
+    числом — она видит и тех, кто пришёл до её появления.
+
+    Объёмы пилотные (десятки учеников), поэтому три запроса и сборка в Python:
+    SQL-джойны тут были бы преждевременной оптимизацией.
+    """
+    accounts = _exec("SELECT id, created_at FROM accounts").fetchall()
+    firsts = dict(_exec(
+        "SELECT student_id, MIN(created_at) FROM results GROUP BY student_id"
+    ).fetchall())
+    counts = dict(_exec(
+        "SELECT student_id, COUNT(*) FROM results GROUP BY student_id"
+    ).fetchall())
+    act: dict = {}
+    for sid, day in _exec("SELECT student_id, day FROM activity_days").fetchall():
+        act.setdefault(sid, set()).add(str(day))
+
+    def day_of(ts) -> str:
+        return str(ts)[:10]
+
+    def next_day(day: str) -> str:
+        d = datetime.strptime(day, "%Y-%m-%d") + timedelta(days=1)
+        return d.strftime("%Y-%m-%d")
+
+    horizon = (datetime.now(timezone.utc) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    by_day: dict = {}
+    total = with_task = came_back = 0
+    delays_min: list[float] = []
+    for acc_id, created in accounts:
+        total += 1
+        reg_day = day_of(created)
+        first = firsts.get(acc_id)
+        if reg_day >= horizon:
+            row = by_day.setdefault(reg_day, {"registered": 0, "reached_task": 0,
+                                              "returned_next_day": 0})
+            row["registered"] += 1
+            if first is not None:
+                row["reached_task"] += 1
+            if next_day(reg_day) in act.get(acc_id, set()):
+                row["returned_next_day"] += 1
+        if first is not None:
+            with_task += 1
+            try:
+                c = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+                f = datetime.fromisoformat(str(first).replace("Z", "+00:00"))
+                delays_min.append(max(0.0, (f - c).total_seconds() / 60.0))
+            except ValueError:
+                pass
+        if next_day(day_of(created)) in act.get(acc_id, set()):
+            came_back += 1
+
+    delays_min.sort()
+    tasks_by_active = [counts[a] for a, _ in accounts if a in counts]
+    return {
+        "days": [{"day": d, **v} for d, v in sorted(by_day.items(), reverse=True)],
+        "cohort": {
+            "accounts": total,
+            "reached_first_task": with_task,
+            "reached_pct": round(100.0 * with_task / total, 1) if total else 0.0,
+            "returned_next_day": came_back,
+            "returned_pct": round(100.0 * came_back / total, 1) if total else 0.0,
+            "median_minutes_to_first_task": (
+                round(delays_min[len(delays_min) // 2], 1) if delays_min else None),
+            "avg_tasks_per_active": (
+                round(sum(tasks_by_active) / len(tasks_by_active), 1)
+                if tasks_by_active else 0.0),
+        },
+    }
+
+
 def pron_raw(limit: int = 20000) -> list[dict]:
     """Сырые строки копилки — для подбора порога снаружи.
 

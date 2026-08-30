@@ -1473,6 +1473,50 @@ async def admin_corpus_delete(cid: str, x_admin_key: str | None = Header(None)):
     return {"ok": ok}
 
 
+@app.post("/admin/notify")
+async def admin_notify(body: dict = Body(...),
+                       x_admin_key: str | None = Header(None)):
+    """Скрипты с ноута владельца кричат в его Telegram через прод.
+
+    Родился из приёмки бэкапа: провал проверки на ноуте был виден только в
+    backup.log, который никто не открывает, — то есть невидим ровно так же,
+    как молчаливо испорченные дампы, копившиеся три дня. У ноута нет
+    телеграм-токена, у прода есть; ключ админки — та же граница доверия, что
+    у /admin/backup, которым эти скрипты уже пользуются.
+    """
+    _require_admin(x_admin_key)
+    text = str(body.get("text") or "").strip()[:800]
+    if not text:
+        raise HTTPException(status_code=400, detail="Пустой текст.")
+    notify_owner("laptop", text)
+    return {"ok": True}
+
+
+@app.get("/admin/funnel")
+async def admin_funnel(days: int = 14, x_admin_key: str | None = Header(None)):
+    """Воронка запуска: регистрация -> первый разбор -> возврат назавтра.
+
+    Считается из уже собираемых данных (accounts/results/activity_days) — без
+    событий с фронта, поэтому видит и тех, кто пришёл до появления воронки.
+    Ошибки за неделю — из usage_daily (пишет middleware _count_http).
+    """
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    out = await asyncio.to_thread(storage.funnel_summary, max(1, min(60, days)))
+    # Ошибки по дням за ту же глубину: сколько раз ученики видели 5xx и 429.
+    try:
+        report = await asyncio.to_thread(storage.usage_report, max(1, min(60, days)))
+        out["errors"] = {
+            day: {k: v for k, v in row.items() if k.startswith("http_")}
+            for day, row in report.items()
+            if any(k.startswith("http_") for k in row)
+        }
+    except Exception:  # noqa: BLE001 — воронка важнее сводки ошибок
+        out["errors"] = {}
+    return out
+
+
 @app.get("/admin/pronunciation")
 async def admin_pronunciation(raw: int = 0,
                               x_admin_key: str | None = Header(None)):
@@ -2753,6 +2797,37 @@ async def _storage_reconnect(first_delay: float = 30.0) -> None:
         if MONTHLY_LLM_BUDGET > 0:
             _BUDGET["synced"] = time.monotonic()
             _budget_sync_bg()
+
+
+# Пути, по которым ходит УЧЕНИК: на них считаем классы ответов, чтобы воронка
+# могла ответить «сколько раз люди видели ошибку», а не только «сколько дошло».
+# /ping, /health и статика не в счёт — это фон, он размыл бы картину.
+_COUNTED_PREFIXES = ("/talk", "/task_feedback", "/monologue", "/auth",
+                     "/me/", "/tasks", "/speak", "/talk_review")
+
+
+@app.middleware("http")
+async def _count_http(request, call_next):
+    """Классы ответов в usage_daily: http_ok / http_429 / http_5xx.
+
+    Фоном и без исключений наружу: счётчик не имеет права ломать сам запрос.
+    """
+    try:
+        response = await call_next(request)
+    except Exception:
+        # Упавший обработчик станет 500 в ASGI — считаем и пробрасываем.
+        if request.url.path.startswith(_COUNTED_PREFIXES):
+            _track_usage(http_5xx=1)
+        raise
+    if request.url.path.startswith(_COUNTED_PREFIXES):
+        code = int(getattr(response, "status_code", 0) or 0)
+        if code >= 500:
+            _track_usage(http_5xx=1)
+        elif code == 429:
+            _track_usage(http_429=1)
+        elif code < 400:
+            _track_usage(http_ok=1)
+    return response
 
 
 @app.on_event("startup")
