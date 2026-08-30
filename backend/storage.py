@@ -221,6 +221,24 @@ def ensure_schema() -> None:
         # (задача отключилась, файл удалили, ноут спал), и снаружи это никак
         # не видно — задача в планировщике проваливается молча. Пусть сервер
         # сам показывает, когда его последний раз забирали.
+        # КОРПУС ГОЛОСА (28.08.2026). Здесь ЛЕЖИТ САМА ЗАПИСЬ — единственное
+        # место в системе, кроме dispute_shots, где это так, и потому единственное
+        # с явным согласием: без consent=1 в настройках ученика сюда не попадает
+        # ничего. Зачем: любая оценка произношения и любая проверка точности
+        # упирались в отсутствие живых размеченных работ, а покупать их негде.
+        #
+        # Разметка КЛАДЁТСЯ СРАЗУ и автоматически: транскрипт, балл по шкале
+        # ФИПИ, разбор по критериям, ошибки с цитатами, числа GOP и осмотр
+        # звука. Ручная проверка владельца (verified) добавляется поверх —
+        # так корпус годен и как обучающий набор, и как сетка точности.
+        "CREATE TABLE IF NOT EXISTS voice_corpus ("
+        " id TEXT PRIMARY KEY, student_id TEXT NOT NULL, kind TEXT NOT NULL,"
+        " variant TEXT, mime TEXT, data BLOB NOT NULL, bytes INTEGER NOT NULL,"
+        " duration REAL, transcript TEXT, reference TEXT,"
+        " score INTEGER, max_score INTEGER, labels TEXT,"
+        " verified TEXT, verified_at TEXT, created_at TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_corpus_created ON voice_corpus(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_corpus_kind ON voice_corpus(kind)",
         "CREATE TABLE IF NOT EXISTS meta ("
         " key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS dispute_shots ("
@@ -242,9 +260,10 @@ def ensure_schema() -> None:
     # ли ученик произнести слово (spoken): пропущенный кусок текста ложится
     # нулями, неотличимыми от «произнёс ужасно», — см. pron_stats.
     _add_columns("pron_samples", ("method TEXT", "spoken INTEGER"))
-    # Ступень 2 (фонемная, method='phoneme'): что слово ДОЛЖНО было звучать и
-    # что прозвучало. Строки — цепочки ARPA через пробел, счётчики отдельно,
-    # чтобы сводку можно было считать в SQL, а не разбором строк.
+    # Наследство фонемной ступени 2 (убрана 28.08.2026, DECISIONS §6.29).
+    # Колонки оставлены пустыми намеренно: на проде они уже созданы, а
+    # восстановление из бэкапа сверяет схемы по факту — удалить их значит
+    # сломать заливку вчерашнего дампа.
     _add_columns("pron_samples", ("expected TEXT", "heard TEXT",
                                   "subs INTEGER", "drops INTEGER",
                                   "critical TEXT"))
@@ -925,43 +944,123 @@ def pron_stats() -> dict:
     return out
 
 
-def pron_phoneme_stats() -> dict:
-    """Сводка ступени 2: какие звуки подменяются и как часто.
+def corpus_add(student_id: str, kind: str, variant: str, audio: bytes,
+               mime: str, duration: float, transcript: str, reference: str,
+               score: int | None, max_score: int | None, labels: dict) -> str:
+    """Записать работу в корпус вместе с автоматической разметкой.
 
-    Отдельно от pron_stats намеренно. Там распределение ОДНОГО показателя, по
-    которому ищется порог; здесь — счёт ЯВЛЕНИЙ (межзубный, долгота, v/w),
-    потому что эксперт задания 1 считает именно их, а не абстрактную близость.
+    Вызывается ФОНОМ после того, как ученик получил разбор: сбор корпуса не
+    должен стоить ему ни секунды. Согласие проверяется ВЫШЕ по стеку (main),
+    здесь его нет намеренно — функция не должна быть местом, где легко
+    забыть проверку, поэтому она просто пишет то, что ей дали.
     """
-    out: dict = {"words": 0, "records": 0, "by_kind": {}, "worst_words": [],
-                 "top_subs": []}
-    row = _exec("SELECT COUNT(*), COUNT(DISTINCT variant) FROM pron_samples"
-                " WHERE method='phoneme'").fetchone()
-    out["words"] = int(row[0] or 0)
-    out["records"] = int(row[1] or 0)
-    if not out["words"]:
-        return out
+    import json as _json
 
-    for (crit,) in _exec("SELECT critical FROM pron_samples"
-                         " WHERE method='phoneme' AND critical IS NOT NULL"
-                         " AND critical <> ''").fetchall():
-        for kind in str(crit).split(","):
-            kind = kind.strip()
-            if kind:
-                out["by_kind"][kind] = out["by_kind"].get(kind, 0) + 1
+    cid = str(uuid.uuid4())
+    _exec("INSERT INTO voice_corpus(id, student_id, kind, variant, mime, data,"
+          " bytes, duration, transcript, reference, score, max_score, labels,"
+          " created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          (cid, student_id, kind, str(variant or "")[:64], mime[:32], audio,
+           len(audio), float(duration or 0.0), (transcript or "")[:8000],
+           (reference or "")[:8000],
+           (int(score) if score is not None else None),
+           (int(max_score) if max_score is not None else None),
+           _json.dumps(labels, ensure_ascii=False)[:20000], _now()))
+    return cid
 
-    out["worst_words"] = [
-        {"word": r[0], "expected": r[1], "heard": r[2], "match": round(float(r[3]), 3)}
-        for r in _exec("SELECT word, expected, heard, p_norm FROM pron_samples"
-                       " WHERE method='phoneme' ORDER BY p_norm LIMIT 15").fetchall()]
 
-    # Какие слова чаще прочих оказываются слабыми — подсказка, что включать
-    # в тренировку, когда порог наконец будет выбран.
-    out["top_subs"] = [
-        {"word": r[0], "n": int(r[1]), "avg_match": round(float(r[2] or 0), 3)}
-        for r in _exec("SELECT word, COUNT(*), AVG(p_norm) FROM pron_samples"
-                       " WHERE method='phoneme' GROUP BY word"
-                       " HAVING COUNT(*) > 1 ORDER BY AVG(p_norm) LIMIT 15").fetchall()]
+def corpus_bytes_total() -> int:
+    """Сколько места занимает корпус. Neon free — 0.5 ГБ на весь проект, и
+    корпус обязан знать свой потолок сам, а не узнавать о нём от базы."""
+    row = _exec("SELECT COALESCE(SUM(bytes), 0) FROM voice_corpus").fetchone()
+    return int(row[0] or 0)
+
+
+def corpus_count_for(student_id: str, kind: str = "") -> int:
+    """Сколько записей уже взято у этого ученика (чтобы один активный не
+    занял весь корпус собой)."""
+    if kind:
+        row = _exec("SELECT COUNT(*) FROM voice_corpus WHERE student_id=?"
+                    " AND kind=?", (student_id, kind)).fetchone()
+    else:
+        row = _exec("SELECT COUNT(*) FROM voice_corpus WHERE student_id=?",
+                    (student_id,)).fetchone()
+    return int(row[0] or 0)
+
+
+def corpus_stats() -> dict:
+    """Сводка для админки: сколько собрано, по каким заданиям, сколько места."""
+    total, bytes_, students = _exec(
+        "SELECT COUNT(*), COALESCE(SUM(bytes), 0), COUNT(DISTINCT student_id)"
+        " FROM voice_corpus").fetchone()
+    by_kind = {r[0]: {"n": int(r[1]), "mb": round(float(r[2] or 0) / 1048576, 1),
+                      "avg_pct": (round(float(r[3]), 1) if r[3] is not None else None)}
+               for r in _exec(
+                   "SELECT kind, COUNT(*), SUM(bytes),"
+                   " AVG(CASE WHEN max_score > 0 THEN 100.0*score/max_score END)"
+                   " FROM voice_corpus GROUP BY kind").fetchall()}
+    verified = int(_exec("SELECT COUNT(*) FROM voice_corpus"
+                         " WHERE verified IS NOT NULL").fetchone()[0] or 0)
+    return {
+        "total": int(total or 0),
+        "mb": round(float(bytes_ or 0) / 1048576, 1),
+        "students": int(students or 0),
+        "by_kind": by_kind,
+        "verified": verified,
+    }
+
+
+def corpus_list(limit: int = 100, kind: str = "", unverified_only: bool = False,
+                offset: int = 0) -> list[dict]:
+    """Список записей БЕЗ самого звука: он тяжёлый, а листать надо быстро."""
+    import json as _json
+
+    where, params = [], []
+    if kind:
+        where.append("kind=?")
+        params.append(kind)
+    if unverified_only:
+        where.append("verified IS NULL")
+    cond = (" WHERE " + " AND ".join(where)) if where else ""
+    rows = _exec(
+        "SELECT id, student_id, kind, variant, bytes, duration, transcript,"
+        " reference, score, max_score, labels, verified, created_at"
+        f" FROM voice_corpus{cond} ORDER BY created_at DESC"  # noqa: S608
+        " LIMIT ? OFFSET ?", tuple(params) + (int(limit), int(offset))).fetchall()
+    out = []
+    for r in rows:
+        try:
+            labels = _json.loads(r[10]) if r[10] else {}
+        except Exception:  # noqa: BLE001
+            labels = {}
+        out.append({
+            "id": r[0], "student_id": r[1], "kind": r[2], "variant": r[3],
+            "bytes": int(r[4] or 0), "duration": float(r[5] or 0),
+            "transcript": r[6], "reference": r[7],
+            "score": r[8], "max_score": r[9], "labels": labels,
+            "verified": r[11], "created_at": r[12],
+        })
     return out
+
+
+def corpus_audio(cid: str) -> tuple[bytes, str] | None:
+    """Сам звук одной записи — для прослушивания в админке и выгрузки."""
+    row = _exec("SELECT data, mime FROM voice_corpus WHERE id=?", (cid,)).fetchone()
+    if not row:
+        return None
+    return bytes(row[0]), str(row[1] or "audio/webm")
+
+
+def corpus_verify(cid: str, verdict: str) -> bool:
+    """Вердикт владельца поверх автоматической разметки."""
+    cur = _exec("UPDATE voice_corpus SET verified=?, verified_at=? WHERE id=?",
+                (str(verdict)[:2000], _now(), cid))
+    return bool(getattr(cur, "rowcount", 0))
+
+
+def corpus_delete(cid: str) -> bool:
+    cur = _exec("DELETE FROM voice_corpus WHERE id=?", (cid,))
+    return bool(getattr(cur, "rowcount", 0))
 
 
 def pron_raw(limit: int = 20000) -> list[dict]:
@@ -1163,14 +1262,23 @@ def dump_all(with_images: bool = False) -> dict:
 
 
 
-# Бинарные колонки: в JSON-бэкапе они лежат base64-строками (так их кодирует
-# FastAPI при выгрузке), при восстановлении декодируем обратно в байты.
-_B64_COLUMNS = {("task_images", "data"), ("dispute_shots", "data")}
+# Картинки и снимки экрана хранятся base64-ТЕКСТОМ в колонке TEXT (см. схему
+# task_images: у SQLite и Postgres разные бинарные типы, и текст — общий
+# знаменатель). В бэкапе они лежат тем же текстом, поэтому при восстановлении
+# их НЕ НАДО ни кодировать, ни декодировать.
+#
+# Стоило это дорого: 27.08.2026 восстановление декодировало base64 в байты,
+# Postgres записал байты в TEXT-колонку как hex-строку "50...", и все 138
+# картинок заданий стали отдавать 500. Прод жил так три дня. Тест это
+# пропустил, потому что SQLite молча принимает bytes в TEXT-колонку и
+# отдаёт их обратно байтами — проверка «декодировалось в байты» была зелёной
+# ровно на том, что ломало прод.
 
 _COLUMN_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
-def restore_all(tables: dict, force: bool = False) -> dict:
+def restore_all(tables: dict, force: bool = False,
+                replace: bool = False) -> dict:
     """Восстановление из JSON-бэкапа /admin/backup — в ПУСТУЮ базу.
 
     Сценарий: Neon встал на паузу (квота), данные живут только в ночном дампе
@@ -1181,14 +1289,12 @@ def restore_all(tables: dict, force: bool = False) -> dict:
     — это желаемое поведение: молча пропущенная половина бэкапа хуже ошибки.
     """
     known = set(_BACKUP_TABLES) | {"task_images", "dispute_shots"}
-    if not force:
+    if not force and not replace:
         (n,) = _exec("SELECT COUNT(*) FROM accounts").fetchone()
         if n:
             raise ValueError(
                 f"В базе уже {n} аккаунтов — восстановление только в пустую "
                 "базу (или force=1, если перезаливка сознательная).")
-    import base64
-
     out: dict = {}
     for t, rows in tables.items():
         if t not in known or not isinstance(rows, list) or not rows:
@@ -1199,12 +1305,13 @@ def restore_all(tables: dict, force: bool = False) -> dict:
         sql = (f"INSERT INTO {t} ({', '.join(cols)}) "  # noqa: S608 — имена из белого списка
                f"VALUES ({', '.join('?' * len(cols))})")
         for row in rows:
-            vals = []
-            for c in cols:
-                v = row.get(c)
-                if (t, c) in _B64_COLUMNS and isinstance(v, str):
-                    v = base64.b64decode(v)
-                vals.append(v)
+            vals = [row.get(c) for c in cols]
+            if replace:
+                # Перезаливка поверх существующих строк: нужна, когда чинишь
+                # уже испорченные данные, а не заполняешь пустую базу.
+                pk = "id" if "id" in cols else None
+                if pk:
+                    _exec(f"DELETE FROM {t} WHERE {pk}=?", (row.get(pk),))  # noqa: S608
             _exec(sql, tuple(vals))
         out[t] = len(rows)
     return out

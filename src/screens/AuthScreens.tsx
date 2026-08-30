@@ -12,6 +12,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 
+import { updateSettings } from '../account/me'
 import { login, randomNickname, register, type AuthUser } from '../auth/auth'
 
 /* ------------------------------------------------------------ Регистрация */
@@ -27,6 +28,10 @@ export function RegisterScreen({
   const [password, setPassword] = useState('')
   const [invite, setInvite] = useState('')
   const [exam, setExam] = useState<'ege' | 'oge'>('ege')
+  /* Согласие на хранение записей. Спрашивается ЗДЕСЬ, а не прячется в условиях:
+     голос — персональные данные, и человек должен видеть вопрос, а не узнавать
+     о нём потом. Снять можно в кабинете в любой момент. */
+  const [consent, setConsent] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [soon, setSoon] = useState(false)
@@ -44,7 +49,11 @@ export function RegisterScreen({
     setBusy(true)
     setError(null)
     try {
-      setCreated(await register(nickname.trim(), password, 'ege', invite.trim()))
+      const user = await register(nickname.trim(), password, 'ege', invite.trim())
+      // Ответ ученика уезжает на сервер сразу: до первой же записи в корпус
+      // сервер обязан знать, разрешили ему или нет.
+      updateSettings({ corpusConsent: consent })
+      setCreated(user)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -141,6 +150,18 @@ export function RegisterScreen({
             ОГЭ
           </button>
         </div>
+
+        <label className="auth2-consent">
+          <input
+            type="checkbox"
+            checked={consent}
+            onChange={(e) => setConsent(e.target.checked)}
+          />
+          <span>
+            Разрешаю сохранять мои записи, чтобы система училась точнее проверять речь.
+            Голос не публикуется и не передаётся третьим лицам; отключить можно в кабинете.
+          </span>
+        </label>
 
         {error && <p className="auth2-err">{error}</p>}
 

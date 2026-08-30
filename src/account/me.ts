@@ -22,6 +22,11 @@ export interface Settings {
   theme: 'dark' | 'light' | 'auto'
   volume: number // 0..1 — громкость голоса ИИ
   showText: boolean // показывать ли текст ответа в Conversation
+  /** Согласие хранить свои записи в корпусе (обучение и проверка точности).
+      Отдельный флаг, а не часть общих условий: снять его можно в любой момент,
+      и сервер перестаёт писать немедленно — он проверяет согласие при каждой
+      записи, а не запоминает его. */
+  corpusConsent: boolean
   /** id собеседника из каталога сервера (GET /personas). Здесь это просто
       строка: список персон принадлежит серверу, и фронт его не дублирует —
       иначе новая персона требовала бы пересборки фронта. */
@@ -34,6 +39,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'light',
   volume: 1,
   showText: true,
+  corpusConsent: true,
   persona: 'tutor',
 }
 
@@ -46,6 +52,8 @@ function normalize(raw: unknown): Settings {
         ? Math.round(r.volume * 100) / 100
         : DEFAULT_SETTINGS.volume,
     showText: typeof r.showText === 'boolean' ? r.showText : DEFAULT_SETTINGS.showText,
+    corpusConsent:
+      typeof r.corpusConsent === 'boolean' ? r.corpusConsent : DEFAULT_SETTINGS.corpusConsent,
     persona:
       typeof r.persona === 'string' && r.persona ? r.persona : DEFAULT_SETTINGS.persona,
   }
@@ -176,6 +184,7 @@ function pushRemoteDebounced() {
         theme: current.theme,
         volume: current.volume,
         show_text: current.showText,
+        corpus_consent: current.corpusConsent,
         persona: current.persona,
       }),
     }).catch(() => {
@@ -218,6 +227,7 @@ export async function syncSettingsFromServer(): Promise<void> {
       ...('theme' in s ? { theme: s.theme } : {}),
       ...('volume' in s ? { volume: s.volume } : {}),
       ...('show_text' in s ? { showText: s.show_text } : {}),
+      ...('corpus_consent' in s ? { corpusConsent: s.corpus_consent } : {}),
       ...('persona' in s ? { persona: s.persona } : {}),
     })
     persistLocal()

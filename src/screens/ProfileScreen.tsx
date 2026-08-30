@@ -274,6 +274,27 @@ export function ProfileScreen({
 
             <div className="setrow2">
               <div className="setrow2__t">
+                <b>Помогаю улучшать проверку</b>
+                <span>
+                  {settings.corpusConsent
+                    ? 'записи заданий сохраняются и помогают точнее оценивать речь'
+                    : 'записи не сохраняются — оценка от этого не меняется'}
+                </span>
+              </div>
+              <button
+                type="button"
+                className={`switch${settings.corpusConsent ? ' switch--on' : ''}`}
+                role="switch"
+                aria-checked={settings.corpusConsent}
+                aria-label="Сохранять мои записи для улучшения проверки"
+                onClick={() => updateSettings({ corpusConsent: !settings.corpusConsent })}
+              >
+                <span className="switch__thumb" />
+              </button>
+            </div>
+
+            <div className="setrow2">
+              <div className="setrow2__t">
                 <b>Экзамен</b>
                 <span>набор заданий и шкалы</span>
               </div>

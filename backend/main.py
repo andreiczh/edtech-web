@@ -54,7 +54,6 @@ import ege_scoring
 import disputes
 import fipi_import
 import speak_check
-import phoneme
 import storage
 
 load_dotenv()
@@ -1126,6 +1125,12 @@ def _sanitize_settings(raw: dict) -> dict:
         out["volume"] = round(float(vol), 2)
     if isinstance(raw.get("show_text"), bool):
         out["show_text"] = raw["show_text"]
+    # Согласие на хранение голоса в корпусе. Отдельный флаг, а не общее
+    # «согласен со всем»: ученик должен мочь передумать в любой момент, и
+    # снятие галочки обязано немедленно останавливать сбор (проверяется при
+    # КАЖДОЙ записи, а не кэшируется).
+    if isinstance(raw.get("corpus_consent"), bool):
+        out["corpus_consent"] = raw["corpus_consent"]
     # Персона проверяется по реестру, а не принимается на веру: в базе должен
     # лежать только тот id, который сервер умеет озвучить.
     if raw.get("persona") in PERSONAS:
@@ -1394,6 +1399,80 @@ async def admin_dispute_pron(did: str, x_admin_key: str | None = Header(None)):
                       for w in words]}
 
 
+@app.get("/admin/corpus")
+async def admin_corpus(limit: int = 50, offset: int = 0, kind: str = "",
+                       unverified: int = 0,
+                       x_admin_key: str | None = Header(None)):
+    """Корпус голоса: что собрано и как система это разметила.
+
+    Звук сюда НЕ едет — он тяжёлый, а листать надо быстро. За самой записью
+    ходят отдельно, /admin/corpus/{id}/audio.
+    """
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    stats = await asyncio.to_thread(storage.corpus_stats)
+    items = await asyncio.to_thread(storage.corpus_list, min(500, max(1, limit)),
+                                    kind, bool(unverified), max(0, offset))
+    return {
+        "stats": stats,
+        "items": items,
+        "collecting": CORPUS_COLLECT and not _corpus_full,
+        "limits": {"max_mb": CORPUS_MAX_MB, "per_student": CORPUS_PER_STUDENT,
+                   "per_student_kind": CORPUS_PER_STUDENT_KIND},
+    }
+
+
+@app.get("/admin/corpus/{cid}/audio")
+async def admin_corpus_audio(cid: str, x_admin_key: str | None = Header(None),
+                             key: str = ""):
+    """Сама запись — послушать в админке или выгрузить на ноут.
+
+    Ключ принимается и заголовком, и параметром: тег <audio> заголовки слать
+    не умеет, а слушать записи владельцу нужно прямо в браузере.
+    """
+    _require_admin(x_admin_key or key or None)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    got = await asyncio.to_thread(storage.corpus_audio, cid)
+    if not got:
+        raise HTTPException(status_code=404, detail="Записи нет.")
+    audio, mime = got
+    return Response(content=audio, media_type=mime,
+                    headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.post("/admin/corpus/{cid}/verify")
+async def admin_corpus_verify(cid: str, body: dict = Body(...),
+                              x_admin_key: str | None = Header(None)):
+    """Вердикт владельца поверх автоматической разметки.
+
+    Именно он превращает запись в строку сетки точности: до него у нас есть
+    только мнение системы о себе самой.
+    """
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    verdict = str(body.get("verdict") or "").strip()
+    if not verdict:
+        raise HTTPException(status_code=400, detail="Пустой вердикт.")
+    ok = await asyncio.to_thread(storage.corpus_verify, cid, verdict)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Записи нет.")
+    return {"ok": True}
+
+
+@app.delete("/admin/corpus/{cid}")
+async def admin_corpus_delete(cid: str, x_admin_key: str | None = Header(None)):
+    """Удалить запись. Нужна не для порядка, а для отзыва согласия: ученик
+    вправе передумать, и тогда его голос обязан исчезнуть."""
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    ok = await asyncio.to_thread(storage.corpus_delete, cid)
+    return {"ok": ok}
+
+
 @app.get("/admin/pronunciation")
 async def admin_pronunciation(raw: int = 0,
                               x_admin_key: str | None = Header(None)):
@@ -1412,12 +1491,7 @@ async def admin_pronunciation(raw: int = 0,
         # только слова заданий и числа при них.
         return {"samples": await asyncio.to_thread(storage.pron_raw, 20000)}
     stats = await asyncio.to_thread(storage.pron_stats)
-    return {"stats": stats,
-            # Ступень 2 отдельным разделом: у неё другой смысл чисел —
-            # не распределение порога, а счёт явлений (межзубный, долгота).
-            "phoneme": (storage.pron_phoneme_stats() if _storage_ok else {}),
-            "phoneme_ready": phoneme.available(),
-            "collecting": PRON_COLLECT and not _pron_disabled,
+    return {"stats": stats, "collecting": PRON_COLLECT and not _pron_disabled,
             "model": os.environ.get("GOP_MODEL", "base.en"),
             "done_this_process": _pron_done}
 
@@ -1924,7 +1998,7 @@ async def admin_backup(images: int = 0,
 
 @app.post("/admin/restore")
 async def admin_restore(body: dict = Body(...),
-                        force: int = 0,
+                        force: int = 0, replace: int = 0,
                         x_admin_key: str | None = Header(None)):
     """Заливка JSON-бэкапа в ПУСТУЮ базу (см. storage.restore_all).
 
@@ -1938,7 +2012,8 @@ async def admin_restore(body: dict = Body(...),
     if not tables:
         raise HTTPException(status_code=400, detail="В теле нет tables — это не бэкап.")
     try:
-        counts = await asyncio.to_thread(storage.restore_all, tables, bool(force))
+        counts = await asyncio.to_thread(storage.restore_all, tables,
+                                         bool(force), bool(replace))
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     _HEALTH_DB["at"] = 0.0  # число кодов и расход в /health пересчитаются
@@ -3235,26 +3310,147 @@ PRON_TALK_EVERY = int(os.environ.get("PRON_TALK_EVERY", "4"))
 # показывать их станет чем, когда появится фонемная ступень.
 PRON_SHOW = os.environ.get("PRON_SHOW", "0").strip() not in ("0", "false", "no")
 
-# СТУПЕНЬ 2 (фонемная). Включается наличием PHONEME_MODEL_URL — пока владелец
-# не выложил веса, её просто нет, и всё работает как раньше.
-# Бюджет общий со ступенью 1: обе ступени фоновые, и вместе они не должны
-# занимать процессор дольше, чем длится сама запись.
-PHONEME_BUDGET_SEC = float(os.environ.get("PHONEME_BUDGET_SEC", "120"))
-# Сколько самых слабых слов разбирать пофонемно. Каждое слово — вырезка ~1 с,
-# на бесплатном Render это 5-7 с процессора.
-PHONEME_WORDS = int(os.environ.get("PHONEME_WORDS", "5"))
-# Полный декод записи — ЕДИНСТВЕННОЕ, что разделило баллы эксперта (§6.28), но
-# он стоит 4-6 минут на бесплатном Render. Поэтому не на каждую работу, а на
-# каждую N-ю: 0 — выключено, 10 — примерно раз в десять чтений. Метрика копится
-# медленно, зато сервис не душится.
-PHONEME_FULL_EVERY = int(os.environ.get("PHONEME_FULL_EVERY", "0"))
-_phoneme_seen = 0
+# ------------------------------------------------------------ КОРПУС ГОЛОСА
+# Здесь хранится САМА ЗАПИСЬ, поэтому правил больше, чем у любой другой части.
+#
+# Зачем вообще. Всё, что мы пытались построить вокруг произношения и точности
+# оценивания, упиралось в одно: живых работ с разметкой нет, а купить их негде
+# (§6.28). Корпус решает это единственным честным способом — накапливая
+# настоящие ответы настоящих учеников вместе с тем, что система о них решила.
+#
+# Три предохранителя, каждый обязателен:
+#   1. СОГЛАСИЕ. Без corpus_consent=1 в настройках ученика не пишется ничего.
+#      Это не вежливость: голос — персональные данные, а среди учеников есть
+#      несовершеннолетние.
+#   2. ПОТОЛОК МЕСТА. Neon free — 0.5 ГБ на весь проект вместе с заданиями и
+#      картинками. Дойдя до CORPUS_MAX_MB, сбор молча останавливается, а не
+#      роняет базу, из которой живёт вся система.
+#   3. КВОТА НА УЧЕНИКА. Один активный не должен занять корпус собой: нужна
+#      РАЗНАЯ речь, а не много одинаковой.
+CORPUS_COLLECT = os.environ.get("CORPUS_COLLECT", "1").strip() not in ("0", "false", "no")
+CORPUS_MAX_MB = float(os.environ.get("CORPUS_MAX_MB", "150"))
+CORPUS_PER_STUDENT = int(os.environ.get("CORPUS_PER_STUDENT", "40"))
+CORPUS_PER_STUDENT_KIND = int(os.environ.get("CORPUS_PER_STUDENT_KIND", "15"))
+# Запись длиннее этого в корпус не берём: минута речи — это уже полный ответ,
+# а всё сверх обычно означает, что ученик забыл остановить запись.
+CORPUS_MAX_SEC = float(os.environ.get("CORPUS_MAX_SEC", "180"))
+_corpus_full = False
+
 _pron_talk_seen = 0
 # Считаем СТРОГО ПО ОДНОЙ записи за раз. На 0.1 vCPU (Render) параллельный
 # разбор двух чтений отнял бы процессор у живых запросов остальных учеников.
 _pron_gate = threading.Semaphore(1)
 _pron_disabled = False
 _pron_done = 0
+
+
+def _mime_of(filename: str) -> str:
+    """Тип записи по расширению: браузеры шлют webm/ogg, iOS — mp4/m4a."""
+    ext = os.path.splitext(filename or "")[1].lower()
+    return {".webm": "audio/webm", ".ogg": "audio/ogg", ".mp3": "audio/mpeg",
+            ".wav": "audio/wav", ".m4a": "audio/mp4",
+            ".mp4": "audio/mp4"}.get(ext, "audio/webm")
+
+
+def _collect_corpus_bg(device: str | None, kind: str, variant: str,
+                       data: bytes, mime: str, duration: float,
+                       transcript: str, reference: str, feedback: dict,
+                       audio_info: dict | None = None) -> None:
+    """Положить работу в корпус вместе с автоматической разметкой.
+
+    Всё, что система уже решила об этом ответе, кладётся рядом со звуком:
+    расшифровка, балл по шкале ФИПИ, разбор по критериям, ошибки с цитатами,
+    осмотр звука. Ручная проверка (verified) добавляется владельцем поверх.
+    Так одна и та же запись годится и как обучающий пример, и как строка сетки
+    точности: видно, что ответил ученик, что решила система и где она неправа.
+
+    Молчит и не мешает: любая беда внутри — это отсутствие ещё одной записи в
+    корпусе, а не сломанный разбор у ученика.
+    """
+    global _corpus_full
+    if not (CORPUS_COLLECT and _storage_ok and device and data) or _corpus_full:
+        return
+    if duration and duration > CORPUS_MAX_SEC:
+        return
+
+    def work() -> None:
+        global _corpus_full
+        try:
+            # СОГЛАСИЕ — первое, что проверяется, и проверяется по базе, а не
+            # по тому, что прислал клиент.
+            try:
+                settings = json.loads(storage.get_settings(device) or "{}")
+            except Exception:  # noqa: BLE001 — битые настройки = нет согласия
+                settings = {}
+            if not settings.get("corpus_consent"):
+                return
+            if storage.corpus_bytes_total() >= CORPUS_MAX_MB * 1048576:
+                if not _corpus_full:
+                    _corpus_full = True
+                    print(f"[corpus] потолок {CORPUS_MAX_MB:.0f} МБ достигнут — "
+                          "сбор остановлен до перезапуска")
+                    notify_owner("corpus", f"Корпус голоса дошёл до "
+                                           f"{CORPUS_MAX_MB:.0f} МБ, сбор остановлен.")
+                return
+            if storage.corpus_count_for(device) >= CORPUS_PER_STUDENT:
+                return
+            if storage.corpus_count_for(device, kind) >= CORPUS_PER_STUDENT_KIND:
+                return
+
+            labels = _corpus_labels(kind, feedback, audio_info)
+            cid = storage.corpus_add(
+                device, kind, variant, data, mime, duration, transcript,
+                reference, labels.pop("_score", None), labels.pop("_max", None),
+                labels)
+            print(f"[corpus] {kind} {len(data) // 1024} КБ, разметка "
+                  f"{labels.get('summary', '')} -> {cid[:8]}")
+        except Exception as e:  # noqa: BLE001 — сбор корпуса не критичен
+            print(f"[corpus] не записалось ({type(e).__name__}: {str(e)[:90]})")
+
+    threading.Thread(target=work, daemon=True, name="corpus").start()
+
+
+def _corpus_labels(kind: str, feedback: dict, audio_info: dict | None) -> dict:
+    """Автоматическая разметка одной работы — то, ради чего корпус и нужен.
+
+    Складываем ровно то, что система уже посчитала: балл, критерии, ошибки с
+    цитатами, замер подачи, осмотр звука. Ничего не досчитываем заново — это
+    снимок ФАКТИЧЕСКОГО решения системы на этой записи, и именно с ним потом
+    сравнивается вердикт человека.
+    """
+    fb = feedback or {}
+    score = fb.get("score")
+    max_score = fb.get("max_score")
+    criteria = {}
+    for c in fb.get("criteria") or []:
+        if isinstance(c, dict) and c.get("key"):
+            criteria[str(c["key"])] = {"score": c.get("score"),
+                                       "max": c.get("max")}
+    errors = [{"cat": e.get("cat"), "quote": e.get("quote"),
+               "correction": e.get("correction")}
+              for e in (fb.get("errors") or [])[:20] if isinstance(e, dict)]
+    out = {
+        "_score": score,
+        "_max": max_score,
+        "kind": kind,
+        "criteria": criteria,
+        "errors": errors,
+        "errors_n": len(fb.get("errors") or []),
+        "summary": (f"{score}/{max_score}" if score is not None else "без балла"),
+        "model": LLM_MODEL,
+        "stt": STT_TASK_MODEL or STT_REMOTE_MODEL,
+        "scored_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if fb.get("delivery"):
+        out["delivery"] = {k: v for k, v in fb["delivery"].items()
+                           if k in ("wpm", "pauses", "finished", "seconds")}
+    if fb.get("diff"):
+        out["diff"] = {k: v for k, v in fb["diff"].items()
+                       if k in ("substitutions", "omissions", "tail_missing")}
+    if audio_info:
+        out["audio"] = {k: audio_info.get(k) for k in
+                        ("seconds", "loud_frames", "reason") if k in audio_info}
+    return out
 
 
 def _collect_pron_bg(device: str | None, kind: str, variant: str, data: bytes,
@@ -3323,15 +3519,6 @@ def _collect_pron_bg(device: str | None, kind: str, variant: str, data: bytes,
             print(f"[pron] {kind}/{method}: {n} слов за {spent:.1f} с "
                   f"(покрыто {res['covered']}/{res['of']}, медиана {res['median']})")
             _track_latency("pron_gop", spent)
-            # СТУПЕНЬ 2. GOP отвечает «подтверждает ли звук это слово» и на
-            # живой речи вердикт эксперта не предсказывает (§6.24): whisper
-            # устойчив к акценту, а эксперт судит акцент. Фонемная модель
-            # называет САМ звук — и на тех же семи записях разделила баллы.
-            # Идём только по САМЫМ СЛАБЫМ словам: полный декод записи стоит
-            # минуты на бесплатном Render, вырезка ~1 с — секунды.
-            if method == "forced" and phoneme.available():
-                _phoneme_pass(pcm, res, device, kind, variant,
-                              spent_before=spent, reference=reference)
             # Громкий отказ вместо тихого тормоза: если на этой машине замер
             # съедает больше отведённого, выключаемся до перезапуска и говорим
             # об этом. Иначе фоновая задача незаметно душила бы весь сервис.
@@ -3345,70 +3532,6 @@ def _collect_pron_bg(device: str | None, kind: str, variant: str, data: bytes,
             _pron_gate.release()
 
     threading.Thread(target=work, daemon=True, name="pron-collect").start()
-
-
-def _phoneme_pass(pcm, gop_result: dict, device: str, kind: str, variant: str,
-                  spent_before: float = 0.0, reference: str = "") -> None:
-    """Ступень 2 по слабым словам: что должно было прозвучать и что прозвучало.
-
-    Вызывается ИЗ фоновой задачи, после того как ученик получил разбор. Всё
-    внутри try: калибровка не имеет права ломать основной путь, а модель может
-    просто не скачаться.
-
-    Whisper выгружается перед проходом и грузится заново при следующем замере:
-    держать резидентно обе модели в 512 МБ Render нельзя (замер §6.20 — пик
-    ~360 МБ по очереди против ~465 МБ вместе), а перезагрузка стоит 1.6 с
-    фоновой задаче, которой никто не ждёт.
-    """
-    import gop  # локально, как и в фоновом сборе: на Render разбор может быть
-                # выключен вовсе, и тянуть whisper в память при импорте незачем
-
-    left = max(0.0, PHONEME_BUDGET_SEC - spent_before)
-    if left < 5:
-        print(f"[phoneme] бюджет уже съеден ступенью 1 ({spent_before:.0f} с) — пропуск")
-        return
-    try:
-        weak = gop.weakest(gop_result, limit=PHONEME_WORDS)
-        weak = [w for w in weak if w.get("spoken", 1)]  # не читал — не произношение
-        if not weak:
-            return
-        gop.unload()
-        t0 = time.time()
-        rows = phoneme.diagnose_words(pcm, weak, budget_sec=left)
-        spent = time.time() - t0
-        if not rows:
-            return
-        # p_norm ступени 2 — доля совпавших фонем: одно число в тех же
-        # границах 0..1, что у ступени 1. Различает их method, не колонка.
-        for r in rows:
-            r["p_norm"] = r["match"]
-            r["p"] = 0.0
-            r["spoken"] = 1
-        n = storage.pron_add(device, kind, variant, rows, "phoneme-base39", "phoneme")
-        summary = phoneme.summary(rows)
-        print(f"[phoneme] {n} слов за {spent:.1f} с, подмен {summary.get('subs', 0)}, "
-              f"критичных {summary.get('critical', 0)} {summary.get('by_kind', {})}")
-        _track_latency("pron_phoneme", spent)
-
-        # Выборочный полный декод: дорогой, но единственный, кто разделяет балл.
-        global _phoneme_seen
-        _phoneme_seen += 1
-        if PHONEME_FULL_EVERY and _phoneme_seen % PHONEME_FULL_EVERY == 0 and reference:
-            whole = phoneme.whole_record(pcm, reference, budget_sec=left)
-            if whole.get("ok"):
-                storage.pron_add(device, kind, variant, [{
-                    "word": "*запись целиком*", "p": 0.0, "p_norm": whole["match"],
-                    "dur": len(pcm) / 16000.0, "spoken": 1,
-                    "expected": f"{whole['phones']} фонем",
-                    "heard": f"{whole['pct']}% расхождений",
-                    "subs": whole["subs"], "drops": whole["drops"],
-                }], "phoneme-base39", "phoneme_full")
-                print(f"[phoneme] полный декод: {whole['pct']}% расхождений "
-                      f"за {whole['seconds']} с")
-    except Exception as e:  # noqa: BLE001 — фоновая калибровка не критична
-        print(f"[phoneme] проход сорвался ({type(e).__name__}: {str(e)[:90]})")
-    finally:
-        phoneme.unload()
 
 
 async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
@@ -3615,6 +3738,13 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
 
     # В память — после того как ответ готов, мимо критического пути.
     _remember(device, kind, variant, feedback, duration_sec, session_done)
+
+    # Корпус голоса: сама запись + всё, что система о ней решила. Только с
+    # согласия ученика и только фоном (см. _collect_corpus_bg).
+    _collect_corpus_bg(device, kind, variant, data,
+                       _mime_of(filename), float(duration_sec or 0),
+                       transcript_text, str((ctx or {}).get("reference") or ""),
+                       feedback)
 
     # Замер произношения — ТОЛЬКО в копилку калибровки и ТОЛЬКО фоном.
     # Ученику сейчас не показывается ничего: порога, отделяющего ошибку от
@@ -4005,6 +4135,12 @@ async def talk_stream(audio: UploadFile = File(...),
         if PRON_TALK_EVERY > 0 and _pron_talk_seen % PRON_TALK_EVERY == 0:
             _collect_pron_bg(x_device, "talk", "", data, ".webm",
                              user_text, method="cross")
+
+        # Корпус берёт реплику разговора по своим правилам, а не по расписанию
+        # замера произношения: у него другие потолки (место, квота на ученика),
+        # и привязывать их друг к другу значит терять записи без причины.
+        _collect_corpus_bg(x_device, "talk", "", data, "audio/webm",
+                           float(len(data) / 16000.0), user_text, "", {})
 
         t2 = time.time()
         _track_latency("conv_answer", (first_audio_at or t2) - t0)

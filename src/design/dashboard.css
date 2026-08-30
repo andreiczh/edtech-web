@@ -1484,3 +1484,24 @@
     height: auto;
   }
 }
+
+/* Согласие на хранение записей — видимая строка в регистрации, не мелкий шрифт
+   в условиях: голос это персональные данные, и вопрос должен быть заметен. */
+.auth2-consent {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 14px 0 4px;
+  cursor: pointer;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+.auth2-consent input {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  accent-color: #8c73ff;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
