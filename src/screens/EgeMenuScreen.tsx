@@ -41,8 +41,11 @@ function TaskCard({
 }) {
   const task = TASKS[id]
   const complete = progress.done >= progress.total
+  const soon = !!task.comingSoon
 
-  const hint = complete
+  const hint = soon
+    ? 'Скоро: разбор произношения ещё учится слышать звуки, а без этого балл за чтение был бы выдуман.'
+    : complete
     ? 'Все варианты пройдены — сессия соберётся из самых давних.'
     : next
       ? 'Начни отсюда: серия из пяти вариантов подряд.'
@@ -55,11 +58,13 @@ function TaskCard({
     <button
       type="button"
       className="card2 card2--button"
-      onClick={() => onOpen(id)}
+      onClick={() => !soon && onOpen(id)}
+      disabled={soon}
       title={`Задание ${id} — ${task.label}. ${hint}`}
       aria-label={`Задание ${id}, ${task.label}. ${hint}`}
       style={{
-        opacity: complete ? 0.62 : 1,
+        opacity: soon ? 0.5 : complete ? 0.62 : 1,
+        cursor: soon ? 'not-allowed' : undefined,
         /* Именно outline, а не box-shadow: инлайновая тень перебила бы подъём
            карточки на ховере из .card2--button:hover. */
         outline: next ? '2px solid var(--orb-2)' : undefined,
@@ -69,7 +74,11 @@ function TaskCard({
       <span className="card2__title">№{id}</span>
       <span className="card2__sub">{task.label}</span>
       <span className="card2__sub">
-        {complete ? '✓ все варианты' : `${progress.done}/${progress.total} вариантов`}
+        {soon
+          ? 'coming soon…'
+          : complete
+            ? '✓ все варианты'
+            : `${progress.done}/${progress.total} вариантов`}
       </span>
     </button>
   )
@@ -95,7 +104,7 @@ export function EgeMenuScreen({
     return () => window.removeEventListener('focus', refresh)
   }, [])
 
-  const next = progress.find((p) => p.done < p.total)?.id
+  const next = progress.find((p) => p.done < p.total && !TASKS[p.id].comingSoon)?.id
 
   /* Шапку рисует App — общий каркас верхних экранов, см. комментарий там. */
   return (
@@ -108,7 +117,10 @@ export function EgeMenuScreen({
 
           <CardButton
             title="DEMO"
-            sub={`№${TASK_ORDER[0]}–${TASK_ORDER[TASK_ORDER.length - 1]} подряд`}
+            sub={(() => {
+              const open = TASK_ORDER.filter((id) => !TASKS[id].comingSoon)
+              return `№${open[0]}–${open[open.length - 1]} подряд`
+            })()}
             onClick={onDemo}
           />
 

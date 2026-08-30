@@ -1505,3 +1505,20 @@
   flex: 0 0 auto;
   cursor: pointer;
 }
+
+/* Оговорка о точности балла: заметная, но не кричащая — это уточнение, а не
+   ошибка. Ставится под самим баллом, где её нельзя не увидеть. */
+.accuracy-note {
+  margin: 10px 2px 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+}
+.accuracy-note span {
+  color: #8c73ff;
+  font-size: 13px;
+  flex: 0 0 auto;
+}

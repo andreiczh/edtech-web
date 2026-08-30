@@ -42,6 +42,14 @@ export interface TaskDef {
   /** Максимум баллов, который ставит разбор (ориентир по устной части ЕГЭ) */
   maxScore: number
   variants: TaskVariant[]
+  /** Задание видно, но не запускается: «скоро».
+   *
+   *  У №39 официальный критерий — ИСКЛЮЧИТЕЛЬНО произношение, а разбор идёт по
+   *  расшифровке и звука не слышит. Балл, который мы можем поставить, отвечает
+   *  на другой вопрос («все ли слова прочитаны»), и выдавать его за фонетику
+   *  нечестно. Фонемную ступень закрыли до появления размеченных записей
+   *  (DECISIONS §6.28-6.29), поэтому задание ждёт. */
+  comingSoon?: boolean
 }
 
 /* Картинки — публичные заглушки из Unsplash: своих материалов в репозитории нет,
@@ -297,6 +305,7 @@ export const TASKS: Record<TaskId, TaskDef> = {
     id: 39,
     kind: 'reading',
     label: 'reading',
+    comingSoon: true,
     prepSeconds: 90,
     answerSeconds: 90,
     maxScore: 1,
@@ -491,7 +500,12 @@ export function pickSession(id: TaskId, want = 5): TaskVariant[] {
 
 /** DEMO: по одному варианту каждого типа — первый нерешённый (или самый давний). */
 export function pickDemoItems(): Array<{ taskId: TaskId; variantId: string }> {
-  return TASK_ORDER.map((taskId) => ({ taskId, variantId: pickSession(taskId, 1)[0].id }))
+  // Задания «скоро» в демо не берём: полный прогон экзамена не должен
+  // упираться в номер, который мы сами не пускаем в работу.
+  return TASK_ORDER.filter((id) => !TASKS[id].comingSoon).map((taskId) => ({
+    taskId,
+    variantId: pickSession(taskId, 1)[0].id,
+  }))
 }
 
 /* --------------------------------------- Последний разбор — для экрана STATS */

@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pingo AI — приёмочный тест перед запуском</title>
+<style>
+  :root {
+    --bg: #fcfaff; --ink: #121214; --dim: #6b6a7c; --line: #e8e6f0;
+    --lav: #8c73ff; --ok: #2f8f5b; --bad: #c9553f; --card: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #131218; --ink: #f2f0f8; --dim: #a09eb4; --line: #2a2836;
+            --card: #1c1a24; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 16px 14px 40px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -0.3px; }
+  .lead { color: var(--dim); font-size: 14px; margin: 0 0 18px; }
+  .bar {
+    position: sticky; top: 0; z-index: 5; background: var(--bg);
+    padding: 10px 0; border-bottom: 1px solid var(--line); margin-bottom: 14px;
+  }
+  .bar b { font-size: 14px; }
+  .track { height: 8px; border-radius: 99px; background: var(--line); margin-top: 6px; overflow: hidden; }
+  .track i { display: block; height: 100%; background: var(--lav); width: 0; transition: width .2s; }
+  details.stage {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    margin-bottom: 12px; overflow: hidden;
+  }
+  details.stage > summary {
+    padding: 12px 14px; cursor: pointer; font-weight: 700; font-size: 15px;
+    list-style: none; display: flex; align-items: center; gap: 8px;
+  }
+  details.stage > summary::-webkit-details-marker { display: none; }
+  .badge { margin-left: auto; font-size: 12px; color: var(--dim); font-weight: 600; }
+  .step { padding: 12px 14px; border-top: 1px solid var(--line); }
+  .step p { margin: 0 0 8px; }
+  .do { font-weight: 600; }
+  .expect { color: var(--dim); font-size: 14px; }
+  .expect b { color: var(--ink); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  .row button {
+    appearance: none; border: 1.5px solid var(--line); background: transparent;
+    color: var(--ink); border-radius: 999px; padding: 7px 14px; font: inherit;
+    font-size: 14px; cursor: pointer;
+  }
+  .row button[aria-pressed="true"][data-v="ok"] { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .row button[aria-pressed="true"][data-v="bad"] { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .row button[aria-pressed="true"][data-v="skip"] { background: var(--dim); border-color: var(--dim); color: #fff; }
+  textarea {
+    width: 100%; min-height: 54px; border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 10px; font: inherit; font-size: 14px; background: transparent; color: var(--ink);
+    resize: vertical;
+  }
+  .foot { margin-top: 22px; }
+  .foot button {
+    appearance: none; border: 0; background: var(--ink); color: var(--bg);
+    border-radius: 999px; padding: 12px 22px; font: inherit; font-weight: 700; cursor: pointer;
+  }
+  .foot button.ghost { background: transparent; color: var(--dim); border: 1.5px solid var(--line); }
+  #report {
+    width: 100%; min-height: 260px; margin-top: 12px; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+  }
+  .hint { font-size: 13px; color: var(--dim); }
+  code { background: var(--line); padding: 1px 5px; border-radius: 5px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Приёмочный тест Pingo AI</h1>
+  <p class="lead">
+    Проходить <b>с телефона</b>, как настоящий ученик, на
+    <a href="https://pingo-ai-dpd9.onrender.com">pingo-ai-dpd9.onrender.com</a>.
+    Отмечай каждый шаг и пиши, что пошло не так. Ответы сохраняются в этом браузере —
+    можно закрыть и вернуться. В конце нажми «Собрать отчёт» и пришли его агенту.
+  </p>
+
+  <div class="bar">
+    <b id="counter">Пройдено 0 из 0</b>
+    <div class="track"><i id="fill"></i></div>
+  </div>
+
+  <div id="stages"></div>
+
+  <div class="foot">
+    <button id="build">Собрать отчёт</button>
+    <button id="reset" class="ghost">Начать заново</button>
+    <p class="hint">Отчёт появится ниже — скопируй его целиком.</p>
+    <textarea id="report" placeholder="Здесь появится отчёт" readonly></textarea>
+  </div>
+</div>
+
+<script>
+/* Сценарий приёмки. Каждый шаг — ДЕЙСТВИЕ и ОЖИДАНИЕ: без ожидания тестировщик
+   не знает, что считать поломкой, и пропускает настоящие дефекты. */
+const STAGES = [
+  {
+    id: 'reg', title: '1. Регистрация по коду',
+    steps: [
+      { do: 'Открой сайт в режиме инкогнито (чтобы не подхватился старый вход).',
+        ex: 'Открывается экран регистрации: «Pingo AI», поля «Твой ник», «Пароль», «Код доступа».' },
+      { do: 'Нажми ⟳ рядом с ником два-три раза.',
+        ex: 'Ник меняется каждый раз. Руками ник не вводится — это нормально.' },
+      { do: 'Введи пароль (8+ символов) и код доступа <code>PINGO-START</code>.',
+        ex: 'Кнопка «Создать аккаунт» становится активной.' },
+      { do: 'Прочитай строку про сохранение записей над кнопкой.',
+        ex: 'Галочка стоит, текст понятен: записи помогают системе учиться, отключается в кабинете.' },
+      { do: 'Нажми «Создать аккаунт».',
+        ex: 'Появляется экран «Запиши свои данные» с ником и паролем. <b>Запиши их — восстановления нет.</b>' },
+      { do: 'Нажми «Я записал(а) — дальше».',
+        ex: 'Экран «Привет! Вот что тебя ждёт внутри» с тремя пунктами и кнопкой «Поехали».' },
+    ],
+  },
+  {
+    id: 'home', title: '2. Главный экран',
+    steps: [
+      { do: 'Посмотри на экран целиком, не прокручивая.',
+        ex: 'Всё помещается: приветствие, огонёк стрика, полоса «Начни первую тренировку», «Твоя неделя», справа ТРЕНАЖЁР / SPEAKING / DEMO.' },
+      { do: 'Проверь, нет ли горизонтальной прокрутки (потяни экран вбок).',
+        ex: 'Экран не ездит вбок, ничего не обрезано по краям.' },
+      { do: 'Нажми на иконки слева по очереди: Календарь, Статистика, Настройки.',
+        ex: 'Экраны открываются, ничего не «белеет», данные пустые (ты ещё не занимался) — это нормально.' },
+      { do: 'Переключи тему солнце/луна внизу слева.',
+        ex: 'Тема меняется сразу, текст читается в обеих.' },
+    ],
+  },
+  {
+    id: 'menu', title: '3. Меню заданий',
+    steps: [
+      { do: 'Нажми ТРЕНАЖЁР.',
+        ex: 'Шесть карточек: №39, №40, №41, №42, DEMO, STATS.' },
+      { do: 'Посмотри на карточку №39.',
+        ex: '<b>Она приглушена и написано «coming soon…»</b>, нажатие ничего не делает — так и задумано.' },
+      { do: 'Нажми №40.',
+        ex: 'Открывается вводный экран задания с фотографией и текстом. <b>Фотография ВИДНА</b> — если серый квадрат, это дефект.' },
+    ],
+  },
+  {
+    id: 't40', title: '4. Задание 40 — вопросы к объявлению',
+    steps: [
+      { do: 'Начни задание. Разреши доступ к микрофону, когда браузер спросит.',
+        ex: 'Идёт подготовка, потом запись. Видно, что микрофон слушает.' },
+      { do: 'Задай вслух 4 вопроса по объявлению (по одному на каждый пункт).',
+        ex: 'Таймер на каждый вопрос, переход к следующему сам.' },
+      { do: 'Дождись разбора.',
+        ex: 'Разбор приходит за 5–20 секунд. Видно, какие вопросы приняты, какие нет, и почему.' },
+      { do: 'Проверь, что написано в разборе про твои вопросы.',
+        ex: 'Цитаты — это ТВОИ слова, а не выдуманные. Если система цитирует то, чего ты не говорил, — важный дефект, опиши.' },
+      { do: 'Нажми «Не согласен» у любого пункта.',
+        ex: 'Открывается форма жалобы: причина из списка, поле объяснения. Отправляется без ошибки.' },
+    ],
+  },
+  {
+    id: 't41', title: '5. Задание 41 — интервью',
+    steps: [
+      { do: 'Запусти №41.',
+        ex: 'Вопросы ЗВУЧАТ голосом (не показываются текстом заранее).' },
+      { do: 'Ответь на все пять вопросов вслух.',
+        ex: 'После каждого — переход к следующему, время видно.' },
+      { do: 'Посмотри разбор.',
+        ex: 'По каждому вопросу видно: засчитан ответ или нет, с объяснением.' },
+    ],
+  },
+  {
+    id: 't42', title: '6. Задание 42 — монолог по фото',
+    steps: [
+      { do: 'Запусти №42, посмотри на фотографии.',
+        ex: 'Обе фотографии видны и различимы.' },
+      { do: 'Наговори монолог по плану (2–3 минуты): опиши фото, различия, плюсы, минусы, своё мнение.',
+        ex: 'Запись идёт, таймер работает, кнопка остановки доступна.' },
+      { do: 'Дождись разбора и прочитай его целиком.',
+        ex: 'Есть балл, разбор по критериям и список ошибок с цитатами. <b>Ниже балла есть пометка, что оценка приблизительная.</b>' },
+      { do: 'Оцени на глаз: похож ли балл на правду?',
+        ex: 'Напиши в комментарии свой ожидаемый балл и полученный — это самое ценное для калибровки.' },
+    ],
+  },
+  {
+    id: 'talk', title: '7. Разговор с ИИ',
+    steps: [
+      { do: 'Вернись на главный экран, нажми SPEAKING.',
+        ex: 'Экран разговора с кругами и микрофоном.' },
+      { do: 'Скажи что-нибудь по-английски и дождись ответа.',
+        ex: 'Ответ приходит ГОЛОСОМ за 2–4 секунды, звучит осмысленно и по теме.' },
+      { do: 'Поговори 4–5 реплик на свободную тему.',
+        ex: 'Собеседник помнит, о чём речь, задаёт вопросы по делу, не повторяется.' },
+      { do: 'Нажми «Разбор» (появляется с третьей реплики).',
+        ex: 'Приходит разбор беседы с ошибками и цитатами из твоей речи.' },
+    ],
+  },
+  {
+    id: 'account', title: '8. Кабинет и возврат',
+    steps: [
+      { do: 'Открой Настройки (шестерёнка слева).',
+        ex: 'Виден ник, уровень, XP, «Лучшая серия», «Занятий», «Реплик».' },
+      { do: 'Найди строку «Помогаю улучшать проверку».',
+        ex: 'Переключатель на месте, его можно выключить и включить.' },
+      { do: 'Переключи тему на «Авто», поменяй громкость.',
+        ex: 'Настройки применяются сразу.' },
+      { do: 'Открой Статистику и Календарь.',
+        ex: 'В календаре сегодняшний день отмечен огоньком, в статистике появились твои занятия.' },
+      { do: 'Выйди из аккаунта и войди снова своим ником и паролем.',
+        ex: 'Вход проходит, прогресс на месте — занятия и стрик не потерялись.' },
+    ],
+  },
+  {
+    id: 'stress', title: '9. Мелочи, которые ломаются чаще всего',
+    steps: [
+      { do: 'Начни задание и нажми «назад» в браузере на середине.',
+        ex: 'Приложение не «белеет», можно вернуться в меню.' },
+      { do: 'Заблокируй телефон на минуту во время записи, потом разблокируй.',
+        ex: 'Приложение не сломалось: либо запись продолжилась, либо честно сказано, что прервано.' },
+      { do: 'Промолчи в задании (запиши тишину) и отправь.',
+        ex: 'Система говорит «ничего не расслышали», а НЕ выдумывает текст и не ставит балл за молчание.' },
+      { do: 'Проверь на медленном интернете (2–3 деления связи).',
+        ex: 'Есть индикация ожидания, ошибки понятны человеку, а не «Error 500».' },
+    ],
+  },
+];
+
+const KEY = 'pingo.manualtest.v1';
+const state = JSON.parse(localStorage.getItem(KEY) || '{}');
+const box = document.getElementById('stages');
+
+STAGES.forEach((st, si) => {
+  const d = document.createElement('details');
+  d.className = 'stage';
+  if (si === 0) d.open = true;
+  const sum = document.createElement('summary');
+  sum.innerHTML = st.title + '<span class="badge" data-badge="' + st.id + '"></span>';
+  d.appendChild(sum);
+  st.steps.forEach((step, i) => {
+    const key = st.id + ':' + i;
+    const wrap = document.createElement('div');
+    wrap.className = 'step';
+    wrap.innerHTML =
+      '<p class="do">' + (i + 1) + '. ' + step.do + '</p>' +
+      '<p class="expect">Ожидается: ' + step.ex + '</p>' +
+      '<div class="row">' +
+        '<button data-k="' + key + '" data-v="ok">Работает</button>' +
+        '<button data-k="' + key + '" data-v="bad">Не так</button>' +
+        '<button data-k="' + key + '" data-v="skip">Пропустил</button>' +
+      '</div>' +
+      '<textarea data-note="' + key + '" placeholder="Что именно пошло не так (или заметка)"></textarea>';
+    d.appendChild(wrap);
+  });
+  box.appendChild(d);
+});
+
+function save() { localStorage.setItem(KEY, JSON.stringify(state)); paint(); }
+
+function paint() {
+  let done = 0, total = 0;
+  STAGES.forEach((st) => {
+    let d = 0, bad = 0;
+    st.steps.forEach((_, i) => {
+      total++;
+      const v = state[st.id + ':' + i];
+      if (v && v.verdict) { done++; d++; if (v.verdict === 'bad') bad++; }
+    });
+    const badge = document.querySelector('[data-badge="' + st.id + '"]');
+    if (badge) badge.textContent = d + '/' + st.steps.length + (bad ? ' · ' + bad + ' проблем' : '');
+  });
+  document.getElementById('counter').textContent = 'Пройдено ' + done + ' из ' + total;
+  document.getElementById('fill').style.width = total ? (100 * done / total) + '%' : '0';
+}
+
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-k]');
+  if (!b) return;
+  const k = b.dataset.k, v = b.dataset.v;
+  state[k] = Object.assign({}, state[k], { verdict: v });
+  document.querySelectorAll('button[data-k="' + k + '"]').forEach((x) => {
+    x.setAttribute('aria-pressed', String(x.dataset.v === v));
+  });
+  save();
+});
+
+document.addEventListener('input', (e) => {
+  const t = e.target.closest('textarea[data-note]');
+  if (!t) return;
+  const k = t.dataset.note;
+  state[k] = Object.assign({}, state[k], { note: t.value });
+  localStorage.setItem(KEY, JSON.stringify(state));
+});
+
+// восстановление ответов после перезагрузки
+Object.keys(state).forEach((k) => {
+  const v = state[k];
+  if (v && v.verdict) {
+    document.querySelectorAll('button[data-k="' + k + '"]').forEach((x) => {
+      x.setAttribute('aria-pressed', String(x.dataset.v === v.verdict));
+    });
+  }
+  if (v && v.note) {
+    const t = document.querySelector('textarea[data-note="' + k + '"]');
+    if (t) t.value = v.note;
+  }
+});
+paint();
+
+document.getElementById('build').addEventListener('click', () => {
+  const L = [];
+  L.push('ОТЧЁТ ПРИЁМОЧНОГО ТЕСТА PINGO AI');
+  L.push('дата: ' + new Date().toLocaleString('ru-RU'));
+  L.push('устройство: ' + navigator.userAgent);
+  L.push('экран: ' + window.innerWidth + 'x' + window.innerHeight);
+  L.push('');
+  let ok = 0, bad = 0, skip = 0, none = 0;
+  STAGES.forEach((st) => {
+    const lines = [];
+    st.steps.forEach((step, i) => {
+      const v = state[st.id + ':' + i] || {};
+      const mark = v.verdict === 'ok' ? 'OK  ' : v.verdict === 'bad' ? 'СЛОМ' :
+                   v.verdict === 'skip' ? 'проп' : ' -- ';
+      if (v.verdict === 'ok') ok++; else if (v.verdict === 'bad') bad++;
+      else if (v.verdict === 'skip') skip++; else none++;
+      // В отчёт пишем только проблемы и заметки: список «всё ок» никто не читает,
+      // а разбирать нужно ровно то, что сломалось.
+      if (v.verdict === 'bad' || (v.note || '').trim()) {
+        lines.push('  ' + mark + ' шаг ' + (i + 1) + ': ' + step.do.replace(/<[^>]+>/g, ''));
+        if ((v.note || '').trim()) lines.push('        заметка: ' + v.note.trim());
+      }
+    });
+    if (lines.length) { L.push(st.title); L.push.apply(L, lines); L.push(''); }
+  });
+  L.push('ИТОГО: работает ' + ok + ', сломано ' + bad + ', пропущено ' + skip +
+         ', не проверено ' + none);
+  if (!bad) L.push('Поломок не отмечено.');
+  const out = L.join('\n');
+  const area = document.getElementById('report');
+  area.value = out;
+  area.removeAttribute('readonly');
+  area.select();
+});
+
+document.getElementById('reset').addEventListener('click', () => {
+  if (!confirm('Стереть все отметки и начать заново?')) return;
+  localStorage.removeItem(KEY);
+  location.reload();
+});
+</script>
+</body>
+</html>

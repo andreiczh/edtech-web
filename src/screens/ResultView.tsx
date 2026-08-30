@@ -553,6 +553,14 @@ export function ResultView({
         </div>
       )}
 
+      {/* Оговорка о точности — сразу под баллом, а не в подвале: ученик должен
+          увидеть её тогда же, когда цифру, иначе она никого не защитит. */}
+      {feedback.accuracy_note && (
+        <p className="accuracy-note">
+          <span aria-hidden="true">ⓘ</span> {feedback.accuracy_note}
+        </p>
+      )}
+
       {taskId === 39 && reference && (
         <ReadingResult feedback={feedback} reference={reference} dispute={dispute}
                        variantId={variantId} />

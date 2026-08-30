@@ -55,6 +55,10 @@ export interface TaskFeedback {
   /** Только у монолога: три критерия ФИПИ */
   criteria?: FeedbackCriterion[]
   delivery?: Delivery
+  /** Честная оговорка о точности балла — приходит с сервера, показывается под
+      баллом. Держать текст на сервере, а не во фронте: цифры в нём меняются
+      вместе с замером, и расходиться этим двум местам нельзя. */
+  accuracy_note?: string
 }
 
 export interface FeedbackResponse {

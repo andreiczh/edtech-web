@@ -1530,21 +1530,46 @@ def _require_admin(key: str | None) -> None:
         raise HTTPException(status_code=401, detail="Неверный админ-ключ.")
 
 
+# Банк заданий в памяти. Замер 30.08.2026: /tasks отдаёт 220 КБ и занимает
+# 6 секунд, потому что тянет payload всех 193 активных заданий из Neon — и так
+# при КАЖДОМ входе в тренажёр. Три беды разом: ученик ждёт, единственное
+# соединение к базе занято (остальные запросы стоят за ним), и Neon не
+# засыпает, сжигая те самые compute-часы, из-за которых проект уже вставал.
+#
+# Банк меняется только руками владельца, поэтому кэш живёт долго и сбрасывается
+# на любой правке задания в админке.
+_TASKS_CACHE: dict = {"at": 0.0, "data": None}
+_TASKS_TTL = float(os.environ.get("TASKS_CACHE_SEC", "600"))
+
+
+def _tasks_cache_drop() -> None:
+    """Сбросить кэш банка: зовётся из всех ручек, меняющих задания."""
+    _TASKS_CACHE["at"] = 0.0
+    _TASKS_CACHE["data"] = None
+
+
 @app.get("/tasks")
 async def tasks_public():
     """Активные задания из банка. Фронт мешает их со встроенными вариантами;
     если базы нет — отвечаем пустым списком, встроенный банк никуда не девается."""
     if not _storage_ok:
         return {"tasks": []}
+    now = time.monotonic()
+    cached = _TASKS_CACHE["data"]
+    if cached is not None and now - _TASKS_CACHE["at"] < _TASKS_TTL:
+        return {"tasks": cached}
     try:
         rows = await asyncio.to_thread(storage.tasks_active)
     except Exception:  # noqa: BLE001
-        return {"tasks": []}
+        # Кэш держим даже на отказе базы: лучше отдать банк десятиминутной
+        # давности, чем пустой список — задания не меняются каждую минуту.
+        return {"tasks": cached if cached is not None else []}
     for r in rows:
         try:
             r["payload"] = json.loads(r["payload"])
         except json.JSONDecodeError:
             r["payload"] = {}
+    _TASKS_CACHE.update(at=now, data=rows)
     return {"tasks": rows}
 
 
@@ -1788,6 +1813,7 @@ async def admin_task_add(body: dict = Body(...), x_admin_key: str | None = Heade
     tid = await asyncio.to_thread(
         storage.task_add, exam, task_no, kind, json.dumps(payload, ensure_ascii=False)
     )
+    _tasks_cache_drop()  # банк изменился — кэш /tasks недействителен
     return {"id": tid}
 
 
@@ -1814,6 +1840,7 @@ async def admin_task_list(x_admin_key: str | None = Header(None)):
 async def admin_task_toggle(tid: str, x_admin_key: str | None = Header(None)):
     _require_admin(x_admin_key)
     state = await asyncio.to_thread(storage.task_toggle, tid)
+    _tasks_cache_drop()  # банк изменился — кэш /tasks недействителен
     if state is None:
         raise HTTPException(status_code=404, detail="Задание не найдено.")
     return {"active": state}
@@ -2074,6 +2101,7 @@ async def admin_publish_clean(body: dict = Body(default={}),
         return {"would_publish": len(clean), "left_for_review": flagged}
     for tid in clean:
         await asyncio.to_thread(storage.task_toggle, tid)
+        _tasks_cache_drop()  # банк изменился — кэш /tasks недействителен
     print(f"[admin] опубликовано пачкой: {len(clean)}, оставлено на разбор: {flagged}")
     return {"published": len(clean), "left_for_review": flagged}
 
@@ -2084,6 +2112,7 @@ async def admin_task_delete(tid: str, x_admin_key: str | None = Header(None)):
     (кривой OCR, картинка не о том). Выключение (toggle) — для «отложить»."""
     _require_admin(x_admin_key)
     ok = await asyncio.to_thread(storage.task_delete, tid)
+    _tasks_cache_drop()  # банк изменился — кэш /tasks недействителен
     if not ok:
         raise HTTPException(status_code=404, detail="Задание не найдено.")
     return {"deleted": tid}
@@ -3086,7 +3115,11 @@ async def _monologue_work(data: bytes) -> dict:
                     {"role": "user", "content": transcript_text},
                 ],
                 response_format={"type": "json_object"},
-                temperature=0.2,
+                # Ноль, как и в /task_feedback: один и тот же ответ обязан
+                # получать один и тот же балл. Здесь 0.2 задержалась с более
+                # ранних времён, и старый эндпоинт оценивал шумнее нового —
+                # то есть два пути к одной оценке расходились между собой.
+                temperature=0.0,
                 max_tokens=2000,
             )
         )
@@ -3309,6 +3342,15 @@ PRON_TALK_EVERY = int(os.environ.get("PRON_TALK_EVERY", "4"))
 # см. /pron/weakest). Сбор при этом продолжается: числа копятся, а
 # показывать их станет чем, когда появится фонемная ступень.
 PRON_SHOW = os.environ.get("PRON_SHOW", "0").strip() not in ("0", "false", "no")
+
+# Монолог 42 разбирается ДВАЖДЫ, и проходы сводятся (ege_scoring.merge_two_passes).
+# Не перестраховка: при одном проходе одна и та же работа получала 0, 4 и 4 балла
+# в разных запусках при temperature 0 — разброс был сравним с самой ошибкой.
+# Замер 30.08.2026 на восьми работах ФИПИ, по три повтора каждого пути:
+#     один проход   в пределах ±1: 3, 3, 3   разброс между повторами 0.8
+#     два прохода   в пределах ±1: 5, 5, 5   разброс между повторами 0.4
+# Цена — один дополнительный вызов LLM на монолог; выключается MONO_CONSENSUS=0.
+MONO_CONSENSUS = os.environ.get("MONO_CONSENSUS", "1").strip() not in ("0", "false", "no")
 
 # ------------------------------------------------------------ КОРПУС ГОЛОСА
 # Здесь хранится САМА ЗАПИСЬ, поэтому правил больше, чем у любой другой части.
@@ -3655,6 +3697,32 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     observations = _loads_forgiving(raw)
     if observations is None:
         raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
+
+    # ВТОРОЙ ПРОХОД монолога и слияние (см. MONO_CONSENSUS). Спорный признак
+    # решается строже, спорное описание фото — в пользу ученика, ошибок берём
+    # больше из двух. Отказ второго прохода не беда: остаётся первый.
+    if kind == "monologue" and MONO_CONSENSUS and (observations.get("aspects") or []):
+        try:
+            second = await asyncio.to_thread(
+                lambda: client.chat.completions.create(
+                    model=LLM_MODEL,
+                    messages=[
+                        {"role": "system", "content": prompt + _memory_prompt_block(mem)},
+                        {"role": "user", "content": transcript_text},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.0,
+                    max_tokens=2000,
+                )
+            )
+            _track_llm(second)
+            obs2 = _loads_forgiving((second.choices[0].message.content or "").strip())
+            if obs2:
+                observations = ege_scoring.merge_two_passes(observations, obs2)
+                print("[monologue] два прохода сведены в один разбор")
+        except Exception as e:  # noqa: BLE001 — консенсус не критичен
+            print(f"[monologue] второй проход не удался ({type(e).__name__}) — "
+                  "остаётся первый")
 
     # ОБРЫВ РАЗБОРА. Модель обязана вернуть пункт на каждый вопрос задания:
     # балл — сумма зачтённых, поэтому недостающий пункт молча становится нулём,

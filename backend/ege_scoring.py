@@ -98,6 +98,72 @@ def verb_form_matches(plan: str, student: str) -> bool:
     return shape(plan_s) == shape(student_s)
 
 
+def merge_two_passes(first: dict, second: dict) -> dict:
+    """Свести два независимых прохода разбора монолога в один.
+
+    Зачем. Замер 30.08.2026 на восьми работах ФИПИ: при ОДНОМ проходе одна и та
+    же работа получала 0, 4 и 4 балла в разных запусках — при temperature 0.
+    Разброс между повторами (0.8 балла в среднем) был сравним с самой ошибкой,
+    то есть ученик, сдавший один и тот же ответ дважды, получал разные оценки.
+
+    Правило слияния (вариант, победивший в замере):
+      * признак, который ОБА прохода видят одинаково, берётся как есть;
+      * расхождение в «описано ли фото» решается в пользу ученика — это самый
+        заметный факт ответа, и если один проход его увидел, значит описание
+        было; спорить тут значит наказывать за причуду модели;
+      * любое другое расхождение решается СТРОЖЕ (логическое И): по систематике
+        проекта система щедрее эксперта везде, где решает модель;
+      * список ошибок берётся оттуда, где их больше (пропуск ошибки — щедрость),
+        число фраз — меньшее из двух (объём режет балл, и завышать его нельзя).
+
+    Замер (8 работ, по три повтора каждого пути):
+        один проход      в пределах ±1: 3, 3, 3   разброс между повторами 0.8
+        два прохода      в пределах ±1: 5, 5, 5   разброс между повторами 0.4
+    """
+    if not isinstance(second, dict) or not second.get("aspects"):
+        return first
+    a = {int(c.get("n") or 0): c for c in (first.get("aspects") or [])
+         if isinstance(c, dict)}
+    b = {int(c.get("n") or 0): c for c in (second.get("aspects") or [])
+         if isinstance(c, dict)}
+    if not a:
+        return second
+
+    merged = []
+    for n in (1, 2, 3, 4):
+        ca, cb = a.get(n), b.get(n)
+        if not ca:
+            if cb:
+                merged.append(cb)
+            continue
+        base = dict(ca)
+        if cb:
+            for key, val in ca.items():
+                other = cb.get(key)
+                if not isinstance(val, bool) or not isinstance(other, bool):
+                    continue
+                if val == other:
+                    continue
+                if key.startswith("described"):
+                    base[key] = val          # спорное описание — в пользу ученика
+                elif key.startswith("factual"):
+                    base[key] = val or other  # замеченную ошибку не прощаем
+                else:
+                    base[key] = val and other  # спорный признак — строже
+        merged.append(base)
+
+    out = dict(first)
+    out["aspects"] = merged
+    for key in ("lang_errors", "logic_errors"):
+        la = first.get(key) or []
+        lb = second.get(key) or []
+        out[key] = la if len(la) >= len(lb) else lb
+    pa, pb = first.get("phrases"), second.get("phrases")
+    if isinstance(pa, int) and isinstance(pb, int):
+        out["phrases"] = min(pa, pb)
+    return out
+
+
 def aspect_verdicts(checks: list[dict]) -> list[dict]:
     """Вердикты по четырём аспектам из простых признаков «да/нет».
 
