@@ -158,9 +158,15 @@ def merge_two_passes(first: dict, second: dict) -> dict:
         la = first.get(key) or []
         lb = second.get(key) or []
         out[key] = la if len(la) >= len(lb) else lb
-    pa, pb = first.get("phrases"), second.get("phrases")
-    if isinstance(pa, int) and isinstance(pb, int):
-        out["phrases"] = min(pa, pb)
+    # Число фраз режет балл по шкале объёма, поэтому берём МЕНЬШЕЕ — но только
+    # из тех проходов, где счёт вообще состоялся. Ноль фраз при непустой речи
+    # означает сбой прохода, а не молчание ученика: слепой min обнулял бы
+    # нормальную работу из-за одной осечки модели (поймано на живом прогоне
+    # прода 30.08.2026 — балл 0/10 при пяти произнесённых фразах).
+    counts = [p for p in (first.get("phrases"), second.get("phrases"))
+              if isinstance(p, int) and p > 0]
+    if counts:
+        out["phrases"] = min(counts)
     return out
 
 

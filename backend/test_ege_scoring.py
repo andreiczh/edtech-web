@@ -587,6 +587,46 @@ def check_gross_errors() -> list[str]:
     return bad
 
 
+
+
+def check_merge() -> list[str]:
+    """Слияние двух проходов монолога: правила и грабли (30.08.2026).
+
+    Консенсус внедрён ради воспроизводимости: при ОДНОМ проходе одна и та же
+    работа получала 0, 4 и 4 балла в разных запусках модели при temperature 0.
+    Здесь закреплены правила слияния — и та ошибка, которую живой прогон прода
+    поймал через час после внедрения.
+    """
+    bad = []
+    a = {"aspects": [{"n": 1, "described_first": True, "described_second": False,
+                      "linked_to_topic": True, "factual_error": False}],
+         "lang_errors": [1, 2], "logic_errors": [], "phrases": 12}
+    b = {"aspects": [{"n": 1, "described_first": True, "described_second": True,
+                      "linked_to_topic": False, "factual_error": True}],
+         "lang_errors": [1, 2, 3], "logic_errors": [], "phrases": 0}
+    m = sc.merge_two_passes(a, b)
+    asp = m["aspects"][0]
+
+    cases = [
+        (asp["described_second"] is False,
+         "спорное описание фото решается в пользу ученика"),
+        (asp["linked_to_topic"] is False,
+         "спорный признак решается строже: система и так щедрее эксперта"),
+        (asp["factual_error"] is True, "замеченную фактическую ошибку не прощаем"),
+        (len(m["lang_errors"]) == 3, "ошибок берём больше из двух проходов"),
+        (m["phrases"] == 12,
+         "ноль фраз у одного прохода НЕ обнуляет объём (это сбой, не молчание)"),
+        (sc.merge_two_passes(a, {}) is a,
+         "пустой второй проход оставляет первый нетронутым"),
+    ]
+    for ok, name in cases:
+        print(f"{'OK  ' if ok else 'FAIL'} слияние: {name}")
+        if not ok:
+            bad.append(f"слияние проходов: {name}")
+    return bad
+
+
+
 def main() -> int:
     print("Сверка шкалы с методичкой ФИПИ 2026\n")
     bad: list[str] = []
@@ -603,7 +643,8 @@ def main() -> int:
     bad += check_items()
     print()
     bad += check_monologues()
-    print()
+    bad += check_merge()
+
     if bad:
         print(f"ПРОВАЛЕНО {len(bad)}:")
         for b in bad:
