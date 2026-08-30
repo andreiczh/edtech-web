@@ -249,7 +249,7 @@ export default function App() {
             ))}
           </nav>
           <span className="lspacer" />
-          <div className="themedock" role="group" aria-label="Тема оформления">
+          <div className="themedock themedock--joined" role="group" aria-label="Тема оформления">
             <button
               type="button"
               className={`rail__btn${theme === 'light' ? ' rail__btn--on' : ''}`}
@@ -278,6 +278,9 @@ export default function App() {
                 onTrainer={backToEge}
                 onSpeaking={() => setRoute({ name: 'conversation' })}
                 onDemo={startDemo}
+                onStats={() => setRoute({ name: 'stats' })}
+                onCalendar={() => setRoute({ name: 'calendar' })}
+                onProfile={() => setRoute({ name: 'profile' })}
               />
             )}
 

@@ -1522,3 +1522,417 @@
   font-size: 13px;
   flex: 0 0 auto;
 }
+
+/* ----------------------------------------------- Главная v2 (референс 31.08)
+   Слева промо-карточки и лента «Сегодня», справа три действия, сверху
+   мини-стрик и профиль, снизу Telegram-баннер. Старый дашборд (пламя,
+   недельный график) уехал: график недели остался владельцу в статистике. */
+.dash2 {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(300px, 0.95fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: clamp(12px, 1.8vh, 20px) 24px;
+  overflow: hidden;
+}
+.dash2__top {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.dash2__top .dash__hello {
+  margin: 0;
+  font-size: clamp(24px, 2.6vw, 38px);
+}
+.dash2__topright {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.streakpill,
+.userpill {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 999px;
+  font: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  box-shadow: var(--shadow-card);
+  color: var(--text);
+}
+.streakpill span {
+  font-size: 16px;
+}
+.streakpill b {
+  font-size: 14px;
+  font-weight: 800;
+}
+.userpill__ava {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #efeaff;
+  color: #6d55d6;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+.userpill__nick {
+  font-size: 13.5px;
+  font-weight: 700;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.userpill__chev {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.app[data-mode='dark'] .streakpill,
+.app[data-mode='dark'] .userpill {
+  background: rgba(29, 27, 38, 0.72);
+}
+
+.dash2__left {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 1.6vh, 18px);
+  min-height: 0;
+}
+.dash2__right {
+  display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: clamp(10px, 1.6vh, 18px);
+  min-height: 0;
+}
+
+/* Промо-карточка: текст слева, 3D-иконка справа. */
+.promo {
+  position: relative;
+  border-radius: 22px;
+  padding: clamp(12px, 1.8vh, 20px) 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: var(--shadow-card);
+  min-height: 0;
+}
+.promo--cream {
+  background: linear-gradient(140deg, #fdf3dd, #fbecc9);
+}
+.promo--pink {
+  background: linear-gradient(140deg, #ffe9f2, #ffdcEB);
+}
+.promo__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.promo__eyebrow {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: #c2618b;
+}
+.promo--cream .promo__eyebrow {
+  color: #b8873a;
+}
+.promo__title {
+  font-size: clamp(15px, 1.5vw, 18px);
+  font-weight: 800;
+  color: var(--card-ink);
+  letter-spacing: -0.2px;
+}
+.promo__sub {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.promo__btn {
+  appearance: none;
+  border: 0;
+  align-self: flex-start;
+  margin-top: 6px;
+  background: #ffffff;
+  color: var(--card-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(30, 30, 50, 0.08);
+}
+.promo__btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+.promo__art {
+  flex: 0 0 auto;
+  width: clamp(64px, 8vh, 92px);
+}
+.promo__art svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  filter: drop-shadow(0 10px 18px rgba(30, 30, 50, 0.12));
+}
+.app[data-mode='dark'] .promo--cream {
+  background: linear-gradient(140deg, #3a3220, #352c1a);
+}
+.app[data-mode='dark'] .promo--pink {
+  background: linear-gradient(140deg, #3a2430, #38222e);
+}
+.app[data-mode='dark'] .promo__btn {
+  background: #24212f;
+  color: var(--text);
+}
+
+/* Лента «Сегодня». */
+.today {
+  border-radius: 22px;
+  padding: clamp(10px, 1.6vh, 16px) 16px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-card);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.app[data-mode='dark'] .today {
+  background: rgba(29, 27, 38, 0.72);
+}
+.today__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.today__head b {
+  font-size: 14.5px;
+  font-weight: 800;
+  color: var(--text);
+}
+.today__nav {
+  display: flex;
+  gap: 6px;
+}
+.today__nav button {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 13px;
+  display: grid;
+  place-items: center;
+}
+.today__row {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  min-height: 0;
+}
+.today__row::-webkit-scrollbar {
+  display: none;
+}
+.tcard {
+  appearance: none;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  flex: 1 0 152px;
+  min-width: 152px;
+  border-radius: 16px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: default;
+  color: var(--card-ink);
+}
+.tcard[type='button'] {
+  cursor: pointer;
+}
+.tcard--lav { background: #efeaff; }
+.tcard--blue { background: #e3f1fd; }
+.tcard--mint { background: #e2f6ea; }
+.tcard--peach { background: #fdeede; }
+.tcard__ic {
+  font-size: 17px;
+}
+.tcard b {
+  font-size: 13px;
+  font-weight: 800;
+}
+.tcard__text {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tcard__go {
+  margin-top: auto;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #8c73ff;
+}
+.app[data-mode='dark'] .tcard--lav { background: rgba(140, 115, 255, 0.16); }
+.app[data-mode='dark'] .tcard--blue { background: rgba(44, 151, 224, 0.14); }
+.app[data-mode='dark'] .tcard--mint { background: rgba(63, 185, 121, 0.13); }
+.app[data-mode='dark'] .tcard--peach { background: rgba(240, 160, 90, 0.13); }
+.app[data-mode='dark'] .tcard { color: var(--text); }
+
+/* Telegram-баннер. */
+.tgbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #17151f;
+  border-radius: 20px;
+  padding: clamp(12px, 1.8vh, 18px) 20px;
+  box-shadow: var(--shadow-card);
+}
+.tgbar__ic {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(84, 169, 235, 0.18);
+  display: grid;
+  place-items: center;
+}
+.tgbar__t {
+  min-width: 0;
+  flex: 1;
+}
+.tgbar__t b {
+  display: block;
+  color: #f2f0f8;
+  font-size: 14.5px;
+  font-weight: 800;
+}
+.tgbar__t span {
+  display: block;
+  color: #8f8da0;
+  font-size: 12.5px;
+  margin-top: 1px;
+}
+.tgbar__btn {
+  appearance: none;
+  border: 0;
+  flex: 0 0 auto;
+  background: #ffffff;
+  color: #17151f;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  padding: 10px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.tgbar__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.app[data-mode='dark'] .tgbar {
+  background: #211e2c;
+  border: 1px solid var(--line);
+}
+
+@media (max-width: 980px) {
+  .dash2 {
+    overflow-y: auto;
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+  .dash2__right {
+    grid-template-rows: none;
+  }
+  .actioncard {
+    min-height: 150px;
+  }
+  .tgbar {
+    flex-wrap: wrap;
+  }
+}
+
+/* Референс 31.08: навигация и переключатель темы — один плавающий док.
+   Разделитель вместо зазора между двумя стеклянными колоннами. */
+.themedock--joined {
+  margin-top: 0;
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  padding-top: 4px;
+  position: relative;
+}
+.themedock--joined::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 18px;
+  height: 1px;
+  background: var(--line);
+}
+.leftcol:has(.themedock--joined) .rail {
+  border-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-bottom: 4px;
+}
+
+@media (max-width: 640px) {
+  /* Шапка главной: заголовок и пилюли не влезают в одну строку — переносим,
+     а ник в пилюле прячем (аватара и стрелки достаточно). */
+  .dash2__top {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .userpill__nick {
+    display: none;
+  }
+  .dash2__top .dash__hello {
+    font-size: 22px;
+  }
+}
+
+/* Грид-айтем по умолчанию не сжимается уже контента (min-width: auto), и
+   лента из четырёх карточек по 152px распирала колонку на телефоне до 638px —
+   весь дашборд уезжал за экран. min-width: 0 возвращает колонкам право
+   сжиматься, а прокрутка ленты остаётся внутри неё самой. */
+.dash2__left,
+.dash2__right,
+.today {
+  min-width: 0;
+}
