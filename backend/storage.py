@@ -221,7 +221,12 @@ def ensure_schema() -> None:
         # (задача отключилась, файл удалили, ноут спал), и снаружи это никак
         # не видно — задача в планировщике проваливается молча. Пусть сервер
         # сам показывает, когда его последний раз забирали.
-        # КОРПУС ГОЛОСА (28.08.2026). Здесь ЛЕЖИТ САМА ЗАПИСЬ — единственное
+        # КОРПУС ГОЛОСА (28.08.2026). Звук лежит base64-ТЕКСТОМ, как картинки
+        # заданий: типа BLOB в PostgreSQL нет вовсе, и попытка объявить его
+        # роняет ensure_schema с UndefinedObject, а вместе с ним всю память
+        # системы (поймано на проде в тот же день). Плата — +33% объёма.
+        #
+        # Здесь ЛЕЖИТ САМА ЗАПИСЬ — единственное
         # место в системе, кроме dispute_shots, где это так, и потому единственное
         # с явным согласием: без consent=1 в настройках ученика сюда не попадает
         # ничего. Зачем: любая оценка произношения и любая проверка точности
@@ -233,7 +238,7 @@ def ensure_schema() -> None:
         # так корпус годен и как обучающий набор, и как сетка точности.
         "CREATE TABLE IF NOT EXISTS voice_corpus ("
         " id TEXT PRIMARY KEY, student_id TEXT NOT NULL, kind TEXT NOT NULL,"
-        " variant TEXT, mime TEXT, data BLOB NOT NULL, bytes INTEGER NOT NULL,"
+        " variant TEXT, mime TEXT, data TEXT NOT NULL, bytes INTEGER NOT NULL,"
         " duration REAL, transcript TEXT, reference TEXT,"
         " score INTEGER, max_score INTEGER, labels TEXT,"
         " verified TEXT, verified_at TEXT, created_at TEXT NOT NULL)",
@@ -954,13 +959,15 @@ def corpus_add(student_id: str, kind: str, variant: str, audio: bytes,
     здесь его нет намеренно — функция не должна быть местом, где легко
     забыть проверку, поэтому она просто пишет то, что ей дали.
     """
+    import base64 as _b64
     import json as _json
 
     cid = str(uuid.uuid4())
+    payload = _b64.b64encode(audio).decode("ascii")
     _exec("INSERT INTO voice_corpus(id, student_id, kind, variant, mime, data,"
           " bytes, duration, transcript, reference, score, max_score, labels,"
           " created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-          (cid, student_id, kind, str(variant or "")[:64], mime[:32], audio,
+          (cid, student_id, kind, str(variant or "")[:64], mime[:32], payload,
            len(audio), float(duration or 0.0), (transcript or "")[:8000],
            (reference or "")[:8000],
            (int(score) if score is not None else None),
@@ -1045,10 +1052,12 @@ def corpus_list(limit: int = 100, kind: str = "", unverified_only: bool = False,
 
 def corpus_audio(cid: str) -> tuple[bytes, str] | None:
     """Сам звук одной записи — для прослушивания в админке и выгрузки."""
+    import base64 as _b64
+
     row = _exec("SELECT data, mime FROM voice_corpus WHERE id=?", (cid,)).fetchone()
     if not row:
         return None
-    return bytes(row[0]), str(row[1] or "audio/webm")
+    return _b64.b64decode(row[0]), str(row[1] or "audio/webm")
 
 
 def corpus_verify(cid: str, verdict: str) -> bool:
