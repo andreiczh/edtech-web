@@ -1936,3 +1936,188 @@
 .today {
   min-width: 0;
 }
+
+/* ==========================================================================
+   Главная: облегчение (31.08.2026, по замечанию владельца «смазано и слишком
+   ИИ-шно»). Три источника «мыла» убраны разом:
+     1. градиентные заливки карточек -> плоский светлый тон;
+     2. backdrop-filter под текстом -> обычный фон (blur на Windows размывает
+        не только подложку, но и субпиксельное сглаживание надписей);
+     3. крупные псевдо-3D SVG с drop-shadow -> line-иконки 22px в чипе, они
+        резкие при любом масштабе.
+   Тени заменены тонкой рамкой: она держит структуру, не мылит края.
+   ========================================================================== */
+
+.dash2 .promo,
+.dash2 .today,
+.dash2 .actioncard {
+  box-shadow: none;
+  border: 1px solid var(--line);
+  background-image: none;
+}
+
+.dash2 .promo--cream { background-color: #fdf6ea; }
+.dash2 .promo--pink { background-color: #fdf1f6; }
+.app[data-mode='dark'] .dash2 .promo--cream { background-color: #221f1a; }
+.app[data-mode='dark'] .dash2 .promo--pink { background-color: #221b21; }
+
+/* Чип иконки: мягкий квадрат со скруглением, тонкая линия внутри. */
+.promo__chip,
+.actioncard__chip {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+}
+.promo__chip svg,
+.actioncard__chip svg {
+  width: 22px;
+  height: 22px;
+}
+.promo__chip--amber { background: #f6e7cd; color: #a9762c; }
+.promo__chip--pink { background: #fadfe9; color: #c2618b; }
+.actioncard__chip--pink { background: #fbe0e9; color: #d1547f; }
+.actioncard__chip--lav { background: #e9e2fb; color: #6d55d6; }
+.actioncard__chip--rose { background: #fce1e4; color: #cf5f6e; }
+.app[data-mode='dark'] .promo__chip--amber { background: rgba(200, 150, 60, 0.16); color: #d9ab63; }
+.app[data-mode='dark'] .promo__chip--pink,
+.app[data-mode='dark'] .actioncard__chip--pink,
+.app[data-mode='dark'] .actioncard__chip--rose { background: rgba(240, 120, 160, 0.14); color: #f0a0bd; }
+.app[data-mode='dark'] .actioncard__chip--lav { background: rgba(140, 115, 255, 0.16); color: #b3a2ff; }
+
+/* Правые карточки: тот же светлый тон, чип в правом верхнем углу вместо
+   большой картинки, без подъёма на ховере (лифт + тень давали ореол). */
+.dash2 .actioncard {
+  padding: clamp(14px, 2vh, 20px) 20px;
+  gap: 6px;
+}
+.dash2 .actioncard--pink { background-color: #fdf1f5; }
+.dash2 .actioncard--lav { background-color: #f5f2fe; }
+.dash2 .actioncard--rose { background-color: #fdf2f3; }
+.app[data-mode='dark'] .dash2 .actioncard--pink,
+.app[data-mode='dark'] .dash2 .actioncard--rose { background-color: #221b21; }
+.app[data-mode='dark'] .dash2 .actioncard--lav { background-color: #1e1c2a; }
+.dash2 .actioncard:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: #d9d5e8;
+}
+.app[data-mode='dark'] .dash2 .actioncard:hover { border-color: #3a3650; }
+.dash2 .actioncard h3 {
+  font-size: clamp(15px, 1.5vw, 19px);
+  letter-spacing: 0.2px;
+}
+.dash2 .actioncard p {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.actioncard__chip {
+  position: absolute;
+  top: clamp(12px, 1.8vh, 18px);
+  right: 18px;
+}
+.dash2 .actioncard__go {
+  margin-top: auto;
+  background: var(--text);
+  color: var(--bg);
+  padding: 9px 16px;
+  font-size: 13px;
+  box-shadow: none;
+}
+
+/* Стеклянные пилюли и лента: без blur, чтобы текст оставался резким. */
+.dash2 .streakpill,
+.dash2 .userpill,
+.dash2 .today {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: var(--card-solid, #ffffff);
+  box-shadow: none;
+}
+.app[data-mode='dark'] .dash2 .streakpill,
+.app[data-mode='dark'] .dash2 .userpill,
+.app[data-mode='dark'] .dash2 .today {
+  background: #1c1a24;
+}
+
+/* Мини-карточки ленты: белые, цвет только в чипе иконки. */
+.dash2 .tcard {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  gap: 5px;
+}
+.dash2 .tcard__ic {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font-size: 0;
+}
+.dash2 .tcard__ic svg {
+  width: 17px;
+  height: 17px;
+}
+.tcard__ic--lav { background: #efeaff; color: #6d55d6; }
+.tcard__ic--blue { background: #e6f1fb; color: #2f7fbf; }
+.tcard__ic--mint { background: #e4f4ea; color: #3f8f62; }
+.tcard__ic--peach { background: #fbeee0; color: #b4783a; }
+.app[data-mode='dark'] .tcard__ic--lav { background: rgba(140, 115, 255, 0.18); color: #b3a2ff; }
+.app[data-mode='dark'] .tcard__ic--blue { background: rgba(60, 150, 220, 0.16); color: #7cc0ee; }
+.app[data-mode='dark'] .tcard__ic--mint { background: rgba(70, 180, 120, 0.16); color: #7ed3a3; }
+.app[data-mode='dark'] .tcard__ic--peach { background: rgba(220, 150, 70, 0.16); color: #e0ae74; }
+
+/* Telegram: та же светлая поверхность, что и остальные блоки. Тёмная плашка
+   тянула на себя всё внимание ради ЗАГЛУШКИ — это неправда о важности. */
+.dash2 .tgbar {
+  background: var(--card-solid, #ffffff);
+  border: 1px solid var(--line);
+  box-shadow: none;
+  padding: 14px 18px;
+}
+.app[data-mode='dark'] .dash2 .tgbar { background: #1c1a24; }
+.dash2 .tgbar__ic {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: #e6f1fb;
+  color: #2f7fbf;
+}
+.dash2 .tgbar__ic svg { width: 19px; height: 19px; }
+.app[data-mode='dark'] .dash2 .tgbar__ic { background: rgba(60, 150, 220, 0.16); color: #7cc0ee; }
+.dash2 .tgbar__t b { color: var(--text); font-size: 14px; }
+.dash2 .tgbar__t span { color: var(--text-dim); }
+.dash2 .tgbar__btn {
+  background: var(--text);
+  color: var(--bg);
+  font-size: 13px;
+  padding: 9px 16px;
+}
+
+/* Промо: та же плотность, что у остальных блоков. */
+.dash2 .promo { padding: clamp(14px, 2vh, 20px) 18px; }
+.dash2 .promo__btn { box-shadow: none; border: 1px solid var(--line); }
+.dash2 .promo__title { font-size: clamp(15px, 1.4vw, 17px); }
+
+/* Рейл и док: тоже без blur — те же надписи и иконки. */
+.rail,
+.themedock {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: var(--card-solid, #ffffff);
+  box-shadow: none;
+  border: 1px solid var(--line);
+}
+.app[data-mode='dark'] .rail,
+.app[data-mode='dark'] .themedock { background: #1c1a24; }
+.rail__btn { box-shadow: none; }
+
+/* Чип стоит абсолютом в правом верхнем углу, поэтому заголовку и подписи
+   нужен коридор — иначе длинное «DEMO ВЕРСИЯ» уезжает под иконку. */
+.dash2 .actioncard h3,
+.dash2 .actioncard p {
+  padding-right: 54px;
+}

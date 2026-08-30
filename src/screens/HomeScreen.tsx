@@ -67,73 +67,31 @@ function greeting(): string {
   return 'Добрый вечер'
 }
 
-/* --------------------------------------------------- 3D-иконки карточек */
+/* ------------------------------------------------- Иконки (line, 24px) */
 
-function ArtBooks() {
+function Ic({ d, boxes }: { d?: string; boxes?: Array<[number, number, number, number, number?]> }) {
   return (
-    <svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
-      <rect x="18" y="52" width="60" height="14" rx="4" fill="#F3D9A4" />
-      <rect x="22" y="38" width="52" height="14" rx="4" fill="#F7E6C4" />
-      <rect x="28" y="24" width="40" height="14" rx="4" fill="#FBF1DC" />
-      <rect x="18" y="52" width="60" height="5" rx="2.5" fill="#E8C687" opacity="0.6" />
-      <rect x="22" y="38" width="52" height="5" rx="2.5" fill="#EDD5A7" opacity="0.6" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {d && <path d={d} />}
+      {boxes?.map(([x, y, w, h, r], i) => (
+        <rect key={i} x={x} y={y} width={w} height={h} rx={r ?? 2} />
+      ))}
     </svg>
   )
 }
 
-function ArtChecklist() {
-  return (
-    <svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
-      <rect x="26" y="16" width="44" height="62" rx="8" fill="#F9C9DD" />
-      <rect x="26" y="16" width="44" height="62" rx="8" fill="url(#chkg)" opacity="0.5" />
-      <defs>
-        <linearGradient id="chkg" x1="26" y1="16" x2="70" y2="78">
-          <stop stopColor="#fff" stopOpacity="0.65" />
-          <stop offset="1" stopColor="#fff" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <rect x="34" y="28" width="10" height="10" rx="3" fill="#E786AD" />
-      <rect x="48" y="30" width="16" height="5" rx="2.5" fill="#E9A8C4" />
-      <rect x="34" y="44" width="10" height="10" rx="3" fill="#E786AD" />
-      <rect x="48" y="46" width="16" height="5" rx="2.5" fill="#E9A8C4" />
-      <path d="M35.5 32.5l2.5 2.5 4-4.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-      <path d="M35.5 48.5l2.5 2.5 4-4.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function ArtHeadphones() {
-  return (
-    <svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
-      <path d="M22 58v-8a26 26 0 0 1 52 0v8" stroke="#F1A7C2" strokeWidth="9" strokeLinecap="round" />
-      <rect x="14" y="52" width="18" height="26" rx="9" fill="#F786B0" />
-      <rect x="64" y="52" width="18" height="26" rx="9" fill="#F786B0" />
-      <rect x="17" y="55" width="7" height="20" rx="3.5" fill="#FBB6D0" />
-      <rect x="67" y="55" width="7" height="20" rx="3.5" fill="#FBB6D0" />
-    </svg>
-  )
-}
-
-function ArtMic() {
-  return (
-    <svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
-      <rect x="36" y="14" width="24" height="42" rx="12" fill="#A88BEB" />
-      <rect x="40" y="18" width="7" height="34" rx="3.5" fill="#C3AEF2" />
-      <path d="M26 44a22 22 0 0 0 44 0" stroke="#8C73FF" strokeWidth="7" strokeLinecap="round" />
-      <rect x="44" y="66" width="8" height="12" rx="3" fill="#8C73FF" />
-      <rect x="34" y="78" width="28" height="6" rx="3" fill="#A88BEB" />
-    </svg>
-  )
-}
-
-function ArtPlay() {
-  return (
-    <svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
-      <rect x="16" y="16" width="64" height="64" rx="20" fill="#F97FA5" />
-      <rect x="20" y="20" width="56" height="30" rx="15" fill="#FB9FBC" opacity="0.7" />
-      <path d="M42 36v24l20-12-20-12Z" fill="#fff" />
-    </svg>
-  )
+const IC = {
+  book: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15Z',
+  sparkles: 'M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3ZM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15Z',
+  bulb: 'M9 18h6M10 21h4M12 3a6 6 0 0 1 3.6 10.8c-.5.4-.6 1-.6 1.7V16h-6v-.5c0-.7-.1-1.3-.6-1.7A6 6 0 0 1 12 3Z',
+  chart: 'M4 20V4M4 17c4-1.5 5.5 1 9-1s6-7 7-8M20 20H4',
+  target: 'M12 12m-9 0a9 9 0 1 0 18 0 9 9 0 1 0-18 0M12 12m-5 0a5 5 0 1 0 10 0 5 5 0 1 0-10 0M12 12m-1 0a1 1 0 1 0 2 0 1 1 0 1 0-2 0',
+  trophy: 'M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4ZM7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4',
+  headphones: 'M4 14v-2a8 8 0 0 1 16 0v2M4 14a2 2 0 0 1 2-2h1v6H6a2 2 0 0 1-2-2v-2Zm16 0a2 2 0 0 0-2-2h-1v6h1a2 2 0 0 0 2-2v-2Z',
+  mic: 'M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3ZM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6',
+  play: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM10 8.5l5.5 3.5-5.5 3.5v-7Z',
+  send: 'M21.5 3.5 10 12M21.5 3.5 14 21l-4-9-9-4 20.5-4.5Z',
 }
 
 /* ------------------------------------------------------------- Экран */
@@ -233,8 +191,8 @@ export function HomeScreen({
               Скоро…
             </button>
           </div>
-          <span className="promo__art">
-            <ArtBooks />
+          <span className="promo__chip promo__chip--amber">
+            <Ic d={IC.book} />
           </span>
         </div>
 
@@ -250,8 +208,8 @@ export function HomeScreen({
               Начать тренировку <span aria-hidden="true">→</span>
             </button>
           </div>
-          <span className="promo__art">
-            <ArtChecklist />
+          <span className="promo__chip promo__chip--pink">
+            <Ic d={IC.sparkles} />
           </span>
         </div>
 
@@ -285,12 +243,12 @@ export function HomeScreen({
           </div>
           <div className="today__row">
             <div className="tcard tcard--lav">
-              <span className="tcard__ic" aria-hidden="true">🤖</span>
+              <span className="tcard__ic tcard__ic--lav"><Ic d={IC.bulb} /></span>
               <b>Совет дня</b>
               <span className="tcard__text">{dayTip()}</span>
             </div>
             <button type="button" className="tcard tcard--blue" onClick={onStats}>
-              <span className="tcard__ic" aria-hidden="true">📈</span>
+              <span className="tcard__ic tcard__ic--blue"><Ic d={IC.chart} /></span>
               <b>Твой прогресс</b>
               <span className="tcard__text">
                 {delta === null
@@ -304,7 +262,7 @@ export function HomeScreen({
               <span className="tcard__go">Смотреть →</span>
             </button>
             <button type="button" className="tcard tcard--mint" onClick={onTrainer}>
-              <span className="tcard__ic" aria-hidden="true">🎯</span>
+              <span className="tcard__ic tcard__ic--mint"><Ic d={IC.target} /></span>
               <b>Фокус недели</b>
               <span className="tcard__text">
                 {weakest
@@ -314,7 +272,7 @@ export function HomeScreen({
               <span className="tcard__go">Тренировать →</span>
             </button>
             <button type="button" className="tcard tcard--peach" onClick={onCalendar}>
-              <span className="tcard__ic" aria-hidden="true">🏆</span>
+              <span className="tcard__ic tcard__ic--peach"><Ic d={IC.trophy} /></span>
               <b>Достижение</b>
               <span className="tcard__text">
                 {streakDays && streakDays > 0
@@ -329,36 +287,33 @@ export function HomeScreen({
 
       <div className="dash2__right">
         <div className="actioncard actioncard--pink">
-          <span className="actioncard__dot" aria-hidden="true" />
           <h3>ТРЕНАЖЁР</h3>
           <p>Практикуй все 4 задания устной части ЕГЭ</p>
           <button type="button" className="actioncard__go" onClick={onTrainer}>
             Начать <span aria-hidden="true">→</span>
           </button>
-          <span className="actioncard__art">
-            <ArtHeadphones />
+          <span className="actioncard__chip actioncard__chip--pink">
+            <Ic d={IC.headphones} />
           </span>
         </div>
         <div className="actioncard actioncard--lav">
-          <span className="actioncard__dot" aria-hidden="true" />
           <h3>SPEAKING</h3>
           <p>Свободные разговоры с AI-собеседником</p>
           <button type="button" className="actioncard__go" onClick={onSpeaking}>
             Практиковаться <span aria-hidden="true">→</span>
           </button>
-          <span className="actioncard__art">
-            <ArtMic />
+          <span className="actioncard__chip actioncard__chip--lav">
+            <Ic d={IC.mic} />
           </span>
         </div>
         <div className="actioncard actioncard--rose">
-          <span className="actioncard__dot" aria-hidden="true" />
           <h3>DEMO ВЕРСИЯ</h3>
           <p>Полный экзамен в формате ЕГЭ</p>
           <button type="button" className="actioncard__go" onClick={onDemo}>
             Начать <span aria-hidden="true">→</span>
           </button>
-          <span className="actioncard__art">
-            <ArtPlay />
+          <span className="actioncard__chip actioncard__chip--rose">
+            <Ic d={IC.play} />
           </span>
         </div>
       </div>
@@ -367,13 +322,7 @@ export function HomeScreen({
           оживёт, когда владелец заведёт канал и укажет VITE_TELEGRAM_URL. */}
       <div className="tgbar">
         <span className="tgbar__ic" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
-            <circle cx="12" cy="12" r="11" fill="#54A9EB" />
-            <path
-              d="M5.5 11.7l11.2-4.4c.5-.2 1 .1.8.9l-1.9 9c-.1.6-.5.8-1 .5l-2.9-2.1-1.4 1.3c-.2.2-.4.3-.7.3l.2-3 5.5-5-6.8 4.3-2.9-.9c-.6-.2-.6-.7-.1-.9Z"
-              fill="#fff"
-            />
-          </svg>
+          <Ic d={IC.send} />
         </span>
         <div className="tgbar__t">
           <b>Присоединяйся к нашему Telegram-каналу</b>
