@@ -65,15 +65,21 @@ const IMG = {
   books: '/img/photo-1512820790803-83ca734da794?w=900&q=70',
   bike: '/img/photo-1485965120184-e220f721d03e?w=900&q=70',
   camera: '/img/photo-1502920917128-1aa500764cbd?w=900&q=70',
-  knit: '/img/photo-1584992236310-6edddc08acff?w=700&q=70',
   skate: '/img/photo-1520045892732-304bc3ac5d8e?w=700&q=70',
-  mountains: '/img/photo-1464822759023-fed622ff2c3b?w=700&q=70',
-  beach: '/img/photo-1507525428034-b723cf961d3e?w=700&q=70',
-  homeFood: '/img/photo-1546069901-ba9599a7e63c?w=700&q=70',
   restaurant: '/img/photo-1414235077428-338989a2e8c0?w=700&q=70',
   guitar: '/img/photo-1510915361894-db8b60106cb1?w=700&q=70',
   concert: '/img/photo-1470229722913-7c0e2dbbafd3?w=700&q=70',
-  chess: '/img/photo-1529699211952-734e80c4d42b?w=700&q=70',
+  /* Фото с ЛЮДЬМИ для №42 (замена заглушек 31.08.2026). Задание просит
+     описать, кто что делает, а на восьми старых заглушках людей не было
+     вовсе — клубки шерсти, пейзажи, шахматные фигуры. Каждое новое фото
+     скачано через наш же прокси и просмотрено: люди и занятие видны,
+     facts написаны по увиденному (разбор фотографий не видит и ловит
+     фактические ошибки именно по facts). */
+  readBook: '/img/photo-1506880018603-83d5b814b5a6?w=700&q=70',
+  hikers: '/img/photo-1551632811-561732d1e306?w=700&q=70',
+  bikeSea: '/img/photo-1541625602330-2277a4c46182?w=700&q=70',
+  cooking: '/img/photo-1556910103-1c02745aae4d?w=700&q=70',
+  cyclists: '/img/photo-1517649763962-0c623066013b?w=700&q=70',
 }
 
 /* ------------------------------------------------------------------- №39 */
@@ -258,25 +264,25 @@ const MONOLOGUE_VARIANTS: Array<{
 }> = [
   {
     topic: 'The world of hobbies', a: 'the two hobbies', b: 'the two hobbies',
-    images: [IMG.knit, IMG.skate],
+    images: [IMG.readBook, IMG.skate],
     facts: [
-      'a close-up of many balls of wool in different colours with two knitting needles lying on them; there are no people in the shot — the photo stands for knitting as a quiet hobby you can do alone at home',
+      'a person sitting with an open paperback book on their lap, holding the pages with one hand; warm sunlight and long shadows fall across the pages, the face is not visible — reading as a quiet hobby',
       'a close-up of a skateboard balanced on the edge of a concrete ramp at sunset; only the rider’s legs and trainers are visible — the photo stands for skateboarding as an active outdoor hobby',
     ],
   },
   {
     topic: 'Ways of travelling', a: 'the two ways of spending holidays', b: 'the two ways of spending holidays',
-    images: [IMG.mountains, IMG.beach],
+    images: [IMG.hikers, IMG.bikeSea],
     facts: [
-      'a wide view of a green mountain valley with snow-capped peaks, pine forest in the foreground and clouds; there are no people in the shot',
-      'an empty tropical beach at sunset: turquoise waves washing over pale sand, palm trees far away on the left; there are no people in the shot',
+      'two hikers with big backpacks walking one after another along a narrow stony path towards snow-capped mountains; green bushes around them and a cloudy sky',
+      'two cyclists in helmets riding road bikes side by side along an empty asphalt road by the sea; sandy dunes with grass on the right',
     ],
   },
   {
     topic: 'Eating at home and eating out', a: 'the two ways of eating', b: 'the two ways of eating',
-    images: [IMG.homeFood, IMG.restaurant],
+    images: [IMG.cooking, IMG.restaurant],
     facts: [
-      'a bowl of home-made salad photographed from above: lettuce, tomatoes, cucumber, sweetcorn, red cabbage, a boiled egg and pieces of grilled meat; there are no people in the shot',
+      'a young man in an apron and a smiling young woman cooking together at a wooden kitchen table with blue pots and jars of spices; a third person is working at the counter behind them',
       'a restaurant table close up: a waiter’s hands are placing a small decorated dish in front of a guest, with wine glasses, a bread basket and other diners blurred in the background',
     ],
   },
@@ -289,11 +295,15 @@ const MONOLOGUE_VARIANTS: Array<{
     ],
   },
   {
-    topic: 'Sport and games in our life', a: 'the two activities', b: 'the two activities',
-    images: [IMG.pool, IMG.chess],
+    /* Тема сужена с «Sport and games» до «Sport»: игрового фото с людьми
+       не нашлось, а шахматные фигуры без игроков просили описать того, кого
+       на снимке нет. Плавание против велоспорта — честная пара «двух видов
+       спорта», и обе фотографии с людьми в действии. */
+    topic: 'Sport in our life', a: 'the two kinds of sport', b: 'the two kinds of sport',
+    images: [IMG.pool, IMG.cyclists],
     facts: [
       'a swimmer in a swimming cap doing the butterfly stroke in a blue indoor pool with lane ropes, water splashing around them',
-      'a close-up of a wooden chessboard with the pieces set up: one dark pawn stands in front of a row of light pieces; there are no players in the shot',
+      'a large group of cyclists in helmets and colourful sports jerseys racing along a road, the front riders leaning over their handlebars; green trees in the background',
     ],
   },
 ]
