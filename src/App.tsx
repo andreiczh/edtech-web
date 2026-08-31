@@ -248,7 +248,6 @@ export default function App() {
               </button>
             ))}
           </nav>
-          <span className="lspacer" />
           <div className="themedock themedock--joined" role="group" aria-label="Тема оформления">
             <button
               type="button"

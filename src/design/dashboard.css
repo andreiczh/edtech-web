@@ -2121,3 +2121,192 @@
 .dash2 .actioncard p {
   padding-right: 54px;
 }
+
+/* ==========================================================================
+   Главная v3 — «бумага» (31.08.2026, вторая итерация по замечаниям владельца:
+   «поплыли блоки», «панель обрезана», «нужен человечный лёгкий дизайн»).
+
+   Что изменилось системно:
+   1. Одна поверхность на всём экране: белая карточка с мягкой тенью-бумагой,
+      без рамок и заливок. Цвет остался только в чипах иконок.
+   2. Кнопки-призраки вместо чёрных пилюль: тяжёлые заливки кричали.
+   3. «Сегодня» больше не карта-в-карте: секция без обёртки, три плитки
+      строго в окне, стрелки листают по одной.
+   4. Правые карточки — та же горизонтальная схема, что и промо: высота от
+      КОНТЕНТА, поэтому кнопкам больше нечем обрезаться (на скриншоте
+      владельца их резала высота, навязанная сеткой).
+   ========================================================================== */
+
+:root {
+  --paper-shadow: 0 1px 2px rgba(25, 23, 45, 0.05), 0 4px 14px rgba(25, 23, 45, 0.05);
+}
+
+/* --- единая поверхность */
+.dash2 .promo,
+.dash2 .tcard,
+.dash2 .tgbar,
+.dash2 .streakpill,
+.dash2 .userpill,
+.rail,
+.themedock {
+  background: #ffffff;
+  border: 0;
+  box-shadow: var(--paper-shadow);
+}
+.app[data-mode='dark'] .dash2 .promo,
+.app[data-mode='dark'] .dash2 .tcard,
+.app[data-mode='dark'] .dash2 .tgbar,
+.app[data-mode='dark'] .dash2 .streakpill,
+.app[data-mode='dark'] .dash2 .userpill,
+.app[data-mode='dark'] .rail,
+.app[data-mode='dark'] .themedock {
+  background: #1d1b26;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+.dash2 .promo--cream,
+.dash2 .promo--pink {
+  background: #ffffff;
+}
+.app[data-mode='dark'] .dash2 .promo--cream,
+.app[data-mode='dark'] .dash2 .promo--pink {
+  background: #1d1b26;
+}
+
+/* --- сетка: правая колонка по контенту, ничего не растягивается */
+.dash2 {
+  grid-template-columns: minmax(0, 1.08fr) minmax(300px, 0.92fr);
+  gap: clamp(12px, 1.8vh, 18px) 20px;
+}
+.dash2__right {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 1.6vh, 16px);
+}
+.dash2 .promo {
+  border-radius: 18px;
+  padding: clamp(14px, 2vh, 20px) 20px;
+  min-height: 0;
+  flex: 0 0 auto;
+}
+.dash2 .promo__title {
+  font-size: 16px;
+  font-weight: 700;
+}
+.dash2 .promo__sub {
+  font-size: 13px;
+}
+
+/* --- кнопки-призраки */
+.dash2 .promo__btn,
+.dash2 .tgbar__btn {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line);
+  box-shadow: none;
+  font-weight: 600;
+  padding: 8px 15px;
+  transition: background 0.15s;
+}
+.dash2 .promo__btn:hover:not(:disabled),
+.dash2 .tgbar__btn:hover:not(:disabled) {
+  background: #f5f3fa;
+}
+.app[data-mode='dark'] .dash2 .promo__btn,
+.app[data-mode='dark'] .dash2 .tgbar__btn {
+  color: var(--text);
+  border-color: #35323f;
+}
+.app[data-mode='dark'] .dash2 .promo__btn:hover:not(:disabled),
+.app[data-mode='dark'] .dash2 .tgbar__btn:hover:not(:disabled) {
+  background: #262331;
+}
+
+/* --- «Сегодня» без обёртки: три плитки в окне, листание по одной */
+.dash2 .today {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 2px 0 6px;
+}
+.app[data-mode='dark'] .dash2 .today {
+  background: transparent;
+  box-shadow: none;
+}
+.today__head b {
+  font-size: 15px;
+}
+.today__nav button {
+  background: #ffffff;
+  border: 0;
+  box-shadow: var(--paper-shadow);
+  width: 30px;
+  height: 30px;
+}
+.app[data-mode='dark'] .today__nav button {
+  background: #1d1b26;
+  color: var(--text);
+}
+.dash2 .today__row {
+  gap: 12px;
+  scroll-snap-type: x mandatory;
+  padding: 4px 2px 8px;
+  margin: -4px -2px -8px;
+}
+.dash2 .tcard {
+  flex: 0 0 calc((100% - 24px) / 3);
+  min-width: calc((100% - 24px) / 3);
+  border-radius: 16px;
+  padding: 13px 14px;
+  scroll-snap-align: start;
+}
+
+/* --- рейл: единый блок, углы только по внешним краям */
+.rail {
+  border-radius: 22px 22px 0 0;
+  padding-bottom: 6px;
+}
+.themedock--joined {
+  border-radius: 0 0 22px 22px;
+  padding-top: 6px;
+}
+.leftcol:has(.themedock--joined) .rail {
+  border-radius: 22px 22px 0 0;
+}
+
+/* --- телеграм-полоса: тот же лист бумаги */
+.dash2 .tgbar {
+  border-radius: 18px;
+}
+
+@media (max-width: 640px) {
+  /* на телефоне три плитки нечитаемы — листаем по одной, окно на 82% */
+  .dash2 .tcard {
+    flex: 0 0 82%;
+    min-width: 82%;
+  }
+}
+
+/* v3-слой стоит в конце файла и без этих блоков перекрывал бы мобильную
+   перестройку выше по каскаду (плитка «Сегодня» схлопывалась до 28px —
+   поймано на 375px). Всё мобильное — строго ПОСЛЕ v3. */
+@media (max-width: 980px) {
+  .dash2 {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 768px) {
+  /* На телефоне рейл — нижний бар, док темы — верхний: они разнесены по
+     экрану, и «склеенные» радиусы единого дока тут неуместны. */
+  .rail,
+  .leftcol:has(.themedock--joined) .rail {
+    border-radius: 22px;
+    padding-bottom: 10px;
+  }
+  .themedock--joined {
+    border-radius: 22px;
+    padding-top: 10px;
+  }
+  .themedock--joined::before {
+    display: none;
+  }
+}

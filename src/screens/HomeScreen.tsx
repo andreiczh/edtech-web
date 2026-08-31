@@ -182,7 +182,6 @@ export function HomeScreen({
             стоит по референсу, а вместо обещаний — честное «скоро». */}
         <div className="promo promo--cream">
           <div className="promo__body">
-            <span className="promo__eyebrow">Теория</span>
             <b className="promo__title">Повтори теорию по заданиям</b>
             <span className="promo__sub">
               Раздела пока нет — конспекты по заданиям 40–42 в работе
@@ -199,9 +198,6 @@ export function HomeScreen({
         {/* Вариант по ошибкам — живой: подпись из копилки, кнопка в тренажёр. */}
         <div className="promo promo--pink">
           <div className="promo__body">
-            <span className="promo__eyebrow">
-              <span aria-hidden="true">✨</span> AI рекомендация
-            </span>
             <b className="promo__title">Вариант по ошибкам</b>
             <span className="promo__sub">{recoSub}</span>
             <button type="button" className="promo__btn" onClick={onTrainer}>
@@ -217,28 +213,29 @@ export function HomeScreen({
             экранах; на широком видны все четыре. */}
         <div className="today">
           <div className="today__head">
-            <b>Сегодня в Pingo</b>
+            <b>Сегодня</b>
             <div className="today__nav">
-              <button
-                type="button"
-                aria-label="Назад"
-                onClick={(e) => {
-                  const row = e.currentTarget.closest('.today')?.querySelector('.today__row')
-                  row?.scrollBy({ left: -180, behavior: 'smooth' })
-                }}
-              >
-                ←
-              </button>
-              <button
-                type="button"
-                aria-label="Вперёд"
-                onClick={(e) => {
-                  const row = e.currentTarget.closest('.today')?.querySelector('.today__row')
-                  row?.scrollBy({ left: 180, behavior: 'smooth' })
-                }}
-              >
-                →
-              </button>
+              {/* Шаг листания — РЕАЛЬНАЯ ширина плитки + зазор, в момент
+                  клика: фиксированные 180px были меньше плитки, и
+                  scroll-snap молча откатывал ленту назад. */}
+              {(['←', '→'] as const).map((ch) => (
+                <button
+                  key={ch}
+                  type="button"
+                  aria-label={ch === '←' ? 'Назад' : 'Вперёд'}
+                  onClick={(e) => {
+                    const row = e.currentTarget
+                      .closest('.today')
+                      ?.querySelector<HTMLElement>('.today__row')
+                    const card = row?.querySelector<HTMLElement>('.tcard')
+                    if (!row || !card) return
+                    const step = card.offsetWidth + 12
+                    row.scrollBy({ left: ch === '←' ? -step : step, behavior: 'smooth' })
+                  }}
+                >
+                  {ch}
+                </button>
+              ))}
             </div>
           </div>
           <div className="today__row">
@@ -286,33 +283,39 @@ export function HomeScreen({
       </div>
 
       <div className="dash2__right">
-        <div className="actioncard actioncard--pink">
-          <h3>ТРЕНАЖЁР</h3>
-          <p>Практикуй все 4 задания устной части ЕГЭ</p>
-          <button type="button" className="actioncard__go" onClick={onTrainer}>
-            Начать <span aria-hidden="true">→</span>
-          </button>
-          <span className="actioncard__chip actioncard__chip--pink">
+        <div className="promo">
+          <div className="promo__body">
+            <b className="promo__title">Тренажёр</b>
+            <span className="promo__sub">Все 4 задания устной части ЕГЭ</span>
+            <button type="button" className="promo__btn" onClick={onTrainer}>
+              Начать <span aria-hidden="true">→</span>
+            </button>
+          </div>
+          <span className="promo__chip promo__chip--pink">
             <Ic d={IC.headphones} />
           </span>
         </div>
-        <div className="actioncard actioncard--lav">
-          <h3>SPEAKING</h3>
-          <p>Свободные разговоры с AI-собеседником</p>
-          <button type="button" className="actioncard__go" onClick={onSpeaking}>
-            Практиковаться <span aria-hidden="true">→</span>
-          </button>
-          <span className="actioncard__chip actioncard__chip--lav">
+        <div className="promo">
+          <div className="promo__body">
+            <b className="promo__title">Разговор</b>
+            <span className="promo__sub">Свободная беседа с ИИ-собеседником</span>
+            <button type="button" className="promo__btn" onClick={onSpeaking}>
+              Практиковаться <span aria-hidden="true">→</span>
+            </button>
+          </div>
+          <span className="promo__chip promo__chip--lav">
             <Ic d={IC.mic} />
           </span>
         </div>
-        <div className="actioncard actioncard--rose">
-          <h3>DEMO ВЕРСИЯ</h3>
-          <p>Полный экзамен в формате ЕГЭ</p>
-          <button type="button" className="actioncard__go" onClick={onDemo}>
-            Начать <span aria-hidden="true">→</span>
-          </button>
-          <span className="actioncard__chip actioncard__chip--rose">
+        <div className="promo">
+          <div className="promo__body">
+            <b className="promo__title">Демо-экзамен</b>
+            <span className="promo__sub">Полный экзамен в формате ЕГЭ</span>
+            <button type="button" className="promo__btn" onClick={onDemo}>
+              Попробовать <span aria-hidden="true">→</span>
+            </button>
+          </div>
+          <span className="promo__chip promo__chip--rose">
             <Ic d={IC.play} />
           </span>
         </div>
