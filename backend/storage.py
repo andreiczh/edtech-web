@@ -244,6 +244,21 @@ def ensure_schema() -> None:
         " verified TEXT, verified_at TEXT, created_at TEXT NOT NULL)",
         "CREATE INDEX IF NOT EXISTS idx_corpus_created ON voice_corpus(created_at)",
         "CREATE INDEX IF NOT EXISTS idx_corpus_kind ON voice_corpus(kind)",
+        # РАЗМЕЧЕННЫЕ РАБОТЫ 42 (01.09.2026). Тестировщик заводит текст
+        # монолога, расставляет баллы по трём критериям с обоснованием и
+        # перечисляет ошибки. Это калибровочный корпус: точность монолога —
+        # слабейшее место оценивания (2-4 из 6 в пределах ±1), и лечится она
+        # только такими работами. Формат полей повторяет золотой набор
+        # fipi_cases.MONOLOGUE_EXTRA, чтобы экспорт шёл в сетку без ручной
+        # переклейки. system — что сказала СИСТЕМА об этой же работе в момент
+        # разметки: расхождение видно сразу и навсегда.
+        "CREATE TABLE IF NOT EXISTS labeled42 ("
+        " id TEXT PRIMARY KEY, name TEXT NOT NULL, variant TEXT,"
+        " brief TEXT NOT NULL, facts TEXT, script TEXT NOT NULL,"
+        " k1 INTEGER NOT NULL, k2 INTEGER NOT NULL, k3 INTEGER NOT NULL,"
+        " rationale TEXT, aspects TEXT, opening INTEGER, closing INTEGER,"
+        " errors TEXT, notes TEXT, labeler TEXT, system TEXT,"
+        " created_at TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS meta ("
         " key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS dispute_shots ("
@@ -1149,6 +1164,98 @@ def funnel_summary(days: int = 14) -> dict:
     }
 
 
+def labeled42_add(rec: dict) -> str:
+    """Сохранить размеченную работу. Валидация полей — на вызывающей стороне;
+    здесь только фиксация. Возвращает id записи."""
+    import json as _json
+
+    rid = str(uuid.uuid4())
+    _exec("INSERT INTO labeled42(id, name, variant, brief, facts, script,"
+          " k1, k2, k3, rationale, aspects, opening, closing, errors, notes,"
+          " labeler, system, created_at)"
+          " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          (rid, str(rec.get("name") or "")[:120],
+           (str(rec.get("variant"))[:64] if rec.get("variant") else None),
+           str(rec.get("brief") or "")[:4000],
+           _json.dumps(rec.get("facts") or [], ensure_ascii=False)[:2000],
+           str(rec.get("script") or "")[:8000],
+           int(rec["k1"]), int(rec["k2"]), int(rec["k3"]),
+           _json.dumps(rec.get("rationale") or {}, ensure_ascii=False)[:4000],
+           _json.dumps(rec.get("aspects") or [], ensure_ascii=False)[:1000],
+           int(bool(rec.get("opening"))), int(bool(rec.get("closing"))),
+           _json.dumps(rec.get("errors") or [], ensure_ascii=False)[:6000],
+           str(rec.get("notes") or "")[:2000],
+           str(rec.get("labeler") or "")[:60], None, _now()))
+    return rid
+
+
+def labeled42_set_system(rid: str, system: dict) -> None:
+    """Дописать вердикт системы к уже сохранённой работе. Отдельным шагом,
+    потому что прогон LLM может упасть — разметка от этого не теряется."""
+    import json as _json
+
+    _exec("UPDATE labeled42 SET system=? WHERE id=?",
+          (_json.dumps(system, ensure_ascii=False)[:4000], rid))
+
+
+def labeled42_list(limit: int = 100) -> list[dict]:
+    import json as _json
+
+    rows = _exec("SELECT id, name, variant, k1, k2, k3, labeler, system,"
+                 " created_at FROM labeled42 ORDER BY created_at DESC"
+                 " LIMIT ?", (max(1, min(500, limit)),)).fetchall()
+    out = []
+    for r in rows:
+        sys_ = None
+        try:
+            sys_ = _json.loads(r[7]) if r[7] else None
+        except Exception:  # noqa: BLE001
+            pass
+        out.append({"id": r[0], "name": r[1], "variant": r[2],
+                    "marks": [int(r[3]), int(r[4]), int(r[5])],
+                    "labeler": r[6], "system": sys_, "created_at": str(r[8])})
+    return out
+
+
+def labeled42_export() -> dict:
+    """Полный экспорт: сырые записи + готовые кейсы формата золотого набора.
+
+    Кейсы можно вставлять в fipi_cases.MONOLOGUE_EXTRA как есть — ровно ради
+    этого поля разметки повторяют его формат (name/brief/facts/script/expected).
+    """
+    import json as _json
+
+    rows = _exec("SELECT id, name, variant, brief, facts, script, k1, k2, k3,"
+                 " rationale, aspects, opening, closing, errors, notes, labeler,"
+                 " system, created_at FROM labeled42 ORDER BY created_at").fetchall()
+
+    def j(v, default):
+        try:
+            return _json.loads(v) if v else default
+        except Exception:  # noqa: BLE001
+            return default
+
+    raw, golden = [], []
+    for r in rows:
+        raw.append({
+            "id": r[0], "name": r[1], "variant": r[2], "brief": r[3],
+            "facts": j(r[4], []), "script": r[5],
+            "marks": [int(r[6]), int(r[7]), int(r[8])],
+            "rationale": j(r[9], {}), "aspects": j(r[10], []),
+            "opening": bool(r[11]), "closing": bool(r[12]),
+            "errors": j(r[13], []), "notes": r[14], "labeler": r[15],
+            "system": j(r[16], None), "created_at": str(r[17]),
+        })
+        golden.append({
+            "name": r[1],
+            "brief": r[3],
+            "facts": j(r[4], []),
+            "script": r[5],
+            "expected": (int(r[6]), int(r[7]), int(r[8])),
+        })
+    return {"count": len(raw), "works": raw, "golden": golden}
+
+
 def pron_raw(limit: int = 20000) -> list[dict]:
     """Сырые строки копилки — для подбора порога снаружи.
 
@@ -1325,7 +1432,7 @@ def dispute_resolve(did: str, status: str, verdict: str, verdict_score: int,
 # на паузу и бэкап оказался единственной копией данных.
 _BACKUP_TABLES = ("students", "accounts", "results", "mistakes", "digests",
                   "tasks", "usage_daily", "activity_days", "settings", "disputes",
-                  "invites", "pron_samples", "voice_daily", "meta")
+                  "invites", "pron_samples", "voice_daily", "meta", "labeled42")
 
 
 def dump_all(with_images: bool = False) -> dict:

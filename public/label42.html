@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Разметка монолога №42 — Pingo AI</title>
+<style>
+  :root {
+    --bg: #f4f2f8; --ink: #17151d; --dim: #6f6c80; --faint: #a5a2b5;
+    --lav: #8c73ff; --lav-soft: #efeaff; --line: #e7e4f0;
+    --mint: #3f9f6e; --pink: #d94f6e; --amber: #b8873a;
+    --paper: 0 1px 2px rgba(25,23,45,.05), 0 4px 14px rgba(25,23,45,.05);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: "Segoe UI", -apple-system, Arial, sans-serif;
+    font-size: 15px; line-height: 1.5;
+    padding: 26px 14px 80px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 26px; letter-spacing: -.3px; margin-bottom: 4px; }
+  .sub { color: var(--dim); font-size: 14px; margin-bottom: 22px; }
+  .card {
+    background: #fff; border-radius: 16px; box-shadow: var(--paper);
+    padding: 20px 22px; margin-bottom: 18px;
+  }
+  .card h2 { font-size: 16px; margin-bottom: 12px; }
+  .card h2 small { color: var(--faint); font-weight: 400; font-size: 12.5px; }
+  label.f { display: block; font-size: 12.5px; font-weight: 700; color: var(--dim); margin: 14px 0 5px; }
+  input[type=text], textarea, select {
+    width: 100%; font: inherit; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 9px 12px; background: #fcfbfe;
+  }
+  textarea { resize: vertical; }
+  input:focus, textarea:focus, select:focus { outline: 2px solid #cfc2f7; border-color: transparent; }
+  .row { display: flex; gap: 12px; }
+  .row > * { flex: 1; }
+  .hint { font-size: 12px; color: var(--faint); margin-top: 4px; }
+  .hint b { color: var(--dim); }
+  button {
+    font: inherit; cursor: pointer; border: 0; border-radius: 999px;
+    padding: 10px 18px; font-weight: 700; font-size: 13.5px;
+  }
+  .btn-dark { background: var(--ink); color: #fff; }
+  .btn-ghost { background: #fff; border: 1px solid var(--line); color: var(--ink); }
+  .btn-mini { padding: 6px 12px; font-size: 12px; }
+  details.crit { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-top: 10px; }
+  details.crit summary { cursor: pointer; font-weight: 700; font-size: 13px; color: var(--dim); }
+  details.crit .lvl { font-size: 12.5px; margin-top: 8px; color: var(--dim); }
+  details.crit .lvl b { color: var(--ink); }
+  table.errs { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  table.errs th { text-align: left; font-size: 11px; color: var(--faint); text-transform: uppercase;
+                  letter-spacing: .06em; padding: 4px 6px; }
+  table.errs td { padding: 4px 6px; vertical-align: top; }
+  table.errs input, table.errs select { padding: 6px 8px; font-size: 13px; }
+  .del { color: var(--pink); background: none; border: 0; font-size: 16px; padding: 4px 6px; }
+  .marks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .mark b { display: block; font-size: 13px; margin-bottom: 5px; }
+  .aspects { display: grid; grid-template-columns: 1fr 170px; gap: 8px 12px; align-items: center; }
+  .aspects span { font-size: 13px; color: var(--dim); }
+  .checkline { display: flex; gap: 22px; margin-top: 12px; font-size: 13.5px; }
+  .checkline label { display: flex; gap: 7px; align-items: center; cursor: pointer; }
+  .stat { display: inline-block; background: var(--lav-soft); color: #6d55d6;
+          border-radius: 999px; padding: 3px 11px; font-size: 12px; font-weight: 700; margin-left: 8px; }
+  .stat.warn { background: #fdeef1; color: var(--pink); }
+  .result { border-left: 4px solid var(--lav); padding: 12px 16px; background: #faf9fe;
+            border-radius: 0 10px 10px 0; margin-top: 14px; font-size: 14px; }
+  .result.err { border-color: var(--pink); background: #fdf5f6; }
+  .result h3 { font-size: 14.5px; margin-bottom: 6px; }
+  .delta-ok { color: var(--mint); font-weight: 700; }
+  .delta-bad { color: var(--pink); font-weight: 700; }
+  .works td, .works th { padding: 7px 8px; font-size: 13px; border-bottom: 1px solid var(--line); text-align: left; }
+  .works th { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
+  #keycard input { max-width: 340px; }
+  .muted { color: var(--faint); }
+  .footer-note { font-size: 12.5px; color: var(--faint); margin-top: 26px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Разметка монолога №42</h1>
+  <p class="sub">Ты — эксперт: заводишь работу, ставишь баллы по критериям ФИПИ и объясняешь почему.
+  Система оценит ту же работу <b>после</b> сохранения — сравнение честное, подсмотреть нельзя.
+  Каждая размеченная работа попадает в калибровочную сетку и делает оценку точнее.</p>
+
+  <!-- ключ -->
+  <div class="card" id="keycard">
+    <h2>Доступ</h2>
+    <div class="row">
+      <div>
+        <label class="f">Ключ разметчика (выдаёт владелец)</label>
+        <input type="text" id="key" placeholder="ключ">
+      </div>
+      <div>
+        <label class="f">Твоё имя (попадёт в подпись работ)</label>
+        <input type="text" id="labeler" placeholder="Тестировщик">
+      </div>
+    </div>
+    <p class="hint" id="keystate">Ключ проверится при первом действии.</p>
+  </div>
+
+  <!-- задание -->
+  <div class="card">
+    <h2>1 · Задание <small>— выбери из банка или заведи своё</small></h2>
+    <label class="f">Вариант из банка</label>
+    <select id="variant"><option value="">— своё задание (поля ниже руками) —</option></select>
+    <label class="f">Название работы (для списка)</label>
+    <input type="text" id="name" placeholder="например: сильная работа, «Городская жизнь»">
+    <label class="f">Текст задания (brief) — как его видит ученик</label>
+    <textarea id="brief" rows="5" placeholder="Task 4. Imagine that you and your friend are doing a school project…"></textarea>
+    <label class="f">Что на фото 1 (facts — по ним ловятся фактические ошибки)</label>
+    <input type="text" id="fact1" placeholder="a girl reading a book in a park">
+    <label class="f">Что на фото 2</label>
+    <input type="text" id="fact2" placeholder="two boys playing football">
+  </div>
+
+  <!-- ответ -->
+  <div class="card">
+    <h2>2 · Ответ ученика текстом <span class="stat" id="wcount">0 слов</span><span class="stat" id="scount">0 фраз</span></h2>
+    <p class="hint">Пиши так, как ученик <b>говорил бы</b>: с его ошибками, повторами и запинками, если они есть.
+    Порог объёма: <b>7 фраз и меньше — 0 за всё задание</b>, 8–9 — максимум 1 за РКЗ, 10–11 — максимум 2.</p>
+    <textarea id="script" rows="9" placeholder="Hi, Max! I have found two photos for our project…"></textarea>
+  </div>
+
+  <!-- аспекты -->
+  <div class="card">
+    <h2>3 · Аспекты плана <small>— что ученик реально раскрыл</small></h2>
+    <div class="aspects">
+      <span>1. Объяснил выбор фото и кратко описал их</span>
+      <select class="aspect"><option value="full">полностью</option><option value="partial">неточно / не всё</option><option value="missing">нет</option></select>
+      <span>2. Назвал отличия фотографий</span>
+      <select class="aspect"><option value="full">полностью</option><option value="partial">неточно / не всё</option><option value="missing">нет</option></select>
+      <span>3. Плюсы и минусы (обоих вариантов)</span>
+      <select class="aspect"><option value="full">полностью</option><option value="partial">неточно / не всё</option><option value="missing">нет</option></select>
+      <span>4. Своё мнение с обоснованием (та же форма глагола, что в плане)</span>
+      <select class="aspect"><option value="full">полностью</option><option value="partial">неточно / не всё</option><option value="missing">нет</option></select>
+    </div>
+    <div class="checkline">
+      <label><input type="checkbox" id="opening" checked> есть вступление с обращением к другу</label>
+      <label><input type="checkbox" id="closing" checked> есть завершающая фраза</label>
+    </div>
+  </div>
+
+  <!-- ошибки -->
+  <div class="card">
+    <h2>4 · Конкретные ошибки <small>— каждая с цитатой из ответа</small></h2>
+    <p class="hint">Выдели кусок текста в поле ответа и нажми «➕ из выделения» — цитата подставится сама.
+    «Грубая» — ошибка, искажающая смысл или элементарная (артикли/базовая грамматика у ФИПИ считаются строже).</p>
+    <div style="margin:10px 0 4px; display:flex; gap:10px;">
+      <button class="btn-ghost btn-mini" id="addSel">➕ из выделения</button>
+      <button class="btn-ghost btn-mini" id="addEmpty">➕ пустая строка</button>
+    </div>
+    <table class="errs" id="errs">
+      <thead><tr><th style="width:86px">Тип</th><th style="width:120px">Категория</th><th>Цитата</th><th>Как правильно</th><th style="width:52px">Грубая</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- баллы -->
+  <div class="card">
+    <h2>5 · Баллы и почему</h2>
+    <div class="marks">
+      <div class="mark">
+        <b>РКЗ (решение задачи) · 0–4</b>
+        <select id="k1">
+          <option value="4">4 — все 4 аспекта полно</option>
+          <option value="3" selected>3 — 1 аспект неполно/нет</option>
+          <option value="2">2 — 2 аспекта пострадали</option>
+          <option value="1">1 — 3 аспекта пострадали</option>
+          <option value="0">0 — тема не раскрыта (обнуляет всё)</option>
+        </select>
+      </div>
+      <div class="mark">
+        <b>Организация · 0–3</b>
+        <select id="k2">
+          <option value="3" selected>3 — вступление, завершение, логично</option>
+          <option value="2">2 — 1 недочёт (нет вступления ИЛИ завершения…)</option>
+          <option value="1">1 — 2 недочёта</option>
+          <option value="0">0 — 3 и больше</option>
+        </select>
+      </div>
+      <div class="mark">
+        <b>Язык · 0–3</b>
+        <select id="k3">
+          <option value="3" selected>3 — до 2 негрубых ошибок</option>
+          <option value="2">2 — до 4 ошибок (не больше 2 грубых)</option>
+          <option value="1">1 — до 7 ошибок (не больше 3 грубых)</option>
+          <option value="0">0 — 8+ ошибок или 4+ грубых</option>
+        </select>
+      </div>
+    </div>
+    <p class="hint" id="k1note" hidden><b>РКЗ = 0 обнуляет задание целиком</b> — организация и язык станут 0 автоматически (правило ФИПИ).</p>
+
+    <label class="f">Почему такой балл за РКЗ?</label>
+    <textarea id="r1" rows="2" placeholder="например: аспект 3 раскрыт только для одного вида отдыха — минусы не названы…"></textarea>
+    <label class="f">Почему такой балл за организацию?</label>
+    <textarea id="r2" rows="2" placeholder="например: есть обращение и завершение, но нет связок между частями…"></textarea>
+    <label class="f">Почему такой балл за язык?</label>
+    <textarea id="r3" rows="2" placeholder="например: 5 ошибок, из них 2 грубые (артикли, форма глагола)…"></textarea>
+
+    <label class="f">Заметки (необязательно) — что ещё важно знать про эту работу</label>
+    <textarea id="notes" rows="2" placeholder="спорные места, чем работа интересна для калибровки…"></textarea>
+
+    <details class="crit">
+      <summary>Шпаргалка: официальные шкалы ФИПИ</summary>
+      <p class="lvl"><b>РКЗ:</b> балл = 4 − число пострадавших аспектов (неполный или отсутствующий аспект = пострадавший). Объём: ≤7 фраз → 0 за всё; 8–9 → максимум 1; 10–11 → максимум 2. РКЗ=0 → всё задание 0.</p>
+      <p class="lvl"><b>Организация:</b> недочёты = нет вступления с обращением; нет завершения; нарушена логика; нет связок. 0 недочётов → 3; 1 → 2; 2 → 1; больше → 0.</p>
+      <p class="lvl"><b>Язык:</b> до 2 негрубых → 3; до 4 (≤2 грубых) → 2; до 7 (≤3 грубых) → 1; иначе 0. Грубая = мешает пониманию или элементарного уровня.</p>
+    </details>
+  </div>
+
+  <div style="display:flex; gap:12px; align-items:center;">
+    <button class="btn-dark" id="save">Сохранить работу и сверить с системой</button>
+    <span class="muted" id="savestate"></span>
+  </div>
+  <div id="result"></div>
+
+  <!-- список -->
+  <div class="card" style="margin-top:22px;">
+    <h2>Сохранённые работы <small id="workstat"></small></h2>
+    <table class="works" id="works"><thead>
+      <tr><th>Работа</th><th>Твои баллы</th><th>Система</th><th>Разница</th><th>Когда</th></tr>
+    </thead><tbody></tbody></table>
+  </div>
+
+  <p class="footer-note">Черновик формы сохраняется в этом браузере сам. Работы уходят в базу и в ночной бэкап;
+  владелец забирает корпус целиком через экспорт и вставляет в калибровочную сетку.</p>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const DRAFT_KEY = 'label42.draft.v1';
+  const KEY_KEY = 'label42.key.v1';
+
+  // ---------- ключ и имя
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY_KEY) || '{}');
+    if (saved.key) $('key').value = saved.key;
+    if (saved.labeler) $('labeler').value = saved.labeler;
+  } catch {}
+  const rememberKey = () => {
+    try { localStorage.setItem(KEY_KEY, JSON.stringify({ key: $('key').value.trim(), labeler: $('labeler').value.trim() })); } catch {}
+  };
+  const hdrs = () => ({ 'Content-Type': 'application/json', 'X-Labeler-Key': $('key').value.trim() });
+
+  // ---------- счётчики слов и фраз
+  // Фраза — предложение со сказуемым; на клиенте считаем предложения:
+  // это НИЖНЯЯ оценка, сервер считает точнее (count_phrases).
+  const recount = () => {
+    const t = $('script').value;
+    const words = (t.match(/[A-Za-zА-Яа-яЁё']+/g) || []).length;
+    const sents = t.split(/[.!?]+/).filter(x => (x.match(/[A-Za-z']+/g) || []).length >= 2).length;
+    $('wcount').textContent = words + ' слов';
+    $('scount').textContent = '≈' + sents + ' фраз';
+    $('scount').className = 'stat' + (sents <= 7 ? ' warn' : '');
+    $('scount').title = sents <= 7 ? '7 фраз и меньше — 0 за всё задание' : '';
+  };
+  $('script').addEventListener('input', recount);
+
+  // ---------- каскад РКЗ = 0
+  const k1cascade = () => {
+    const zero = $('k1').value === '0';
+    $('k1note').hidden = !zero;
+    for (const id of ['k2', 'k3']) {
+      $(id).disabled = zero;
+      if (zero) $(id).value = '0';
+    }
+  };
+  $('k1').addEventListener('change', k1cascade);
+
+  // ---------- ошибки
+  const CATS = [['gram','грамматика'],['lex','лексика'],['phon','произношение'],
+                ['logic','логика'],['fact','фактическая'],['other','прочее']];
+  const errRow = (e = {}) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><select class="e-where"><option value="lang">язык</option><option value="logic">логика</option></select></td>' +
+      '<td><select class="e-cat">' + CATS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('') + '</select></td>' +
+      '<td><input type="text" class="e-quote" placeholder="точная цитата"></td>' +
+      '<td><input type="text" class="e-fix" placeholder="как правильно"></td>' +
+      '<td style="text-align:center"><input type="checkbox" class="e-grave"></td>' +
+      '<td><button class="del" title="убрать">×</button></td>';
+    tr.querySelector('.e-where').value = e.where || 'lang';
+    tr.querySelector('.e-cat').value = e.cat || 'gram';
+    tr.querySelector('.e-quote').value = e.quote || '';
+    tr.querySelector('.e-fix').value = e.correction || '';
+    tr.querySelector('.e-grave').checked = !!e.grave;
+    tr.querySelector('.del').onclick = () => { tr.remove(); saveDraft(); };
+    $('errs').tBodies[0].appendChild(tr);
+    return tr;
+  };
+  $('addEmpty').onclick = () => errRow();
+  $('addSel').onclick = () => {
+    const ta = $('script');
+    const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd).trim();
+    const tr = errRow({ quote: sel });
+    if (!sel) tr.querySelector('.e-quote').focus();
+    else tr.querySelector('.e-fix').focus();
+  };
+  const collectErrors = () =>
+    [...$('errs').tBodies[0].rows].map(tr => ({
+      where: tr.querySelector('.e-where').value,
+      cat: tr.querySelector('.e-cat').value,
+      quote: tr.querySelector('.e-quote').value.trim(),
+      correction: tr.querySelector('.e-fix').value.trim(),
+      grave: tr.querySelector('.e-grave').checked,
+    })).filter(e => e.quote || e.correction);
+
+  // ---------- черновик
+  const saveDraft = () => {
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        name: $('name').value, brief: $('brief').value,
+        fact1: $('fact1').value, fact2: $('fact2').value,
+        script: $('script').value,
+        aspects: [...document.querySelectorAll('.aspect')].map(s => s.value),
+        opening: $('opening').checked, closing: $('closing').checked,
+        k1: $('k1').value, k2: $('k2').value, k3: $('k3').value,
+        r1: $('r1').value, r2: $('r2').value, r3: $('r3').value,
+        notes: $('notes').value, errors: collectErrors(),
+      }));
+    } catch {}
+  };
+  document.addEventListener('input', saveDraft);
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
+    if (d) {
+      $('name').value = d.name || ''; $('brief').value = d.brief || '';
+      $('fact1').value = d.fact1 || ''; $('fact2').value = d.fact2 || '';
+      $('script').value = d.script || '';
+      (d.aspects || []).forEach((v, i) => {
+        const el = document.querySelectorAll('.aspect')[i]; if (el) el.value = v;
+      });
+      $('opening').checked = d.opening !== false;
+      $('closing').checked = d.closing !== false;
+      if (d.k1) $('k1').value = d.k1;
+      if (d.k2) $('k2').value = d.k2;
+      if (d.k3) $('k3').value = d.k3;
+      $('r1').value = d.r1 || ''; $('r2').value = d.r2 || ''; $('r3').value = d.r3 || '';
+      $('notes').value = d.notes || '';
+      (d.errors || []).forEach(errRow);
+      recount(); k1cascade();
+    }
+  } catch {}
+
+  // ---------- каталог вариантов
+  let variants = [];
+  const loadCatalog = async () => {
+    if (!$('key').value.trim()) return;
+    try {
+      const r = await fetch('/label42/catalog', { headers: hdrs() });
+      if (!r.ok) { $('keystate').textContent = 'Ключ не подошёл (' + r.status + ').'; return; }
+      $('keystate').textContent = 'Ключ принят.';
+      rememberKey();
+      variants = (await r.json()).variants || [];
+      const sel = $('variant');
+      sel.length = 1;
+      for (const v of variants) {
+        const o = document.createElement('option');
+        o.value = v.id;
+        o.textContent = (v.brief || '').replace(/\s+/g, ' ').slice(0, 90) + '…';
+        sel.appendChild(o);
+      }
+      loadWorks();
+    } catch { $('keystate').textContent = 'Сервер недоступен.'; }
+  };
+  $('key').addEventListener('change', loadCatalog);
+  $('variant').addEventListener('change', () => {
+    const v = variants.find(x => x.id === $('variant').value);
+    if (!v) return;
+    $('brief').value = v.brief || '';
+    $('fact1').value = (v.facts || [])[0] || '';
+    $('fact2').value = (v.facts || [])[1] || '';
+    saveDraft();
+  });
+
+  // ---------- сохранение
+  $('save').onclick = async () => {
+    rememberKey();
+    const errors = collectErrors();
+    const body = {
+      name: $('name').value.trim(),
+      variant: $('variant').value || null,
+      brief: $('brief').value.trim(),
+      facts: [$('fact1').value.trim(), $('fact2').value.trim()].filter(Boolean),
+      script: $('script').value.trim(),
+      k1: +$('k1').value, k2: +$('k2').value, k3: +$('k3').value,
+      rationale: { k1: $('r1').value.trim(), k2: $('r2').value.trim(), k3: $('r3').value.trim() },
+      aspects: [...document.querySelectorAll('.aspect')].map(s => s.value),
+      opening: $('opening').checked, closing: $('closing').checked,
+      errors, notes: $('notes').value.trim(), labeler: $('labeler').value.trim(),
+    };
+    $('save').disabled = true;
+    $('savestate').textContent = 'Сохраняю и гоняю систему (до ~20 секунд)…';
+    $('result').innerHTML = '';
+    try {
+      const r = await fetch('/label42/save', { method: 'POST', headers: hdrs(), body: JSON.stringify(body) });
+      const data = await r.json();
+      if (!r.ok) {
+        $('result').innerHTML = '<div class="result err"><h3>Не сохранено</h3>' + (data.detail || r.status) + '</div>';
+        return;
+      }
+      const h = data.human, s = data.system || {};
+      let html = '<div class="result"><h3>Сохранено ✔ Твоя оценка: ' + h.join('/') + ' = ' + (h[0]+h[1]+h[2]) + '/10</h3>';
+      if (s.marks) {
+        const d = Math.abs(s.total - (h[0]+h[1]+h[2]));
+        html += 'Система: <b>' + s.marks.join('/') + ' = ' + s.total + '/10</b> — разница ' +
+          '<span class="' + (d <= 1 ? 'delta-ok' : 'delta-bad') + '">' + d + ' балл(а)</span>.<br>';
+        html += (s.criteria || []).map(c => '<b>' + c.name + ' ' + c.score + ':</b> ' + (c.comment || '')).join('<br>');
+        if ((s.errors || []).length) {
+          html += '<br><b>Ошибки, которые назвала система:</b><br>' +
+            s.errors.map(e => '«' + e.quote + '» → ' + (e.correction || '—')).join('<br>');
+        }
+        html += '<p class="hint" style="margin-top:8px">Если система ошиблась — напиши в «Заметки» следующей работы или сохрани ещё работы такого же типа: расхождения и есть материал для калибровки.</p>';
+      } else if (s.error) {
+        html += '<span class="muted">Сверка с системой не прошла: ' + s.error + ' (разметка сохранена).</span>';
+      }
+      html += '</div>';
+      $('result').innerHTML = html;
+      try { localStorage.removeItem(DRAFT_KEY); } catch {}
+      $('errs').tBodies[0].innerHTML = '';
+      ['name','script','r1','r2','r3','notes'].forEach(id => $(id).value = '');
+      recount();
+      loadWorks();
+    } catch (e) {
+      $('result').innerHTML = '<div class="result err"><h3>Сеть подвела</h3>' + e + '</div>';
+    } finally {
+      $('save').disabled = false;
+      $('savestate').textContent = '';
+    }
+  };
+
+  // ---------- список
+  const loadWorks = async () => {
+    try {
+      const r = await fetch('/label42/list', { headers: hdrs() });
+      if (!r.ok) return;
+      const works = (await r.json()).works || [];
+      $('workstat').textContent = '— всего ' + works.length;
+      $('works').tBodies[0].innerHTML = works.map(w => {
+        const hsum = w.marks[0] + w.marks[1] + w.marks[2];
+        let sysCell = '<span class="muted">—</span>', dCell = '';
+        if (w.system && w.system.marks) {
+          sysCell = w.system.marks.join('/') + ' = ' + w.system.total;
+          const d = Math.abs(w.system.total - hsum);
+          dCell = '<span class="' + (d <= 1 ? 'delta-ok' : 'delta-bad') + '">' + d + '</span>';
+        }
+        return '<tr><td>' + (w.name || '—') + '</td><td>' + w.marks.join('/') + ' = ' + hsum +
+               '</td><td>' + sysCell + '</td><td>' + dCell + '</td><td class="muted">' +
+               (w.created_at || '').slice(0, 16).replace('T', ' ') + '</td></tr>';
+      }).join('');
+    } catch {}
+  };
+
+  recount(); k1cascade();
+  if ($('key').value.trim()) loadCatalog();
+})();
+</script>
+</body>
+</html>

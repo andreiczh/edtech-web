@@ -3132,6 +3132,169 @@ async def _json_with_heartbeat(work):
         yield json.dumps({"detail": f"Внутренняя ошибка: {e}"}, ensure_ascii=False)
 
 
+async def _judge_monologue_text(brief: str, facts: list, script: str) -> dict:
+    """Оценка ТЕКСТА монолога тем же путём, что на проде: промпт-эксперт ->
+    два прохода с консенсусом -> шкала в коде (scoring._score_feedback).
+
+    Отличия от боевого /task_feedback названы в ответе честно: нет памяти
+    ученика (эталонному прогону она и не нужна) и нет добора оборванных
+    пунктов — у монолога нет списка вопросов, добор его не касается.
+    """
+    client = llm_client()
+    prompt = ege_prompts.monologue_prompt(brief, facts)
+
+    def one_pass():
+        c = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "system", "content": prompt},
+                      {"role": "user", "content": script}],
+            response_format={"type": "json_object"},
+            temperature=0.0, max_tokens=2000)
+        _track_llm(c)
+        return _loads_forgiving((c.choices[0].message.content or "").strip())
+
+    obs = await asyncio.to_thread(one_pass)
+    if obs is None:
+        raise HTTPException(status_code=502, detail="LLM вернул не-JSON.")
+    if MONO_CONSENSUS and (obs.get("aspects") or []):
+        try:
+            obs2 = await asyncio.to_thread(one_pass)
+            if obs2:
+                obs = ege_scoring.merge_two_passes(obs, obs2)
+        except Exception as e:  # noqa: BLE001 — консенсус не критичен
+            print(f"[label42] второй проход не удался ({type(e).__name__})")
+
+    fb = _score_feedback("monologue", obs, {"transcript": script, "brief": brief})
+    marks = [int(c["score"]) for c in fb.get("criteria", [])][:3]
+    return {
+        "marks": marks,
+        "total": sum(marks),
+        "criteria": [{"name": c.get("name"), "score": c.get("score"),
+                      "comment": str(c.get("comment") or "")[:400]}
+                     for c in fb.get("criteria", [])],
+        "errors": [{"quote": str(e.get("quote") or "")[:160],
+                    "correction": str(e.get("correction") or "")[:160],
+                    "note": str(e.get("note") or e.get("explanation") or "")[:200]}
+                   for e in (fb.get("errors") or [])][:20],
+        "mode": "prod-path: consensus x2, no student memory",
+    }
+
+
+@app.get("/label42/catalog")
+async def label42_catalog(x_labeler_key: str | None = Header(None)):
+    """Варианты задания 42 из банка — чтобы разметчик не перепечатывал бриф."""
+    _require_labeler(x_labeler_key)
+    if not _storage_ok:
+        return {"variants": []}
+    rows = await asyncio.to_thread(storage.tasks_active)
+    out = []
+    for r in rows:
+        try:
+            payload = json.loads(r.get("payload") or "{}")
+        except json.JSONDecodeError:
+            continue
+        if int(r.get("task_no") or 0) != 42:
+            continue
+        out.append({"id": r.get("id"), "brief": payload.get("brief") or "",
+                    "facts": payload.get("facts") or []})
+    return {"variants": out}
+
+
+@app.post("/label42/save")
+async def label42_save(body: dict = Body(...),
+                       x_labeler_key: str | None = Header(None)):
+    """Сохранить разметку и СРАЗУ свериться с системой.
+
+    Порядок принципиален: сначала фиксируется оценка человека, потом
+    считается системная — разметчик не может подсмотреть и подстроиться,
+    сравнение честное. Провал LLM разметку не теряет: system остаётся null.
+    """
+    _require_labeler(x_labeler_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+
+    brief = str(body.get("brief") or "").strip()
+    script = str(body.get("script") or "").strip()
+    facts = [str(f).strip() for f in (body.get("facts") or []) if str(f).strip()]
+    if len(brief) < 40:
+        raise HTTPException(status_code=422, detail="Бриф задания слишком короткий.")
+    if len(script.split()) < 30:
+        raise HTTPException(status_code=422,
+                            detail="Ответ ученика короче 30 слов — это не монолог.")
+    try:
+        k1, k2, k3 = int(body.get("k1")), int(body.get("k2")), int(body.get("k3"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Баллы k1/k2/k3 обязательны.")
+    if not (0 <= k1 <= 4 and 0 <= k2 <= 3 and 0 <= k3 <= 3):
+        raise HTTPException(status_code=422,
+                            detail="Шкала: РКЗ 0-4, Организация 0-3, Язык 0-3.")
+    if k1 == 0 and (k2 or k3):
+        # Методичка: ноль за решение задачи обнуляет задание целиком.
+        raise HTTPException(status_code=422,
+                            detail="При РКЗ = 0 организация и язык тоже 0 (правило ФИПИ).")
+    rationale = body.get("rationale") or {}
+    if any(len(str(rationale.get(k) or "").strip()) < 10 for k in ("k1", "k2", "k3")):
+        raise HTTPException(status_code=422,
+                            detail="К каждому критерию нужно обоснование (от 10 символов).")
+
+    rec = {
+        "name": str(body.get("name") or "").strip()
+                or "работа " + datetime.now().strftime("%d.%m %H:%M"),
+        "variant": body.get("variant"),
+        "brief": brief, "facts": facts, "script": script,
+        "k1": k1, "k2": k2, "k3": k3,
+        "rationale": {k: str(rationale.get(k) or "")[:1200] for k in ("k1", "k2", "k3")},
+        "aspects": [str(a)[:20] for a in (body.get("aspects") or [])][:4],
+        "opening": bool(body.get("opening")), "closing": bool(body.get("closing")),
+        "errors": [
+            {"where": str(e.get("where") or "")[:10],
+             "cat": str(e.get("cat") or "")[:16],
+             "quote": str(e.get("quote") or "")[:200],
+             "correction": str(e.get("correction") or "")[:200],
+             "grave": bool(e.get("grave"))}
+            for e in (body.get("errors") or []) if isinstance(e, dict)
+        ][:30],
+        "notes": body.get("notes") or "",
+        "labeler": body.get("labeler") or "тестировщик",
+    }
+    rid = await asyncio.to_thread(storage.labeled42_add, rec)
+
+    # Сверка с системой — после фиксации человека. Не чаще раза в 15 секунд.
+    system = None
+    now = time.monotonic()
+    if now - _LABEL_RUN_GATE["at"] >= 15:
+        _LABEL_RUN_GATE["at"] = now
+        try:
+            system = await _judge_monologue_text(brief, facts, script)
+            await asyncio.to_thread(storage.labeled42_set_system, rid, system)
+        except HTTPException as e:
+            system = {"error": str(e.detail)[:200]}
+        except Exception as e:  # noqa: BLE001 — сверка не важнее разметки
+            system = {"error": type(e).__name__}
+    else:
+        system = {"error": "Сверка чаще раза в 15 секунд не запускается — работа сохранена."}
+
+    return {"id": rid, "saved": True, "human": [k1, k2, k3], "system": system}
+
+
+@app.get("/label42/list")
+async def label42_list(x_labeler_key: str | None = Header(None)):
+    _require_labeler(x_labeler_key)
+    if not _storage_ok:
+        return {"works": []}
+    return {"works": await asyncio.to_thread(storage.labeled42_list, 100)}
+
+
+@app.get("/admin/label42/export")
+async def admin_label42_export(x_admin_key: str | None = Header(None)):
+    """Полный экспорт корпуса владельцу: сырые записи + golden-кейсы, готовые
+    к вставке в fipi_cases.MONOLOGUE_EXTRA — ту самую сетку точности."""
+    _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
+    return await asyncio.to_thread(storage.labeled42_export)
+
+
 @app.post("/monologue")
 async def monologue(audio: UploadFile = File(...),
                     x_device: str | None = Header(None),
@@ -3426,6 +3589,26 @@ PRON_SHOW = os.environ.get("PRON_SHOW", "0").strip() not in ("0", "false", "no")
 #     два прохода   в пределах ±1: 5, 5, 5   разброс между повторами 0.4
 # Цена — один дополнительный вызов LLM на монолог; выключается MONO_CONSENSUS=0.
 MONO_CONSENSUS = os.environ.get("MONO_CONSENSUS", "1").strip() not in ("0", "false", "no")
+
+# ------------------------------------------------- РАЗМЕТКА МОНОЛОГА (42)
+# Страница /label42.html: тестировщик заводит работу текстом, ставит баллы по
+# критериям с обоснованием и перечисляет ошибки. Это калибровочный корпус для
+# слабейшего места оценивания. Доступ — по ОТДЕЛЬНОМУ ключу: админ-ключ
+# тестировщику не выдаётся (правило проекта), а без ключа страница позволяла
+# бы кому угодно жечь LLM-прогоны сверки. Пустой LABELER_KEY = раздел
+# выключен целиком.
+LABELER_KEY = os.environ.get("LABELER_KEY", "").strip()
+
+
+def _require_labeler(key: str | None) -> None:
+    if not LABELER_KEY:
+        raise HTTPException(status_code=403, detail="Разметка выключена: LABELER_KEY не задан.")
+    if (key or "").strip() != LABELER_KEY:
+        raise HTTPException(status_code=403, detail="Неверный ключ разметчика.")
+
+
+# Прогоны сверки жгут по два вызова LLM — чаще раза в 15 секунд им идти незачем.
+_LABEL_RUN_GATE = {"at": 0.0}
 
 # ------------------------------------------------------------ КОРПУС ГОЛОСА
 # Здесь хранится САМА ЗАПИСЬ, поэтому правил больше, чем у любой другой части.
