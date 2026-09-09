@@ -202,6 +202,32 @@ export default function App() {
     )
   }
 
+  // Главная — макет «MacBook Air - 15 (2)» целиком, со своим рейлом и доком
+  // темы внутри холста: каркас с общим рейлом здесь не нужен.
+  if (route.name === 'home') {
+    return (
+      <div className="app" data-theme={paint} data-mode={mode}>
+        <HomeScreen
+          onTrainer={backToEge}
+          onSpeaking={() => setRoute({ name: 'conversation' })}
+          onDemo={startDemo}
+          onStats={() => setRoute({ name: 'stats' })}
+          onCalendar={() => setRoute({ name: 'calendar' })}
+          onProfile={() => setRoute({ name: 'profile' })}
+          theme={theme}
+          onTheme={(t) => updateSettings({ theme: t })}
+        />
+        {feedbackOpen && (
+          <DisagreeModal
+            ctx={{ kind: 'app', target: 'app', targetLabel: 'Отзыв о приложении' }}
+            onClose={() => setFeedbackOpen(false)}
+            onSent={() => undefined}
+          />
+        )}
+      </div>
+    )
+  }
+
   // Сессия задания — полноэкранный поток со своей шапкой, рейл не показываем:
   // на экзамене ничто не должно уводить из задания.
   if (route.name === 'session') {
@@ -272,17 +298,6 @@ export default function App() {
 
         <div className="screen">
           <div className="swap" key={route.name}>
-            {route.name === 'home' && (
-              <HomeScreen
-                onTrainer={backToEge}
-                onSpeaking={() => setRoute({ name: 'conversation' })}
-                onDemo={startDemo}
-                onStats={() => setRoute({ name: 'stats' })}
-                onCalendar={() => setRoute({ name: 'calendar' })}
-                onProfile={() => setRoute({ name: 'profile' })}
-              />
-            )}
-
             {route.name === 'calendar' && <CalendarScreen />}
 
             {route.name === 'conversation' && <ConversationScreen onFeedback={onFeedback} />}

@@ -1,100 +1,149 @@
 /**
- * Главный экран — по референсу владельца от 31.08.2026.
+ * Главный экран — перенос макета «MacBook Air - 15 (2)» один в один.
  *
- * Слева: ТЕОРИЯ (заглушка — раздела в системе нет), «Вариант по ошибкам»
- * (живой: собирается из копилки ошибок), лента «Сегодня» из четырёх мини-
- * карточек. Справа: ТРЕНАЖЁР / SPEAKING / DEMO. Сверху: мини-стрик и
- * профиль-пилюля. Снизу: Telegram-баннер (заглушка — канала пока нет).
+ * Раскладка (координаты, размеры, кегли, трекинг) не пишется руками: она
+ * лежит в homeV2Layout.ts, сгенерированном из откалиброванной копии SVG.
+ * Здесь только поведение: те же обработчики, что и раньше — тренажёр,
+ * разговор, демо, календарь, статистика, профиль, тема, Telegram.
  *
- * Принцип честности прежний: живые числа — из /me/stats и /me/analytics,
- * чего система не меряет — того на экране нет; у заглушек прямо написано,
- * чего не хватает. «Совет дня» — ротация написанного руками банка советов
- * по дате: это контент, а не выдуманные данные.
+ * Холст макета 1710×1112 масштабируется под окно целиком (one-pager без
+ * скролла), как в утверждённой HTML-версии. Живые данные: имя из аккаунта,
+ * серия занятий из /me/stats. Чего в системе нет, то честно не работает:
+ * раздел теории (кнопка выключена), уведомления (колокольчик без действия),
+ * карусель баннера (стрелки и точки декоративные — баннер один).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 
-import { fetchMeAnalytics, fetchMeStats, type MeAnalytics, type MeStats } from '../account/me'
+import { fetchMeStats, type MeStats } from '../account/me'
 import { currentUser } from '../auth/auth'
+import { HOME_LAYOUT, STAGE_H, STAGE_W } from './homeV2Layout'
 
-const CAT_RU: Record<string, string> = {
-  gram: 'грамматика',
-  lex: 'лексика',
-  order: 'структура вопроса',
-  missing: 'нет ответа',
-  logic: 'логика',
-  phon: 'произношение',
-  other: 'прочее',
-}
-
-const KIND_RU: Record<string, string> = {
-  reading: 'чтение вслух',
-  dialogue: 'вопросы (№40)',
-  interview: 'интервью (№41)',
-  monologue: 'монолог (№42)',
-}
-
-/* Советы дня — написанный руками банк, ротация по дате. Именно банк, а не
-   вызов LLM: совет не стоит запроса из месячного бюджета, а ротация даёт
-   «новое каждый день» без единого обращения к сети. */
-const TIPS = [
-  'Не бойся пауз — они нормальны и в разговоре, и на экзамене.',
-  'Отвечай на вопрос, который задали, а не на тот, что готовил.',
-  'Две короткие фразы лучше одной длинной и запутанной.',
-  'В монологе называй, ЧТО на фото, а не что ты об этом думаешь — мнение только в конце.',
-  'Стяжения (I’m, don’t, it’s) делают речь живее — используй их.',
-  'Начни ответ с обращения к другу — за его отсутствие снимают балл.',
-  'Следи за формой глагола в задании: «you prefer» — отвечай «I prefer».',
-  'Проговаривай окончания -s и -ed: их потеря — самая частая ошибка.',
-  'Лучше простое слово к месту, чем сложное наугад.',
-  'Заверши монолог выводом — «That’s all» тоже считается.',
-  'Перечитай план задания за 10 секунд до записи — пункты легко потерять.',
-  'Говори в среднем темпе: торопливость съедает окончания слов.',
-  'Один день пропуска в неделю не рвёт серию — заморозка спасёт.',
-  'Отвечай полными предложениями: обрывок фразой не считается.',
-]
-
-function dayTip(): string {
-  const now = new Date()
-  const day = Math.floor(now.getTime() / 86400000)
-  return TIPS[day % TIPS.length]
-}
+/* Ссылка на канал приходит из окружения сборки: канала пока нет, и кнопка
+   честно выключена. Появится канал — одна переменная, без правки кода. */
+const TG_URL = (import.meta.env.VITE_TELEGRAM_URL as string | undefined) ?? ''
 
 function greeting(): string {
   const h = new Date().getHours()
-  if (h < 5) return 'Доброй ночи'
-  if (h < 12) return 'Доброе утро'
-  if (h < 18) return 'Добрый день'
-  return 'Добрый вечер'
+  if (h < 5) return 'Good night'
+  if (h < 12) return 'Good morning'
+  if (h < 18) return 'Good afternoon'
+  return 'Good evening'
 }
 
-/* ------------------------------------------------- Иконки (line, 24px) */
+const pic = (key: string) => HOME_LAYOUT.pics.find((p) => p.key === key)!
+const box = (key: string) => HOME_LAYOUT.boxes.find((b) => b.key === key)!.style
+const icon = (key: string) => HOME_LAYOUT.icons.find((i) => i.key === key)!
+const txt = (key: string) => HOME_LAYOUT.texts[key]
 
-function Ic({ d, boxes }: { d?: string; boxes?: Array<[number, number, number, number, number?]> }) {
+/* Иконка из макета: SVG-контур вырезан из файла дословно. `strip` убирает
+   из группы элемент, который рисуем отдельно (чёрная подложка активного
+   пункта, число стрика). */
+function Ic({ k, strip, style, className }: { k: string; strip?: RegExp; style?: CSSProperties; className?: string }) {
+  const i = icon(k)
+  const svg = strip ? i.svg.replace(strip, '') : i.svg
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {d && <path d={d} />}
-      {boxes?.map(([x, y, w, h, r], i) => (
-        <rect key={i} x={x} y={y} width={w} height={h} rx={r ?? 2} />
-      ))}
-    </svg>
+    <span
+      className={`homev2__ic${className ? ` ${className}` : ''}`}
+      style={{ ...i.style, ...style }}
+      aria-hidden="true"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
   )
 }
 
-const IC = {
-  book: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15Z',
-  sparkles: 'M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3ZM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15Z',
-  bulb: 'M9 18h6M10 21h4M12 3a6 6 0 0 1 3.6 10.8c-.5.4-.6 1-.6 1.7V16h-6v-.5c0-.7-.1-1.3-.6-1.7A6 6 0 0 1 12 3Z',
-  chart: 'M4 20V4M4 17c4-1.5 5.5 1 9-1s6-7 7-8M20 20H4',
-  target: 'M12 12m-9 0a9 9 0 1 0 18 0 9 9 0 1 0-18 0M12 12m-5 0a5 5 0 1 0 10 0 5 5 0 1 0-10 0M12 12m-1 0a1 1 0 1 0 2 0 1 1 0 1 0-2 0',
-  trophy: 'M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4ZM7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4',
-  headphones: 'M4 14v-2a8 8 0 0 1 16 0v2M4 14a2 2 0 0 1 2-2h1v6H6a2 2 0 0 1-2-2v-2Zm16 0a2 2 0 0 0-2-2h-1v6h1a2 2 0 0 0 2-2v-2Z',
-  mic: 'M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3ZM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6',
-  play: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM10 8.5l5.5 3.5-5.5 3.5v-7Z',
-  send: 'M21.5 3.5 10 12M21.5 3.5 14 21l-4-9-9-4 20.5-4.5Z',
+function Pic({ k }: { k: string }) {
+  const p = pic(k)
+  const { file, ...img } = p.img
+  return (
+    <span className="homev2__pic" style={p.box}>
+      <img src={`/home/${file}`} alt="" style={img} draggable={false} />
+    </span>
+  )
 }
 
-/* ------------------------------------------------------------- Экран */
+function Txt({ k, children, style }: { k: string; children?: string; style?: CSSProperties }) {
+  const t = txt(k)
+  if (children !== undefined) {
+    return (
+      <span className="homev2__t" style={{ ...t.style, ...style }}>
+        {children}
+      </span>
+    )
+  }
+  return <span className="homev2__t" style={{ ...t.style, ...style }} dangerouslySetInnerHTML={{ __html: t.html }} />
+}
+
+/* Кнопка макета: чёрная/белая плашка из файла — сама и есть кнопка,
+   подпись и стрелка лежат поверх и клики пропускают. */
+function Btn({
+  k,
+  label,
+  onClick,
+  disabled,
+  title,
+  href,
+}: {
+  k: string
+  label: string
+  onClick?: () => void
+  disabled?: boolean
+  title?: string
+  href?: string
+}) {
+  const style = box(k)
+  if (href) {
+    return (
+      <a className="homev2__btn" style={style} href={href} target="_blank" rel="noreferrer" aria-label={label} title={title} />
+    )
+  }
+  return (
+    <button
+      type="button"
+      className="homev2__btn"
+      style={style}
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={title}
+    />
+  )
+}
+
+/* Кнопка рейла: зона нажатия — бокс иконки с полем 8 px. */
+function RailBtn({
+  k,
+  label,
+  onClick,
+  strip,
+  active,
+}: {
+  k: string
+  label: string
+  onClick: () => void
+  strip?: RegExp
+  active?: boolean
+}) {
+  const i = icon(k)
+  const px = (v: unknown) => parseFloat(String(v))
+  const pad = 8
+  return (
+    <button
+      type="button"
+      className={`homev2__rail${active ? ' homev2__rail--on' : ''}`}
+      style={{
+        left: px(i.style.left) - pad,
+        top: px(i.style.top) - pad,
+        width: px(i.style.width) + pad * 2,
+        height: px(i.style.height) + pad * 2,
+      }}
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+    >
+      <Ic k={k} strip={strip} style={{ left: pad, top: pad }} />
+    </button>
+  )
+}
 
 export function HomeScreen({
   onTrainer,
@@ -103,6 +152,8 @@ export function HomeScreen({
   onStats,
   onCalendar,
   onProfile,
+  theme,
+  onTheme,
 }: {
   onTrainer: () => void
   onSpeaking: () => void
@@ -110,245 +161,159 @@ export function HomeScreen({
   onStats: () => void
   onCalendar: () => void
   onProfile: () => void
+  theme: 'light' | 'dark' | 'auto'
+  onTheme: (t: 'light' | 'dark') => void
 }) {
   const [stats, setStats] = useState<MeStats | null>(null)
-  const [analytics, setAnalytics] = useState<MeAnalytics | null>(null)
-
   useEffect(() => {
     let alive = true
     void fetchMeStats().then((s) => alive && setStats(s))
-    void fetchMeAnalytics().then((a) => alive && setAnalytics(a))
     return () => {
       alive = false
     }
   }, [])
 
+  /* Масштаб холста под окно: целиком, по центру, без скролла. */
+  const stageRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = stageRef.current
+    if (!el) return
+    const fit = () => {
+      const w = window.innerWidth || document.documentElement.clientWidth
+      const h = window.innerHeight || document.documentElement.clientHeight
+      if (!w || !h) return // окно ещё без размера (скрытая вкладка) — ждём resize
+      const k = Math.min(w / STAGE_W, h / STAGE_H)
+      const dx = (w - STAGE_W * k) / 2
+      const dy = (h - STAGE_H * k) / 2
+      el.style.transform = `translate(${dx}px, ${dy}px) scale(${k})`
+    }
+    fit()
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  }, [])
+
   const nick = currentUser()?.nickname ?? ''
-  const initials = (nick.match(/[A-Z]/g) ?? ['?']).slice(0, 1).join('')
-
-  /* «Вариант по ошибкам»: подпись из настоящей копилки. */
-  const cats = analytics?.mistakes.by_cat ?? []
-  const recoSub =
-    cats.length > 0
-      ? 'Частое у тебя: ' + cats.slice(0, 2).map((c) => CAT_RU[c.cat] ?? c.cat).join(', ')
-      : 'Появится после первых разборов — система запомнит твои ошибки'
-
-  /* «Твой прогресс»: последние работы против среднего — из /me/analytics. */
-  const kinds = analytics?.kinds ?? {}
-  const kindList = Object.entries(kinds)
-  const attempts = kindList.reduce((s, [, k]) => s + k.attempts, 0)
-  const delta =
-    attempts > 0
-      ? Math.round(
-          kindList.reduce((s, [, k]) => s + (k.recent_pct - k.avg_pct) * k.attempts, 0) / attempts,
-        )
-      : null
-
-  /* «Фокус недели»: слабейший тип задания по последним работам. */
-  const rows = Object.entries(kinds).filter(([, k]) => k.attempts > 0)
-  const weakest =
-    rows.length > 1
-      ? rows.reduce((a, b) => (b[1].recent_pct < a[1].recent_pct ? b : a))[0]
-      : null
-
-  const streakDays = stats?.streak.days ?? null
+  const streak = stats?.streak.days ?? null
+  /* Док темы: чёрный квадрат из макета стоит под активным пунктом. Режим
+     «авто» на макете не показан — подсвечиваем то, что сейчас на экране. */
+  const darkOn = theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const sun = icon('navSun')
+  const moon = icon('navMoon')
+  const px = (v: unknown) => parseFloat(String(v))
+  const squareSize = px(sun.style.width) - 3.93
+  const square = (i: typeof sun): CSSProperties => ({
+    left: px(i.style.left) + px(i.style.width) / 2 - squareSize / 2,
+    top: px(i.style.top) + px(i.style.height) / 2 - squareSize / 2,
+    width: squareSize,
+    height: squareSize,
+    borderRadius: 11.3,
+    background: '#000',
+    border: '1px solid #fff',
+  })
+  const flameNo = txt('greeting') // стиль числа считаем от иконки, см. ниже
+  void flameNo
 
   return (
-    <div className="dash2">
-      <div className="dash2__top">
-        <h1 className="dash__hello">
-          {greeting()}, {nick}! <span aria-hidden="true">👋</span>
-        </h1>
-        <div className="dash2__topright">
-          <button
-            type="button"
-            className="streakpill"
-            onClick={onCalendar}
-            title="Серия занятий — открыть календарь"
-          >
-            <span aria-hidden="true">🔥</span>
-            <b>{streakDays ?? '—'}</b>
-          </button>
-          <button type="button" className="userpill" onClick={onProfile} title="Личный кабинет">
-            <span className="userpill__ava">{initials}</span>
-            <span className="userpill__nick">{nick}</span>
-            <span aria-hidden="true" className="userpill__chev">▾</span>
-          </button>
-        </div>
-      </div>
+    <div className="homev2">
+      <div className="homev2__stage" ref={stageRef} style={{ width: STAGE_W, height: STAGE_H }}>
+        {/* фон-картинки карточек */}
+        <Pic k="theory" />
+        <Pic k="ai" />
+        <Pic k="telegram" />
+        <Pic k="trainer" />
+        <Pic k="speaking" />
+        <Pic k="demo" />
 
-      <div className="dash2__left">
-        {/* ТЕОРИЯ — заглушка: раздела теории в системе пока НЕТ. Карточка
-            стоит по референсу, а вместо обещаний — честное «скоро». */}
-        <div className="promo promo--cream">
-          <div className="promo__body">
-            <b className="promo__title">Повтори теорию по заданиям</b>
-            <span className="promo__sub">
-              Раздела пока нет — конспекты по заданиям 40–42 в работе
-            </span>
-            <button type="button" className="promo__btn" disabled title="Раздел теории ещё не готов">
-              Скоро…
-            </button>
-          </div>
-          <span className="promo__chip promo__chip--amber">
-            <Ic d={IC.book} />
-          </span>
-        </div>
+        {/* рейл навигации и док темы */}
+        <span className="homev2__box homev2__box--rail" style={box('railNav')} />
+        <span className="homev2__box homev2__box--rail" style={box('railTheme')} />
+        <RailBtn k="navHome" label="Главная" onClick={() => undefined} active />
+        <RailBtn k="navCalendar" label="Календарь" onClick={onCalendar} />
+        <RailBtn k="navStats" label="Статистика" onClick={onStats} />
+        <RailBtn k="navSettings" label="Настройки" onClick={onProfile} />
+        <span className="homev2__box" style={square(darkOn ? moon : sun)} />
+        <RailBtn
+          k="navSun"
+          label="Светлая тема"
+          onClick={() => onTheme('light')}
+          strip={/<rect[^>]*\/>/}
+          active={!darkOn}
+        />
+        <RailBtn k="navMoon" label="Тёмная тема" onClick={() => onTheme('dark')} active={darkOn} />
 
-        {/* Вариант по ошибкам — живой: подпись из копилки, кнопка в тренажёр. */}
-        <div className="promo promo--pink">
-          <div className="promo__body">
-            <b className="promo__title">Вариант по ошибкам</b>
-            <span className="promo__sub">{recoSub}</span>
-            <button type="button" className="promo__btn" onClick={onTrainer}>
-              Начать тренировку <span aria-hidden="true">→</span>
-            </button>
-          </div>
-          <span className="promo__chip promo__chip--pink">
-            <Ic d={IC.sparkles} />
-          </span>
-        </div>
+        {/* шапка */}
+        <Txt k="greeting">{`${greeting()}, ${nick}!`}</Txt>
+        <button type="button" className="homev2__streak" style={hit(icon('flame').style)} onClick={onCalendar} title="Серия занятий — открыть календарь" aria-label="Серия занятий">
+          <Ic k="flame" strip={/<path[^>]*fill="white"[^>]*\/>/} style={{ left: 0, top: 0 }} />
+          <span className="homev2__streakno">{streak ?? '—'}</span>
+        </button>
+        <span className="homev2__box" style={box('bellBg')} />
+        <Ic k="bell" />
+        <span className="homev2__box" style={box('avatarBg')} />
+        <button type="button" className="homev2__avatar" style={pic('avatar').box} onClick={onProfile} title="Личный кабинет" aria-label="Личный кабинет">
+          <Pic k="avatar" />
+        </button>
 
-        {/* Сегодня: четыре мини-карточки. Стрелки листают ленту на узких
-            экранах; на широком видны все четыре. */}
-        <div className="today">
-          <div className="today__head">
-            <b>Сегодня</b>
-            <div className="today__nav">
-              {/* Шаг листания — РЕАЛЬНАЯ ширина плитки + зазор, в момент
-                  клика: фиксированные 180px были меньше плитки, и
-                  scroll-snap молча откатывал ленту назад. */}
-              {(['←', '→'] as const).map((ch) => (
-                <button
-                  key={ch}
-                  type="button"
-                  aria-label={ch === '←' ? 'Назад' : 'Вперёд'}
-                  onClick={(e) => {
-                    const row = e.currentTarget
-                      .closest('.today')
-                      ?.querySelector<HTMLElement>('.today__row')
-                    const card = row?.querySelector<HTMLElement>('.tcard')
-                    if (!row || !card) return
-                    const step = card.offsetWidth + 12
-                    row.scrollBy({ left: ch === '←' ? -step : step, behavior: 'smooth' })
-                  }}
-                >
-                  {ch}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="today__row">
-            <div className="tcard tcard--lav">
-              <span className="tcard__ic tcard__ic--lav"><Ic d={IC.bulb} /></span>
-              <b>Совет дня</b>
-              <span className="tcard__text">{dayTip()}</span>
-            </div>
-            <button type="button" className="tcard tcard--blue" onClick={onStats}>
-              <span className="tcard__ic tcard__ic--blue"><Ic d={IC.chart} /></span>
-              <b>Твой прогресс</b>
-              <span className="tcard__text">
-                {delta === null
-                  ? 'Появится после первых занятий'
-                  : delta > 0
-                    ? `Последние работы на ${delta}% лучше твоего среднего`
-                    : delta < 0
-                      ? `Последние работы на ${-delta}% ниже среднего — бывает`
-                      : 'Держишься ровно на своём среднем'}
-              </span>
-              <span className="tcard__go">Смотреть →</span>
-            </button>
-            <button type="button" className="tcard tcard--mint" onClick={onTrainer}>
-              <span className="tcard__ic tcard__ic--mint"><Ic d={IC.target} /></span>
-              <b>Фокус недели</b>
-              <span className="tcard__text">
-                {weakest
-                  ? `${(KIND_RU[weakest] ?? weakest).replace(/^./, (c) => c.toUpperCase())} — твоя точка роста`
-                  : 'Реши пару заданий — подскажем, что подтянуть'}
-              </span>
-              <span className="tcard__go">Тренировать →</span>
-            </button>
-            <button type="button" className="tcard tcard--peach" onClick={onCalendar}>
-              <span className="tcard__ic tcard__ic--peach"><Ic d={IC.trophy} /></span>
-              <b>Достижение</b>
-              <span className="tcard__text">
-                {streakDays && streakDays > 0
-                  ? `${streakDays} ${streakDays === 1 ? 'день' : streakDays < 5 ? 'дня' : 'дней'} подряд! Так держать 🔥`
-                  : 'Начни серию сегодня — одно занятие уже засчитается'}
-              </span>
-              <span className="tcard__go">Смотреть →</span>
-            </button>
-          </div>
-        </div>
-      </div>
+        {/* карточка ТЕОРИЯ — раздела в системе пока нет, кнопка выключена */}
+        <Txt k="theoryLabel" />
+        <Txt k="theoryTitle" />
+        <Txt k="theoryText" />
+        <Btn k="btnTheory" label="Читать теорию" disabled title="Раздел теории ещё не готов" />
+        <Txt k="theoryBtn" />
+        <Ic k="arrowTheory" />
 
-      <div className="dash2__right">
-        <div className="promo">
-          <div className="promo__body">
-            <b className="promo__title">Тренажёр</b>
-            <span className="promo__sub">Все 4 задания устной части ЕГЭ</span>
-            <button type="button" className="promo__btn" onClick={onTrainer}>
-              Начать <span aria-hidden="true">→</span>
-            </button>
-          </div>
-          <span className="promo__chip promo__chip--pink">
-            <Ic d={IC.headphones} />
-          </span>
-        </div>
-        <div className="promo">
-          <div className="promo__body">
-            <b className="promo__title">Разговор</b>
-            <span className="promo__sub">Свободная беседа с ИИ-собеседником</span>
-            <button type="button" className="promo__btn" onClick={onSpeaking}>
-              Практиковаться <span aria-hidden="true">→</span>
-            </button>
-          </div>
-          <span className="promo__chip promo__chip--lav">
-            <Ic d={IC.mic} />
-          </span>
-        </div>
-        <div className="promo">
-          <div className="promo__body">
-            <b className="promo__title">Демо-экзамен</b>
-            <span className="promo__sub">Полный экзамен в формате ЕГЭ</span>
-            <button type="button" className="promo__btn" onClick={onDemo}>
-              Попробовать <span aria-hidden="true">→</span>
-            </button>
-          </div>
-          <span className="promo__chip promo__chip--rose">
-            <Ic d={IC.play} />
-          </span>
-        </div>
-      </div>
+        {/* карточка AI РЕКОМЕНДАЦИИ — вариант по ошибкам открывает тренажёр */}
+        <Txt k="aiLabel" />
+        <Txt k="aiTitle" />
+        <Txt k="aiText" />
+        <Btn k="btnAi" label="Вариант по ошибкам" onClick={onTrainer} />
+        <Txt k="aiBtn" />
+        <Ic k="arrowAi" />
 
-      {/* Telegram — заглушка: канала пока НЕТ. Баннер по референсу, кнопка
-          оживёт, когда владелец заведёт канал и укажет VITE_TELEGRAM_URL. */}
-      <div className="tgbar">
-        <span className="tgbar__ic" aria-hidden="true">
-          <Ic d={IC.send} />
-        </span>
-        <div className="tgbar__t">
-          <b>Присоединяйся к нашему Telegram-каналу</b>
-          <span>
-            {TG_URL
-              ? 'Полезные материалы, разборы заданий и мотивация каждый день'
-              : 'Канал скоро откроется — ссылки пока нет'}
-          </span>
-        </div>
+        {/* баннер Telegram */}
+        <Txt k="tgTitle" />
+        <Txt k="tgText" />
         {TG_URL ? (
-          <a className="tgbar__btn" href={TG_URL} target="_blank" rel="noreferrer">
-            Перейти в канал <span aria-hidden="true">→</span>
-          </a>
+          <Btn k="btnTelegram" label="Перейти в канал" href={TG_URL} />
         ) : (
-          <button type="button" className="tgbar__btn" disabled title="Канала пока нет">
-            Скоро…
-          </button>
+          <Btn k="btnTelegram" label="Перейти в канал" disabled title="Канала пока нет" />
         )}
+        <Ic k="tgLogo" />
+        <Txt k="tgBtn" />
+        <Ic k="arrowTelegram" />
+        <span className="homev2__box" style={box('prevCircle')} />
+        <span className="homev2__box" style={box('nextCircle')} />
+        <Ic k="chevPrev" />
+        <Ic k="chevNext" />
+        <span className="homev2__box" style={box('dot1')} />
+        <span className="homev2__box" style={box('dot2')} />
+        <span className="homev2__box" style={box('dot3')} />
+        <span className="homev2__box" style={box('dot4')} />
+
+        {/* правая колонка */}
+        <Txt k="trainerTitle" />
+        <Txt k="trainerText" />
+        <Btn k="btnTrainer" label="Тренажёр — начать" onClick={onTrainer} />
+        <Txt k="trainerBtn" />
+        <Ic k="arrowTrainer" />
+
+        <Txt k="speakingTitle" />
+        <Txt k="speakingText" />
+        <Btn k="btnSpeaking" label="Speaking — начать" onClick={onSpeaking} />
+        <Txt k="speakingBtn" />
+        <Ic k="arrowSpeaking" />
+
+        <Txt k="demoTitle" />
+        <Txt k="demoText" />
+        <Btn k="btnDemo" label="Демо-экзамен — начать" onClick={onDemo} />
+        <Txt k="demoBtn" />
+        <Ic k="arrowDemo" />
       </div>
     </div>
   )
 }
 
-/* Ссылка на канал приходит из окружения сборки: канала пока нет, и кнопка
-   честно выключена. Появится канал — одна переменная, без правки кода. */
-const TG_URL = (import.meta.env.VITE_TELEGRAM_URL as string | undefined) ?? ''
+/* Зона нажатия поверх иконки: тот же бокс, что у иконки. */
+function hit(s: CSSProperties): CSSProperties {
+  return { left: s.left, top: s.top, width: s.width, height: s.height }
+}

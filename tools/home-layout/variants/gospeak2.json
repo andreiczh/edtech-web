@@ -1,0 +1,3 @@
+{"name": "gospeak2", "gf": "family=Unbounded:wght@300..900&family=Golos+Text:wght@400..900", "bold": 700, "demo_stroke": 0,
+ "faces": {"hero": ["Unbounded", 600], "title": ["Unbounded", 600], "demo": ["Unbounded", 700], "label": ["Golos Text", 600],
+           "sub": ["Golos Text", 700], "body": ["Golos Text", 400], "bodyr": ["Golos Text", 400], "button": ["Golos Text", 500]}}
