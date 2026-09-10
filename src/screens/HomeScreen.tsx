@@ -4,23 +4,57 @@
  * Раскладка (координаты, размеры, кегли, трекинг) не пишется руками: она
  * лежит в homeV2Layout.ts, сгенерированном из откалиброванной копии SVG.
  * Здесь только поведение: те же обработчики, что и раньше — тренажёр,
- * разговор, демо, календарь, статистика, профиль, тема, Telegram.
+ * разговор, демо, календарь, статистика, профиль, Telegram.
  *
- * Холст макета 1710×1112 масштабируется под окно целиком (one-pager без
- * скролла), как в утверждённой HTML-версии. Живые данные: имя из аккаунта,
- * серия занятий из /me/stats. Чего в системе нет, то честно не работает:
- * раздел теории (кнопка выключена), уведомления (колокольчик без действия),
- * карусель баннера (стрелки и точки декоративные — баннер один).
+ * Рейл и док темы у главной общие со всеми экранами (components/Rail.tsx,
+ * фиксированы поверх холста) — в холсте их нет. Холст 1710×1112
+ * масштабируется под окно целиком (one-pager без скролла).
+ *
+ * Баннер — слайдер из четырёх карточек: канал Telegram и три живые плитки
+ * прежней главной («Совет дня», «Твой прогресс», «Фокус недели»). Живые
+ * данные: имя из аккаунта, серия из /me/stats, прогресс и слабое место из
+ * /me/analytics. Чего в системе нет, то честно не работает: раздел теории
+ * (кнопка выключена), уведомления (колокольчик без действия).
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 
-import { fetchMeStats, type MeStats } from '../account/me'
+import { fetchMeAnalytics, fetchMeStats, type MeAnalytics, type MeStats } from '../account/me'
 import { currentUser } from '../auth/auth'
 import { HOME_LAYOUT, STAGE_H, STAGE_W } from './homeV2Layout'
 
-/* Ссылка на канал приходит из окружения сборки: канала пока нет, и кнопка
-   честно выключена. Появится канал — одна переменная, без правки кода. */
-const TG_URL = (import.meta.env.VITE_TELEGRAM_URL as string | undefined) ?? ''
+/* Канал: ссылка владельца, переменная окружения может её переопределить. */
+const TG_URL = (import.meta.env.VITE_TELEGRAM_URL as string | undefined) || 'https://t.me/Go_Speak_AI'
+
+const KIND_RU: Record<string, string> = {
+  reading: 'чтение вслух',
+  dialogue: 'вопросы (№40)',
+  interview: 'интервью (№41)',
+  monologue: 'монолог (№42)',
+}
+
+/* Советы дня — написанный руками банк, ротация по дате. Именно банк, а не
+   вызов LLM: совет не стоит запроса из месячного бюджета. */
+const TIPS = [
+  'Не бойся пауз — они нормальны и в разговоре, и на экзамене.',
+  'Отвечай на вопрос, который задали, а не на тот, что готовил.',
+  'Две короткие фразы лучше одной длинной и запутанной.',
+  'В монологе называй, ЧТО на фото, а не что ты об этом думаешь — мнение только в конце.',
+  'Стяжения (I’m, don’t, it’s) делают речь живее — используй их.',
+  'Начни ответ с обращения к другу — за его отсутствие снимают балл.',
+  'Следи за формой глагола в задании: «you prefer» — отвечай «I prefer».',
+  'Проговаривай окончания -s и -ed: их потеря — самая частая ошибка.',
+  'Лучше простое слово к месту, чем сложное наугад.',
+  'Заверши монолог выводом — «That’s all» тоже считается.',
+  'Перечитай план задания за 10 секунд до записи — пункты легко потерять.',
+  'Говори в среднем темпе: торопливость съедает окончания слов.',
+  'Один день пропуска в неделю не рвёт серию — заморозка спасёт.',
+  'Отвечай полными предложениями: обрывок фразой не считается.',
+]
+
+function dayTip(): string {
+  const day = Math.floor(Date.now() / 86400000)
+  return TIPS[day % TIPS.length]
+}
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -34,16 +68,16 @@ const pic = (key: string) => HOME_LAYOUT.pics.find((p) => p.key === key)!
 const box = (key: string) => HOME_LAYOUT.boxes.find((b) => b.key === key)!.style
 const icon = (key: string) => HOME_LAYOUT.icons.find((i) => i.key === key)!
 const txt = (key: string) => HOME_LAYOUT.texts[key]
+const px = (v: unknown) => parseFloat(String(v))
 
 /* Иконка из макета: SVG-контур вырезан из файла дословно. `strip` убирает
-   из группы элемент, который рисуем отдельно (чёрная подложка активного
-   пункта, число стрика). */
-function Ic({ k, strip, style, className }: { k: string; strip?: RegExp; style?: CSSProperties; className?: string }) {
+   из группы элемент, который рисуем отдельно (число стрика). */
+function Ic({ k, strip, style }: { k: string; strip?: RegExp; style?: CSSProperties }) {
   const i = icon(k)
   const svg = strip ? i.svg.replace(strip, '') : i.svg
   return (
     <span
-      className={`homev2__ic${className ? ` ${className}` : ''}`}
+      className="homev2__ic"
       style={{ ...i.style, ...style }}
       aria-hidden="true"
       dangerouslySetInnerHTML={{ __html: svg }}
@@ -61,7 +95,7 @@ function Pic({ k }: { k: string }) {
   )
 }
 
-function Txt({ k, children, style }: { k: string; children?: string; style?: CSSProperties }) {
+function Txt({ k, children, style, html }: { k: string; children?: string; style?: CSSProperties; html?: string }) {
   const t = txt(k)
   if (children !== undefined) {
     return (
@@ -70,7 +104,13 @@ function Txt({ k, children, style }: { k: string; children?: string; style?: CSS
       </span>
     )
   }
-  return <span className="homev2__t" style={{ ...t.style, ...style }} dangerouslySetInnerHTML={{ __html: t.html }} />
+  return (
+    <span
+      className="homev2__t"
+      style={{ ...t.style, ...style }}
+      dangerouslySetInnerHTML={{ __html: html ?? t.html }}
+    />
+  )
 }
 
 /* Кнопка макета: чёрная/белая плашка из файла — сама и есть кнопка,
@@ -82,6 +122,7 @@ function Btn({
   disabled,
   title,
   href,
+  style,
 }: {
   k: string
   label: string
@@ -89,18 +130,19 @@ function Btn({
   disabled?: boolean
   title?: string
   href?: string
+  style?: CSSProperties
 }) {
-  const style = box(k)
+  const s = { ...box(k), ...style }
   if (href) {
     return (
-      <a className="homev2__btn" style={style} href={href} target="_blank" rel="noreferrer" aria-label={label} title={title} />
+      <a className="homev2__btn" style={s} href={href} target="_blank" rel="noreferrer" aria-label={label} title={title} />
     )
   }
   return (
     <button
       type="button"
       className="homev2__btn"
-      style={style}
+      style={s}
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
@@ -109,40 +151,19 @@ function Btn({
   )
 }
 
-/* Кнопка рейла: зона нажатия — бокс иконки с полем 8 px. */
-function RailBtn({
-  k,
-  label,
-  onClick,
-  strip,
-  active,
-}: {
-  k: string
-  label: string
-  onClick: () => void
-  strip?: RegExp
-  active?: boolean
-}) {
-  const i = icon(k)
-  const px = (v: unknown) => parseFloat(String(v))
-  const pad = 8
-  return (
-    <button
-      type="button"
-      className={`homev2__rail${active ? ' homev2__rail--on' : ''}`}
-      style={{
-        left: px(i.style.left) - pad,
-        top: px(i.style.top) - pad,
-        width: px(i.style.width) + pad * 2,
-        height: px(i.style.height) + pad * 2,
-      }}
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-    >
-      <Ic k={k} strip={strip} style={{ left: pad, top: pad }} />
-    </button>
-  )
+/* Зона нажатия поверх иконки: тот же бокс, что у иконки. */
+function hit(s: CSSProperties): CSSProperties {
+  return { left: s.left, top: s.top, width: s.width, height: s.height }
+}
+
+interface Slide {
+  title: string
+  titleHtml?: string
+  text: string
+  btn: string
+  href?: string
+  onClick?: () => void
+  logo?: boolean
 }
 
 export function HomeScreen({
@@ -152,8 +173,6 @@ export function HomeScreen({
   onStats,
   onCalendar,
   onProfile,
-  theme,
-  onTheme,
 }: {
   onTrainer: () => void
   onSpeaking: () => void
@@ -161,13 +180,13 @@ export function HomeScreen({
   onStats: () => void
   onCalendar: () => void
   onProfile: () => void
-  theme: 'light' | 'dark' | 'auto'
-  onTheme: (t: 'light' | 'dark') => void
 }) {
   const [stats, setStats] = useState<MeStats | null>(null)
+  const [analytics, setAnalytics] = useState<MeAnalytics | null>(null)
   useEffect(() => {
     let alive = true
     void fetchMeStats().then((s) => alive && setStats(s))
+    void fetchMeAnalytics().then((a) => alive && setAnalytics(a))
     return () => {
       alive = false
     }
@@ -194,24 +213,54 @@ export function HomeScreen({
 
   const nick = currentUser()?.nickname ?? ''
   const streak = stats?.streak.days ?? null
-  /* Док темы: чёрный квадрат из макета стоит под активным пунктом. Режим
-     «авто» на макете не показан — подсвечиваем то, что сейчас на экране. */
-  const darkOn = theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  const sun = icon('navSun')
-  const moon = icon('navMoon')
-  const px = (v: unknown) => parseFloat(String(v))
-  const squareSize = px(sun.style.width) - 3.93
-  const square = (i: typeof sun): CSSProperties => ({
-    left: px(i.style.left) + px(i.style.width) / 2 - squareSize / 2,
-    top: px(i.style.top) + px(i.style.height) / 2 - squareSize / 2,
-    width: squareSize,
-    height: squareSize,
-    borderRadius: 11.3,
-    background: '#000',
-    border: '1px solid #fff',
-  })
-  const flameNo = txt('greeting') // стиль числа считаем от иконки, см. ниже
-  void flameNo
+
+  /* Слайды баннера: канал + три живые плитки прежней главной. */
+  const kinds = analytics?.kinds ?? {}
+  const kindList = Object.entries(kinds)
+  const attempts = kindList.reduce((s, [, k]) => s + k.attempts, 0)
+  const delta =
+    attempts > 0
+      ? Math.round(kindList.reduce((s, [, k]) => s + (k.recent_pct - k.avg_pct) * k.attempts, 0) / attempts)
+      : null
+  const rows = kindList.filter(([, k]) => k.attempts > 0)
+  const weakest = rows.length > 1 ? rows.reduce((a, b) => (b[1].recent_pct < a[1].recent_pct ? b : a))[0] : null
+
+  const slides: Slide[] = [
+    {
+      title: 'Присоединяйся к Telegram GoSpeak',
+      titleHtml: txt('tgTitle').html,
+      text: 'Разборы заданий, новый вариант, советы по ЕГЭ и обновления платформы',
+      btn: 'Перейти в канал',
+      href: TG_URL,
+      logo: true,
+    },
+    { title: 'Совет дня', text: dayTip(), btn: 'К тренажёру', onClick: onTrainer },
+    {
+      title: 'Твой прогресс',
+      text:
+        delta === null
+          ? 'Появится после первых занятий — сравним последние работы с твоим средним.'
+          : delta > 0
+            ? `Последние работы на ${delta}% лучше твоего среднего. Так держать.`
+            : delta < 0
+              ? `Последние работы на ${-delta}% ниже среднего — бывает, разберём.`
+              : 'Держишься ровно на своём среднем.',
+      btn: 'Смотреть',
+      onClick: onStats,
+    },
+    {
+      title: 'Фокус недели',
+      text: weakest
+        ? `${(KIND_RU[weakest] ?? weakest).replace(/^./, (c) => c.toUpperCase())} — твоя точка роста на этой неделе.`
+        : 'Реши пару заданий — подскажем, что подтянуть.',
+      btn: 'Тренировать',
+      onClick: onTrainer,
+    },
+  ]
+  const [slide, setSlide] = useState(0)
+  const cur = slides[slide]
+  const go = (d: number) => setSlide((s) => (s + d + slides.length) % slides.length)
+  const btnBox = box('btnTelegram')
 
   return (
     <div className="homev2">
@@ -224,33 +273,30 @@ export function HomeScreen({
         <Pic k="speaking" />
         <Pic k="demo" />
 
-        {/* рейл навигации и док темы */}
-        <span className="homev2__box homev2__box--rail" style={box('railNav')} />
-        <span className="homev2__box homev2__box--rail" style={box('railTheme')} />
-        <RailBtn k="navHome" label="Главная" onClick={() => undefined} active />
-        <RailBtn k="navCalendar" label="Календарь" onClick={onCalendar} />
-        <RailBtn k="navStats" label="Статистика" onClick={onStats} />
-        <RailBtn k="navSettings" label="Настройки" onClick={onProfile} />
-        <span className="homev2__box" style={square(darkOn ? moon : sun)} />
-        <RailBtn
-          k="navSun"
-          label="Светлая тема"
-          onClick={() => onTheme('light')}
-          strip={/<rect[^>]*\/>/}
-          active={!darkOn}
-        />
-        <RailBtn k="navMoon" label="Тёмная тема" onClick={() => onTheme('dark')} active={darkOn} />
-
         {/* шапка */}
         <Txt k="greeting">{`${greeting()}, ${nick}!`}</Txt>
-        <button type="button" className="homev2__streak" style={hit(icon('flame').style)} onClick={onCalendar} title="Серия занятий — открыть календарь" aria-label="Серия занятий">
+        <button
+          type="button"
+          className="homev2__streak"
+          style={hit(icon('flame').style)}
+          onClick={onCalendar}
+          title="Серия занятий — открыть календарь"
+          aria-label="Серия занятий"
+        >
           <Ic k="flame" strip={/<path[^>]*fill="white"[^>]*\/>/} style={{ left: 0, top: 0 }} />
           <span className="homev2__streakno">{streak ?? '—'}</span>
         </button>
         <span className="homev2__box" style={box('bellBg')} />
         <Ic k="bell" />
         <span className="homev2__box" style={box('avatarBg')} />
-        <button type="button" className="homev2__avatar" style={pic('avatar').box} onClick={onProfile} title="Личный кабинет" aria-label="Личный кабинет">
+        <button
+          type="button"
+          className="homev2__avatar"
+          style={pic('avatar').box}
+          onClick={onProfile}
+          title="Личный кабинет"
+          aria-label="Личный кабинет"
+        >
           <Pic k="avatar" />
         </button>
 
@@ -270,26 +316,57 @@ export function HomeScreen({
         <Txt k="aiBtn" />
         <Ic k="arrowAi" />
 
-        {/* баннер Telegram */}
-        <Txt k="tgTitle" />
-        <Txt k="tgText" />
-        {TG_URL ? (
-          <Btn k="btnTelegram" label="Перейти в канал" href={TG_URL} />
-        ) : (
-          <Btn k="btnTelegram" label="Перейти в канал" disabled title="Канала пока нет" />
-        )}
-        <Ic k="tgLogo" />
-        <Txt k="tgBtn" />
-        <Ic k="arrowTelegram" />
-        <span className="homev2__box" style={box('prevCircle')} />
-        <span className="homev2__box" style={box('nextCircle')} />
+        {/* баннер-слайдер */}
+        <div className="homev2__slide" key={slide}>
+          {cur.titleHtml ? (
+            <Txt k="tgTitle" html={cur.titleHtml} />
+          ) : (
+            <Txt k="tgTitle">{cur.title}</Txt>
+          )}
+          <Txt k="tgText" style={{ whiteSpace: 'normal', width: 310 }}>
+            {cur.text}
+          </Txt>
+          {cur.href ? (
+            <Btn k="btnTelegram" label={cur.btn} href={cur.href} />
+          ) : (
+            <Btn k="btnTelegram" label={cur.btn} onClick={cur.onClick} />
+          )}
+          {cur.logo && <Ic k="tgLogo" />}
+          <Txt
+            k="tgBtn"
+            style={cur.logo ? undefined : { left: px(btnBox.left) + 28 }}
+          >
+            {cur.btn}
+          </Txt>
+          <Ic k="arrowTelegram" />
+        </div>
+        <button
+          type="button"
+          className="homev2__box homev2__arrow"
+          style={box('prevCircle')}
+          onClick={() => go(-1)}
+          aria-label="Предыдущий слайд"
+        />
+        <button
+          type="button"
+          className="homev2__box homev2__arrow"
+          style={box('nextCircle')}
+          onClick={() => go(1)}
+          aria-label="Следующий слайд"
+        />
         <Ic k="chevPrev" />
         <Ic k="chevNext" />
-        <span className="homev2__box" style={box('dot1')} />
-        <span className="homev2__box" style={box('dot2')} />
-        <span className="homev2__box" style={box('dot3')} />
-        <span className="homev2__box" style={box('dot4')} />
-
+        {(['dot1', 'dot2', 'dot3', 'dot4'] as const).map((k, i) => (
+          <button
+            key={k}
+            type="button"
+            className="homev2__box homev2__dot"
+            style={{ ...box(k), background: i === slide ? '#9169EE' : '#D6D2EB' }}
+            onClick={() => setSlide(i)}
+            aria-label={`Слайд ${i + 1}: ${slides[i].title}`}
+            aria-current={i === slide ? 'true' : undefined}
+          />
+        ))}
         {/* правая колонка */}
         <Txt k="trainerTitle" />
         <Txt k="trainerText" />
@@ -311,9 +388,4 @@ export function HomeScreen({
       </div>
     </div>
   )
-}
-
-/* Зона нажатия поверх иконки: тот же бокс, что у иконки. */
-function hit(s: CSSProperties): CSSProperties {
-  return { left: s.left, top: s.top, width: s.width, height: s.height }
 }

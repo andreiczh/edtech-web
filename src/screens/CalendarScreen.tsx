@@ -133,9 +133,6 @@ export function CalendarScreen() {
               </div>
             ))}
           </div>
-          <p className="calcard__legend">
-            🔥 день с занятием · ❄ заморозка спасла серию · обводка — сегодня
-          </p>
         </div>
 
         <div className="calside">

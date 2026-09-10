@@ -157,6 +157,15 @@ export function ProfileScreen({
                   </>
                 )}
               </div>
+              {/* Аккаунт — здесь же, справа в шапке: ссылка на политику и выход. */}
+              <div className="profhead__actions">
+                <a href="/privacy.html" target="_blank" rel="noreferrer">
+                  Как хранятся твои данные
+                </a>
+                <button type="button" className="proflogout" onClick={doLogout}>
+                  Выйти из аккаунта
+                </button>
+              </div>
             </div>
             {nickChanged && (
               <p className="profnote">
@@ -166,6 +175,10 @@ export function ProfileScreen({
             {nickError && <p className="profnote profnote--err">{nickError}</p>}
 
             <div className="profstats">
+              <div>
+                <span>Серия сейчас</span>
+                <b>🔥 {streak ? `${streak.days} ${streak.days === 1 ? 'день' : 'дней'}` : dash}</b>
+              </div>
               <div>
                 <span>Лучшая серия</span>
                 <b>{streak ? `${streak.best} ${streak.best === 1 ? 'день' : 'дней'}` : dash}</b>
@@ -183,6 +196,15 @@ export function ProfileScreen({
                 <b>{user?.exam === 'oge' ? 'ОГЭ' : 'ЕГЭ'}</b>
               </div>
             </div>
+            <p className="profstats__hint">
+              {streak
+                ? streak.active_today
+                  ? 'Сегодня зачтено — серия живёт. Возвращайся завтра.'
+                  : 'Загляни до полуночи по Москве — серия продлится.'
+                : statsFailed
+                  ? 'Нет связи с сервером.'
+                  : 'Считаю…'}
+            </p>
           </div>
 
           {/* -------------------------------------------------- Настройки */}
@@ -310,37 +332,6 @@ export function ProfileScreen({
           </div>
         </div>
 
-        {/* ------------------------------------------------ Правая колонка */}
-        <div className="profpage__side">
-          <div className="profstreak">
-            <span className="profstreak__ic">🔥</span>
-            <b>Стрик {streak ? streak.days : (dash ?? '…')} {streak && streak.days === 1 ? 'день' : 'дней'}</b>
-            <p>
-              {streak
-                ? streak.active_today
-                  ? 'Сегодня зачтено — серия живёт. Возвращайся завтра.'
-                  : 'Загляни до полуночи по Москве — серия продлится.'
-                : statsFailed
-                  ? 'Нет связи с сервером.'
-                  : 'Считаю…'}
-            </p>
-          </div>
-          <div className="calcard">
-            <p className="calside__eyebrow">Аккаунт</p>
-            <p className="profnote" style={{ margin: '0 0 12px' }}>
-              Ник + пароль, почты нет. Пароль знаешь только ты — потерял, попроси сброс у
-              владельца.
-            </p>
-            <p className="profnote" style={{ margin: '0 0 12px' }}>
-              <a href="/privacy.html" target="_blank" rel="noreferrer">
-                Как хранятся твои данные
-              </a>
-            </p>
-            <button type="button" className="proflogout" onClick={doLogout}>
-              Выйти из аккаунта
-            </button>
-          </div>
-        </div>
       </div>
 
       {confirming && (
