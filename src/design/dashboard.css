@@ -2571,3 +2571,22 @@
     display: contents;
   }
 }
+
+/* Рейл 10.09 (вечер): два отдельных блока, как в утверждённом виде — меню по
+   центру колонки, док темы отдельной плашкой внизу. Перебивает «склеенные»
+   радиусы v3-слоя. */
+.railwrap .rail,
+.railwrap .themedock {
+  border-radius: 22px;
+  margin-top: 0;
+  padding: 14px;
+}
+.railwrap .themedock::before {
+  display: none;
+}
+@media (max-width: 760px) {
+  .railwrap .rail,
+  .railwrap .themedock {
+    padding: 10px;
+  }
+}

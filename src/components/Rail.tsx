@@ -253,17 +253,18 @@ export function Rail({
     { id: 'light', icon: 'sun', title: 'Светлая тема', go: () => onTheme('light') },
     { id: 'dark', icon: 'moon', title: 'Тёмная тема', go: () => onTheme('dark') },
   ]
+  /* Два отдельных блока: меню — по центру колонки, док темы — внизу. */
   return (
     <div className="railwrap">
-      <span className="lspacer lspacer--top" />
+      <span className="lspacer" />
       <GlassGroup items={items} activeId={active} className="rail" label="Основная навигация" />
+      <span className="lspacer" />
       <GlassGroup
         items={themeItems}
         activeId={dark ? 'dark' : 'light'}
-        className="themedock themedock--joined"
+        className="themedock"
         label="Тема оформления"
       />
-      <span className="lspacer" />
     </div>
   )
 }
