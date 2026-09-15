@@ -33,6 +33,7 @@ import {
   syncServerProgress,
   type TaskId,
 } from './ege2/tasks'
+import { favoriteSessionItems, syncFavorites } from './ege2/favorites'
 import { isMaxLaunch } from './max/bridge'
 import { AdminScreen } from './screens/AdminScreen'
 import { CalendarScreen } from './screens/CalendarScreen'
@@ -59,7 +60,9 @@ type Route =
   | { name: 'profile' }
   /** nonce пересоздаёт сессию при «Пройти ещё раз» — иначе React сохранил бы
       состояние старой (индекс, результаты) и итоги не сбросились бы. */
-  | { name: 'session'; items: SessionItem[]; nonce: number }
+  | { name: 'session'; items: SessionItem[]; nonce: number; fav?: boolean }
+  /* fav — серия «Избранный вариант»: «Пройти ещё раз» собирает её заново из
+     избранного, а не из банка номера. */
 
 function initialRoute(): Route {
   // /?admin — скрытый вход в админку; сервер всё равно требует ADMIN_KEY.
@@ -100,12 +103,14 @@ export default function App() {
     if (currentUser()) {
       void syncServerProgress(identityId())
       void syncSettingsFromServer()
+      void syncFavorites()
     }
   }, [])
 
   const enterApp = useCallback((_u: AuthUser) => {
     void syncServerProgress(identityId())
     void syncSettingsFromServer()
+    void syncFavorites()
     setRoute({ name: 'home' })
   }, [])
 
@@ -114,6 +119,7 @@ export default function App() {
   const enterAfterRegister = useCallback((_u: AuthUser) => {
     void syncServerProgress(identityId())
     void syncSettingsFromServer()
+    void syncFavorites()
     setRoute({ name: 'intro' })
   }, [])
 
@@ -125,6 +131,7 @@ export default function App() {
     if (created) updateSettings({ corpusConsent: false })
     void syncServerProgress(identityId())
     void syncSettingsFromServer()
+    void syncFavorites()
     setRoute(created ? { name: 'intro' } : { name: 'home' })
   }, [])
 
@@ -143,9 +150,19 @@ export default function App() {
     setRoute({ name: 'session', items: pickDemoItems(), nonce: Date.now() })
   }, [])
 
+  /* «Избранный вариант»: серия из заданий, отмеченных звёздочкой. */
+  const startFavorites = useCallback(() => {
+    const items = favoriteSessionItems()
+    if (items.length) setRoute({ name: 'session', items, nonce: Date.now(), fav: true })
+  }, [])
+
   const restartSession = useCallback(() => {
     setRoute((r) => {
       if (r.name !== 'session') return r
+      if (r.fav) {
+        const items = favoriteSessionItems()
+        return items.length ? { name: 'session', items, nonce: Date.now(), fav: true } : { name: 'ege' }
+      }
       const taskId = r.items[0]?.taskId
       if (taskId === undefined) return { name: 'ege' }
       const sameTask = r.items.every((i) => i.taskId === taskId)
@@ -268,6 +285,7 @@ export default function App() {
               <EgeMenuScreen
                 onOpenTask={startSession}
                 onDemo={startDemo}
+                onFavorites={startFavorites}
                 onStats={() => setRoute({ name: 'stats' })}
               />
             )}

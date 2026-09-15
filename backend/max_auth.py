@@ -162,7 +162,8 @@ def account_id(max_user_id: str | int, salt: str) -> str:
 
 
 def nickname(max_user_id: str | int, salt: str) -> str:
-    """Ник только из латинских букв (правило /auth/register), стабильный для
-    одного человека — повторный вход не плодит аккаунты и не ловит коллизий."""
+    """Запасной ник — если все предложенные фронтом заняты. Только латинские
+    буквы и 16 знаков (правило main.NICK_MIN: ник длиннее любого приветствия),
+    стабильный для одного человека — повторный вход не ловит коллизий."""
     digest = hashlib.sha256(f"nick:{salt}:{max_user_id}".encode()).digest()
-    return "Max" + "".join(chr(ord("a") + b % 26) for b in digest[:10])
+    return "Max" + "".join(chr(ord("a") + b % 26) for b in digest[:13])

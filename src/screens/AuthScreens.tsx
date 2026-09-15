@@ -299,7 +299,7 @@ export function LoginScreen({
           className="auth2-field"
           value={nickname}
           onChange={(e) => setNickname(e.target.value)}
-          placeholder="SwiftOtter"
+          placeholder="CheerfulHummingbird"
           aria-label="Никнейм"
           maxLength={32}
         />

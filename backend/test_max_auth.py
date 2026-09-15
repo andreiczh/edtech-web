@@ -118,7 +118,7 @@ check(a1 == max_auth.account_id("987654321", "s1") and a1.startswith("max_") and
 check(a1 != max_auth.account_id(987654321, "s2"), "id зависит от соли")
 check(a1 != max_auth.account_id(987654322, "s1"), "id зависит от пользователя")
 n1 = max_auth.nickname(987654321, "s1")
-check(re.fullmatch(r"[A-Za-z]{4,32}", n1) is not None and n1 == max_auth.nickname(987654321, "s1"),
+check(re.fullmatch(r"[A-Za-z]{15,32}", n1) is not None and n1 == max_auth.nickname(987654321, "s1"),
       "запасной ник: только буквы и стабилен", n1)
 check(n1 != max_auth.nickname(987654322, "s1"), "запасной ник у разных людей разный")
 
@@ -183,20 +183,20 @@ def why(res, err) -> str:
 # ------------------------------------------------------------ /auth/max
 
 res, err = call(main.auth_max(req(), {"init_data": launch(),
-                                      "nicknames": ["BraveFalcon", "bad nick", 42]}))
-check(err is None and res["created"] is True and res["nickname"] == "BraveFalcon"
+                                      "nicknames": ["ShortNick", "BraveNightingale", "bad nick", 42]}))
+check(err is None and res["created"] is True and res["nickname"] == "BraveNightingale"
       and res["id"].startswith("max_"),
       "первый вход создаёт аккаунт с предложенным ником", why(res, err))
 acc = res["id"] if res else ""
 check(storage.account_exists(acc), "аккаунт виден шлюзу API (account_exists)")
 
-res, err = call(main.auth_max(req(), {"init_data": launch(), "nicknames": ["CalmOtter"]}))
+res, err = call(main.auth_max(req(), {"init_data": launch(), "nicknames": ["CalmHummingbird"]}))
 check(err is None and res["created"] is False and res["id"] == acc
-      and res["nickname"] == "BraveFalcon",
+      and res["nickname"] == "BraveNightingale",
       "повторный вход — тот же аккаунт и тот же ник", why(res, err))
 
 bob = {"id": 777001, "first_name": "Боб"}
-res, err = call(main.auth_max(req(), {"init_data": launch(user=bob), "nicknames": ["BraveFalcon"]}))
+res, err = call(main.auth_max(req(), {"init_data": launch(user=bob), "nicknames": ["BraveNightingale"]}))
 check(err is None and res["created"] and res["id"] != acc
       and res["nickname"] == max_auth.nickname(777001, main._max_salt()),
       "занятый ник — берётся запасной из хеша", why(res, err))
@@ -220,7 +220,7 @@ res, err = call(main.auth_max(req(), {"init_data": launch()}))
 check(err is not None and err.status_code == 503, "без токена на сервере — 503", why(res, err))
 os.environ["MAX_BOT_TOKEN"] = saved
 
-res, err = call(main.auth_login(req(), {"nickname": "BraveFalcon", "password": "max"}))
+res, err = call(main.auth_login(req(), {"nickname": "BraveNightingale", "password": "max"}))
 check(err is not None and err.status_code == 401,
       "пароля у MAX-аккаунта нет: по нику он не открывается", why(res, err))
 
@@ -305,6 +305,18 @@ for head, want in (
 ):
     got = main._stt_upload_name(head)
     check(got == want, f"распознаванию уходит {want[0]}", str(got))
+
+# ------------------------------------------------------------ правило ника
+
+check(main._nick_ok("CheerfulHummingbird") and not main._nick_ok("BraveFalcon")
+      and not main._nick_ok("Cheerful Hummingbird") and not main._nick_ok("Cheerful4Hummingbird"),
+      "правило ника: от 15 букв, только латиница, без пробелов и цифр")
+front = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "auth",
+                          "nickname.ts"), encoding="utf-8").read()
+m = re.search(r"export const NICK_MIN = (\d+)", front)
+check(m is not None and int(m.group(1)) == main.NICK_MIN,
+      "минимальная длина ника на фронте и на сервере одна",
+      m.group(0) if m else "NICK_MIN во фронте не найден")
 
 print()
 print("ВСЁ ЗЕЛЁНОЕ" if not failed else f"ПРОВАЛОВ: {failed}")

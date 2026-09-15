@@ -637,6 +637,8 @@
   font-size: 21px;
   font-weight: 800;
   color: var(--card-ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .profhead__regen {
   appearance: none;
@@ -1067,6 +1069,8 @@
   flex: 1;
   min-width: 0;
   user-select: all;
+  /* Ник от 15 букв одним словом: на узком экране переносится, а не вылезает */
+  overflow-wrap: anywhere;
 }
 .auth2-regen {
   appearance: none;
@@ -1162,6 +1166,7 @@
 .auth2-keep b {
   font-size: 20px;
   color: #121214;
+  overflow-wrap: anywhere;
 }
 .auth2-keep span {
   color: #77768a;

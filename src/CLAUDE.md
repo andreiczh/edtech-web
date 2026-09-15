@@ -65,3 +65,12 @@ React 19 + Vite 6 + TypeScript, **обычный CSS** (`index.css`). Tailwind �
   (`makeRecorder`), blob подписывается `recordedType`, имя файла —
   `audioFileName`. iPhone пишет mp4, а не webm; новые места записи — только
   через эти три функции. Подробности — `docs/DECISIONS.md` §6.37.
+
+## Ник и избранное (16.09.2026)
+- Ник генерирует `auth/nickname.ts` (два слова, от 15 букв — длиннее любого
+  приветствия из `account/greeting.ts`); `auth.ts` его только реэкспортирует.
+- Звёздочка — `components/FavoriteStar.tsx` в шапке `TaskScreen`; данные и
+  синхронизация — `ege2/favorites.ts`, чистая логика — `ege2/favoritesCore.ts`
+  (тест в node). «Избранный вариант» — карточка ИЗБРАННОЕ в `EgeMenuScreen`;
+  серия помечена `fav` в маршруте, и «Пройти ещё раз» собирает её заново.
+  Подробности — `docs/DECISIONS.md` §6.38.

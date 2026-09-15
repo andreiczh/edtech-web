@@ -929,6 +929,21 @@ def _note_reply_bg(device: str | None) -> None:
 # библиотеки: для паролей от аккаунтов без денег и почты этого достаточно,
 # а зависимость не добавляется.
 
+# Ник: два английских слова без цифр — и длиннее любого приветствия главной
+# (16.09.2026, просьба владельца): он стоит под «Good afternoon,» и обязан быть
+# длиннее этой строки. Генерирует фронт (src/auth/nickname.ts, там же свой
+# NICK_MIN), сервер проверяет то же правило; за совпадением следит
+# test_max_auth.py. Старые короткие ники входят как раньше — правило стоит
+# только на создании и смене.
+NICK_MIN = 15
+_NICK_RE = re.compile(r"[A-Za-z]{%d,32}" % NICK_MIN)
+_NICK_RULE = f"Никнейм — два английских слова без цифр, от {NICK_MIN} букв; он генерируется кнопкой."
+
+
+def _nick_ok(nickname: str) -> bool:
+    return bool(_NICK_RE.fullmatch(nickname))
+
+
 def _hash_pw(password: str) -> str:
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 120_000)
@@ -960,11 +975,8 @@ async def auth_register(request: Request, body: dict = Body(...)):
     # Только английские буквы, без цифр: ник генерируется из двух слов, руками
     # его не вводят (23.07.2026). Фронт это и так не даёт, но API обязан
     # проверять сам — в базу не должно попадать то, что нельзя сгенерировать.
-    if not re.fullmatch(r"[A-Za-z]{4,32}", nickname):
-        raise HTTPException(
-            status_code=422,
-            detail="Никнейм — два английских слова без цифр, он генерируется кнопкой.",
-        )
+    if not _nick_ok(nickname):
+        raise HTTPException(status_code=422, detail=_NICK_RULE)
     # 8 символов, а не 4 (03.08.2026). Ник у нас генерируется из закрытого
     # списка ~2500 комбинаций, то есть он ПУБЛИЧНО угадываем — вся защита
     # аккаунта держится на пароле. Четырёхсимвольный перебирается за минуты
@@ -1052,7 +1064,7 @@ async def auth_max(request: Request, body: dict = Body(...)):
     # слов, что при регистрации); последний шанс — стабильный ник из хеша.
     offered = body.get("nicknames") if isinstance(body.get("nicknames"), list) else []
     candidates = [n for n in offered[:6]
-                  if isinstance(n, str) and re.fullmatch(r"[A-Za-z]{4,32}", n)]
+                  if isinstance(n, str) and _nick_ok(n)]
     candidates.append(max_auth.nickname(max_uid, _max_salt()))
     # Пароля у MAX-аккаунта нет: вместо соли не hex, _check_pw на нём всегда False.
     pass_hash = "max$" + secrets.token_hex(32)
@@ -1281,6 +1293,64 @@ async def me_settings_post(body: dict = Body(...),
     return {"settings": clean}
 
 
+# ------------------------------------------------------- Избранные задания
+#
+# Звёздочка в правом верхнем углу задания (и в серии тренажёра, и в
+# демо-варианте) кладёт вариант в избранное; из отмеченного фронт собирает
+# «избранный вариант». Хранится у аккаунта, а не в браузере: как прогресс,
+# избранное следует за человеком между устройствами. С банком заданий сервер
+# вариант не сверяет — часть вариантов встроена во фронт; удалённые из банка
+# фронт отсеивает сам, когда собирает серию.
+
+_FAV_MAX = 200
+_FAV_ID_RE = re.compile(r"[A-Za-z0-9_.:\-]{1,64}")
+
+
+def _fav_out(rows) -> dict:
+    return {"items": [{"task_id": t, "variant_id": v, "at": at} for v, t, at in rows]}
+
+
+@app.get("/me/favorites")
+async def me_favorites_get(x_device: str | None = Header(None),
+                           x_admin_key: str | None = Header(None)):
+    await _require_account(x_device, x_admin_key)
+    if not (_storage_ok and x_device):
+        return {"items": []}
+    try:
+        rows = await asyncio.to_thread(storage.favorites_list, x_device)
+    except Exception as e:  # noqa: BLE001
+        print(f"[favorites] список не прочитался ({type(e).__name__}) — отдаю пустой")
+        return {"items": []}
+    return _fav_out(rows)
+
+
+@app.post("/me/favorites")
+async def me_favorites_post(body: dict = Body(...),
+                            x_device: str | None = Header(None),
+                            x_admin_key: str | None = Header(None)):
+    """Поставить ({"on": true}) или снять звёздочку. Отвечает всем списком —
+    фронт сверяет с ним свою копию."""
+    await _require_account(x_device, x_admin_key)
+    if not x_device:
+        raise HTTPException(status_code=401, detail="Нужен аккаунт.")
+    try:
+        task_id = int(body.get("task_id"))
+    except (TypeError, ValueError):
+        task_id = 0
+    variant_id = str(body.get("variant_id") or "")
+    if task_id not in (39, 40, 41, 42) or not _FAV_ID_RE.fullmatch(variant_id):
+        raise HTTPException(status_code=422, detail="Такого задания нет.")
+    on = body.get("on", True) is not False
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна — избранное не сохранилось.")
+    ok = await asyncio.to_thread(storage.favorite_set, x_device, task_id, variant_id, on, _FAV_MAX)
+    if not ok:
+        raise HTTPException(status_code=422,
+                            detail=f"В избранном уже {_FAV_MAX} заданий — убери лишние.")
+    rows = await asyncio.to_thread(storage.favorites_list, x_device)
+    return _fav_out(rows)
+
+
 @app.get("/me/analytics")
 async def me_analytics(x_device: str | None = Header(None),
                        x_admin_key: str | None = Header(None)):
@@ -1312,11 +1382,8 @@ async def me_nickname(request: Request, body: dict = Body(...),
     if not x_device:
         raise HTTPException(status_code=401, detail="Нужен аккаунт.")
     nickname = str(body.get("nickname") or "").strip()
-    if not re.fullmatch(r"[A-Za-z]{4,32}", nickname):
-        raise HTTPException(
-            status_code=422,
-            detail="Никнейм — два английских слова без цифр, он генерируется кнопкой.",
-        )
+    if not _nick_ok(nickname):
+        raise HTTPException(status_code=422, detail=_NICK_RULE)
     if not _storage_ok:
         raise HTTPException(status_code=503, detail="База недоступна — попробуй чуть позже.")
     try:

@@ -1,7 +1,8 @@
 /**
  * Экран выбора задания ЕГЭ (фото 3 макета).
  *
- * Шесть карточек: четыре номера, DEMO и STATS. Клик по номеру запускает СЕССИЮ —
+ * Семь карточек: четыре номера, DEMO, ИЗБРАННОЕ (серия из заданий, отмеченных
+ * звёздочкой, 16.09.2026) и STATS. Клик по номеру запускает СЕССИЮ —
  * серию из пяти ранее не решённых вариантов этого типа (пожелание пользователя),
  * поэтому прогресс на карточке считается по вариантам: «3/5».
  *
@@ -9,9 +10,19 @@
  * только приглушаем, а не блокируем: блокировка по данным, которых нет на
  * сервере, отняла бы задание из-за очищенного кэша.
  */
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { CardButton } from '../design/ui'
+import { favoriteSessionItems, useFavorites } from '../ege2/favorites'
 import { TASKS, TASK_ORDER, taskProgress, type TaskId } from '../ege2/tasks'
+
+/** «3 задания», «5 заданий», «21 задание». */
+function tasksWord(n: number): string {
+  const d = n % 10
+  const dd = n % 100
+  if (d === 1 && dd !== 11) return 'задание'
+  if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) return 'задания'
+  return 'заданий'
+}
 
 /* Прокрутки здесь нет — по прямой просьбе: «всё должно стоять на одном экране».
    Высоту диктует сетка (.cardgrid делит остаток между рядами, 3×2 и 2×3), а
@@ -87,12 +98,19 @@ function TaskCard({
 export function EgeMenuScreen({
   onOpenTask,
   onDemo,
+  onFavorites,
   onStats,
 }: {
   onOpenTask: (id: TaskId) => void
   onDemo: () => void
+  /** «Избранный вариант» — серия из заданий со звёздочкой */
+  onFavorites: () => void
   onStats: () => void
 }) {
+  const favorites = useFavorites()
+  // Считаем то, что реально пойдёт в серию: удалённые из банка и «скоро» — мимо.
+  const favCount = useMemo(() => favoriteSessionItems().length, [favorites])
+
   /* Отметки ставит сессия, а меню при возврате монтируется заново — этого
      хватает. Слушатель фокуса добирает случай, когда вкладку переключали. */
   const [progress, setProgress] = useState(() =>
@@ -110,7 +128,7 @@ export function EgeMenuScreen({
   return (
     <div className="screenbody">
       <div className="screen__body" style={BODY}>
-        <div className="cardgrid">
+        <div className="cardgrid cardgrid--menu">
           {progress.map((p) => (
             <TaskCard key={p.id} id={p.id} progress={p} next={p.id === next} onOpen={onOpenTask} />
           ))}
@@ -122,6 +140,14 @@ export function EgeMenuScreen({
               return `№${open[0]}–${open[open.length - 1]} подряд`
             })()}
             onClick={onDemo}
+          />
+
+          <CardButton
+            title="ИЗБРАННОЕ"
+            sub={favCount ? `${favCount} ${tasksWord(favCount)} подряд` : 'отмечай ☆ в задании'}
+            onClick={onFavorites}
+            disabled={!favCount}
+            fit
           />
 
           <CardButton
@@ -140,7 +166,8 @@ export function EgeMenuScreen({
           <p style={{ margin: 0 }}>
             Каждый номер — серия из пяти вариантов с общим разбором в конце. Отметки о
             пройденном хранятся только в этом браузере. У №39 разбор сверяет слова с текстом —
-            произношение по записи не оценивается.
+            произношение по записи не оценивается. Звёздочка в правом верхнем углу задания
+            добавляет его в избранное: из отмеченных собирается «Избранное» — свой вариант.
           </p>
         </div>
       </div>

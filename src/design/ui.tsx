@@ -121,21 +121,24 @@ export function CardButton({
   onClick,
   ghost,
   disabled,
+  fit,
 }: {
   title: ReactNode
   sub?: ReactNode
   onClick?: () => void
   ghost?: boolean
   disabled?: boolean
+  /** Длинный заголовок: кегль подгоняется под ширину карточки, а не окна */
+  fit?: boolean
 }) {
   return (
     <button
       type="button"
-      className={`card2 card2--button${ghost ? ' card2--ghost' : ''}`}
+      className={`card2 card2--button${ghost ? ' card2--ghost' : ''}${fit ? ' card2--fit' : ''}`}
       onClick={onClick}
       disabled={disabled}
     >
-      <span className="card2__title">{title}</span>
+      <span className={`card2__title${fit ? ' card2__title--fit' : ''}`}>{title}</span>
       {sub && <span className="card2__sub">{sub}</span>}
     </button>
   )

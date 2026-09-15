@@ -18,6 +18,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 
+import { greeting } from '../account/greeting'
 import { fetchMeAnalytics, fetchMeStats, type MeAnalytics, type MeStats } from '../account/me'
 import { currentUser } from '../auth/auth'
 import { HOME_LAYOUT, STAGE_H, STAGE_W } from './homeV2Layout'
@@ -54,14 +55,6 @@ const TIPS = [
 function dayTip(): string {
   const day = Math.floor(Date.now() / 86400000)
   return TIPS[day % TIPS.length]
-}
-
-function greeting(): string {
-  const h = new Date().getHours()
-  if (h < 5) return 'Good night'
-  if (h < 12) return 'Good morning'
-  if (h < 18) return 'Good afternoon'
-  return 'Good evening'
 }
 
 const pic = (key: string) => HOME_LAYOUT.pics.find((p) => p.key === key)!

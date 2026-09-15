@@ -265,6 +265,13 @@ def ensure_schema() -> None:
         " id TEXT PRIMARY KEY, dispute_id TEXT NOT NULL, mime TEXT NOT NULL,"
         " data TEXT NOT NULL, bytes INTEGER NOT NULL, created_at TEXT NOT NULL)",
         "CREATE INDEX IF NOT EXISTS idx_shots_dispute ON dispute_shots(dispute_id)",
+        # Избранные задания (16.09.2026): звёздочка в правом верхнем углу
+        # задания. Строка на (ученик, вариант), порядок — по времени отметки;
+        # из отмеченного фронт собирает «избранный вариант».
+        "CREATE TABLE IF NOT EXISTS favorites ("
+        " student_id TEXT NOT NULL, variant_id TEXT NOT NULL,"
+        " task_id INTEGER NOT NULL, created_at TEXT NOT NULL,"
+        " PRIMARY KEY (student_id, variant_id))",
     ):
         _exec(ddl)
 
@@ -524,6 +531,32 @@ def save_settings(student_id: str, data: str) -> None:
           " ON CONFLICT (student_id) DO UPDATE SET data=excluded.data,"
           " updated_at=excluded.updated_at",
           (student_id, data, _now()))
+
+
+def favorites_list(student_id: str) -> list:
+    """Избранные задания ученика: (variant_id, task_id, created_at) по времени."""
+    return _exec("SELECT variant_id, task_id, created_at FROM favorites"
+                 " WHERE student_id=? ORDER BY created_at", (student_id,)).fetchall()
+
+
+def favorite_set(student_id: str, task_id: int, variant_id: str, on: bool,
+                 limit: int = 200) -> bool:
+    """Поставить или снять звёздочку. Повторная постановка ничего не меняет
+    (время первой отметки сохраняется). False — упёрлись в потолок избранного."""
+    if not on:
+        _exec("DELETE FROM favorites WHERE student_id=? AND variant_id=?",
+              (student_id, variant_id))
+        return True
+    if _exec("SELECT 1 FROM favorites WHERE student_id=? AND variant_id=?",
+             (student_id, variant_id)).fetchone():
+        return True
+    (n,) = _exec("SELECT COUNT(*) FROM favorites WHERE student_id=?", (student_id,)).fetchone()
+    if n >= limit:
+        return False
+    _exec("INSERT INTO favorites(student_id, variant_id, task_id, created_at)"
+          " VALUES(?,?,?,?) ON CONFLICT (student_id, variant_id) DO NOTHING",
+          (student_id, variant_id, task_id, _now()))
+    return True
 
 
 def reset_password(nickname: str, pass_hash: str) -> bool:
@@ -1443,9 +1476,11 @@ def dispute_resolve(did: str, status: str, verdict: str, verdict_score: int,
 # invites, pron_samples, voice_daily и meta добавлены 27.08.2026: старый список
 # молча терял коды доступа и копилку произношения — вскрылось, когда Neon встал
 # на паузу и бэкап оказался единственной копией данных.
+# favorites — с 16.09.2026, вместе с самой таблицей.
 _BACKUP_TABLES = ("students", "accounts", "results", "mistakes", "digests",
                   "tasks", "usage_daily", "activity_days", "settings", "disputes",
-                  "invites", "pron_samples", "voice_daily", "meta", "labeled42")
+                  "invites", "pron_samples", "voice_daily", "meta", "labeled42",
+                  "favorites")
 
 
 def dump_all(with_images: bool = False) -> dict:

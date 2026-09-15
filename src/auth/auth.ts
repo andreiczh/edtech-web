@@ -11,6 +11,7 @@
  */
 import { backendUnreachableMessage, httpErrorMessage } from '../backendError'
 import { deviceId } from '../ege2/device'
+import { randomNickname } from './nickname'
 
 const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
 const KEY = 'pingo.auth.v1'
@@ -68,35 +69,12 @@ export function identityId(): string {
 
 /* ------------------------------------------------------------- Никнеймы
  *
- * Строго два английских слова, прилагательное + существительное, БЕЗ цифр
- * (требование владельца, 23.07.2026). Руками ник не вводится вовсе — только
- * генерация, поэтому занятые имена решаются не человеком, а тихим повтором
- * в register(). Списки расширены: без цифр комбинаций меньше, чем было.
+ * Генерация — в auth/nickname.ts: два слова без цифр и длиннее любого
+ * приветствия главной (16.09.2026). Здесь только реэкспорт для прежних
+ * импортов; занятые имена register() решает тихим повтором.
  */
 
-const ADJECTIVES = [
-  'Brave', 'Calm', 'Clever', 'Bright', 'Gentle', 'Happy', 'Kind', 'Lucky',
-  'Mighty', 'Noble', 'Proud', 'Quick', 'Quiet', 'Royal', 'Shiny', 'Smart',
-  'Sunny', 'Swift', 'Warm', 'Wild', 'Witty', 'Bold', 'Cosmic', 'Golden',
-  'Silver', 'Velvet', 'Cozy', 'Breezy', 'Merry', 'Frosty', 'Amber', 'Azure',
-  'Coral', 'Crimson', 'Daring', 'Dreamy', 'Eager', 'Fluffy', 'Gleaming',
-  'Humble', 'Jolly', 'Lively', 'Misty', 'Peachy', 'Rosy', 'Sleek', 'Tender',
-  'Vivid', 'Zesty', 'Snowy',
-]
-const NOUNS = [
-  'Falcon', 'Tiger', 'Panda', 'Dolphin', 'Comet', 'Maple', 'River', 'Meadow',
-  'Pearl', 'Cloud', 'Ember', 'Breeze', 'Harbor', 'Willow', 'Aurora', 'Canyon',
-  'Fox', 'Owl', 'Lark', 'Otter', 'Pine', 'Star', 'Moon', 'Wave', 'Stone',
-  'Leaf', 'Spark', 'Drift', 'Bloom', 'Badger', 'Beacon', 'Cedar', 'Clover',
-  'Coyote', 'Crane', 'Fern', 'Glacier', 'Heron', 'Lagoon', 'Lynx', 'Orchid',
-  'Osprey', 'Puffin', 'Raven', 'Sequoia', 'Sparrow', 'Thistle', 'Tundra',
-  'Walrus', 'Zephyr',
-]
-
-export function randomNickname(): string {
-  const pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
-  return `${pick(ADJECTIVES)}${pick(NOUNS)}`
-}
+export { randomNickname }
 
 /* ------------------------------------------------------------------- API */
 

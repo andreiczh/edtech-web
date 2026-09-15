@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 import { useCurrentPersona } from '../account/me'
+import { FavoriteStar } from '../components/FavoriteStar'
 import { ConfirmDialog, CountdownBar, Pill } from '../design/ui'
 import { askAloud } from '../ege2/askAloud'
 import { requestTaskFeedback, type TaskFeedback } from '../ege2/feedback'
@@ -364,9 +365,14 @@ export function TaskScreen({
 
       <header className="topbar2">
         <span className="topbar2__brand">GoSpeak</span>
-        <span className="statrow__label" style={{ marginTop: 0 }}>
-          №{task.id} · {task.label}
-          {progress && ` · ${progress.index} из ${progress.total}`}
+        <span className="topbar2__right">
+          <span className="statrow__label" style={{ marginTop: 0 }}>
+            №{task.id} · {task.label}
+            {progress && ` · ${progress.index} из ${progress.total}`}
+          </span>
+          {/* Звёздочка в правом верхнем углу — у каждого задания: и в серии
+              тренажёра, и в демо-варианте (экран один на оба пути). */}
+          <FavoriteStar taskId={taskId} variantId={variant.id} />
         </span>
       </header>
 
