@@ -134,7 +134,7 @@
 <script>
 (function () {
   'use strict';
-  var R = { page: 'max-check v1', at: new Date().toISOString() };
+  var R = { page: 'max-check v2', at: new Date().toISOString() };
   var W = null;
   var $ = function (id) { return document.getElementById(id); };
 
@@ -195,7 +195,7 @@
     R.platform = (W && W.platform) || null;
     R.max_version = (W && W.version) || null;
     R.viewport = window.innerWidth + '×' + window.innerHeight;
-    R.dpr = window.devicePixelRatio;
+    R.dpr = Math.round((window.devicePixelRatio || 1) * 100) / 100;
     R.screen = screen.width + '×' + screen.height;
     R.in_iframe = window.self !== window.top;
     R.secure_context = !!window.isSecureContext;
