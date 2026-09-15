@@ -1718,7 +1718,7 @@ export function AdminScreen({ onExit }: { onExit: () => void }) {
   return (
     <div className="screen">
       <header className="topbar2">
-        <span className="topbar2__brand">SPEAKO · ADMIN</span>
+        <span className="topbar2__brand">GoSpeak · ADMIN</span>
         <Pill onClick={onExit}>Выйти из админки</Pill>
       </header>
 

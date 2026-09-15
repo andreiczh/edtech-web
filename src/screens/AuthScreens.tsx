@@ -9,11 +9,15 @@
  *  - после регистрации — карточка «запиши данные»: восстановления нет
  *    по построению; затем интро «что тебя ждёт внутри» (фото 8);
  *  - ОГЭ показывает «скоро…» и выбор не меняет.
+ *
+ * Из мини-приложения MAX вход свой (MaxLoginScreen): без ника и кода —
+ * личность подтверждает подпись мессенджера (15.09.2026).
  */
 import { useCallback, useEffect, useState } from 'react'
 
 import { updateSettings } from '../account/me'
-import { login, randomNickname, register, type AuthUser } from '../auth/auth'
+import { login, loginMax, randomNickname, register, type AuthUser } from '../auth/auth'
+import { maxInitData } from '../max/bridge'
 
 /* ------------------------------------------------------------ Регистрация */
 
@@ -87,7 +91,7 @@ export function RegisterScreen({
   return (
     <div className="authpage">
       <div className="authcol">
-        <h1 className="auth2-title">Pingo AI</h1>
+        <h1 className="auth2-title">GoSpeak</h1>
         <p className="auth2-sub">
           Голосовой тренажёр устной части ЕГЭ.
           <br />
@@ -159,7 +163,8 @@ export function RegisterScreen({
           />
           <span>
             Разрешаю сохранять мои записи, чтобы система училась точнее проверять речь.
-            Голос не публикуется и не передаётся третьим лицам; отключить можно в кабинете.{' '}
+            Записи не публикуются и не продаются; речь распознаёт сервис Mistral AI.
+            Отключить можно в кабинете.{' '}
             <a className="auth2-link" href="/privacy.html" target="_blank" rel="noreferrer">
               Как хранятся данные
             </a>
@@ -286,7 +291,7 @@ export function LoginScreen({
   return (
     <div className="authpage">
       <div className="authcol">
-        <h1 className="auth2-title">Pingo AI</h1>
+        <h1 className="auth2-title">GoSpeak</h1>
         <p className="auth2-sub">С возвращением — введи свои данные.</p>
 
         <label className="auth2-label">Твой ник</label>
@@ -328,6 +333,74 @@ export function LoginScreen({
             Создать
           </button>
         </p>
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------- Вход из MAX
+ *
+ * Мини-приложение в MAX входит само: подпись данных запуска проверяет сервер
+ * (/auth/max), ник, пароль и код доступа не нужны. Экран виден, только пока
+ * идёт вход, а при ошибке — с повтором и запасным входом по нику.
+ */
+
+export function MaxLoginScreen({
+  onDone,
+  onFallback,
+}: {
+  onDone: (u: AuthUser, created: boolean) => void
+  onFallback: () => void
+}) {
+  const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    let alive = true
+    setError(null)
+    void (async () => {
+      try {
+        const initData = await maxInitData()
+        if (!initData) {
+          throw new Error(
+            'MAX не передал данные для входа. Закрой мини-приложение и открой его снова из чата бота.',
+          )
+        }
+        const { user, created } = await loginMax(initData)
+        if (alive) onDone(user, created)
+      } catch (e) {
+        if (alive) setError(e instanceof Error ? e.message : String(e))
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [attempt, onDone])
+
+  return (
+    <div className="authpage">
+      <div className="authcol">
+        <h1 className="auth2-title">GoSpeak</h1>
+        {error === null ? (
+          <p className="auth2-sub" role="status">
+            Входим через MAX…
+          </p>
+        ) : (
+          <>
+            <p className="auth2-err" role="alert">
+              {error}
+            </p>
+            <button type="button" className="auth2-btn" onClick={() => setAttempt((a) => a + 1)}>
+              Попробовать ещё раз
+            </button>
+            <p className="auth2-foot">
+              Есть аккаунт с ником и паролем?{' '}
+              <button type="button" className="auth2-link" onClick={onFallback}>
+                Войти
+              </button>
+            </p>
+          </>
+        )}
       </div>
     </div>
   )

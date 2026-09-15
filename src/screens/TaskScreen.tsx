@@ -363,7 +363,7 @@ export function TaskScreen({
       )}
 
       <header className="topbar2">
-        <span className="topbar2__brand">SPEAKO</span>
+        <span className="topbar2__brand">GoSpeak</span>
         <span className="statrow__label" style={{ marginTop: 0 }}>
           №{task.id} · {task.label}
           {progress && ` · ${progress.index} из ${progress.total}`}

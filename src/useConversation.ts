@@ -3,6 +3,7 @@
 import { getSettings } from './account/me'
 import { backendUnreachableMessage, httpErrorMessage } from './backendError'
 import { identityId } from './auth/auth'
+import { audioFileName, makeRecorder, recordedType } from './ege2/audioMime'
 import type { DialogTurn } from './talk/review'
 
 const DIALOG_KEY = 'pingo.dialog.v1'
@@ -292,7 +293,7 @@ export function useConversation(): ConversationApi {
 
       const runOnce = async () => {
         const fd = new FormData()
-        fd.append('audio', blob, 'speech.webm')
+        fd.append('audio', blob, audioFileName('speech', blob))
         // Память диалога: последние 10 реплик ЭТОЙ сессии уходят с запросом —
         // тьютор помнит, о чём шла речь. Хранится только в этой вкладке
         // (historyRef): сервер намеренно ничего не запоминает, закрыл вкладку —
@@ -422,14 +423,14 @@ export function useConversation(): ConversationApi {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
-      const recorder = new MediaRecorder(stream)
+      const recorder = makeRecorder(stream)
       chunksRef.current = []
       recorder.ondataavailable = (e) => {
         if (e.data.size) chunksRef.current.push(e.data)
       }
       recorder.onstop = () => {
         stopStream()
-        void streamTalk(new Blob(chunksRef.current, { type: 'audio/webm' }))
+        void streamTalk(new Blob(chunksRef.current, { type: recordedType(recorder) }))
       }
       recorderRef.current = recorder
       recorder.start()

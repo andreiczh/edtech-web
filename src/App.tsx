@@ -33,9 +33,10 @@ import {
   syncServerProgress,
   type TaskId,
 } from './ege2/tasks'
+import { isMaxLaunch } from './max/bridge'
 import { AdminScreen } from './screens/AdminScreen'
 import { CalendarScreen } from './screens/CalendarScreen'
-import { IntroScreen, LoginScreen, RegisterScreen } from './screens/AuthScreens'
+import { IntroScreen, LoginScreen, MaxLoginScreen, RegisterScreen } from './screens/AuthScreens'
 import { ConversationScreen } from './screens/ConversationScreen'
 import { EgeMenuScreen } from './screens/EgeMenuScreen'
 import { HomeScreen } from './screens/HomeScreen'
@@ -47,6 +48,8 @@ type Route =
   | { name: 'welcome' }
   | { name: 'intro' }
   | { name: 'login' }
+  /** Запуск из мини-приложения MAX: вход подписью мессенджера. */
+  | { name: 'maxlogin' }
   | { name: 'admin' }
   | { name: 'home' }
   | { name: 'calendar' }
@@ -61,7 +64,9 @@ type Route =
 function initialRoute(): Route {
   // /?admin — скрытый вход в админку; сервер всё равно требует ADMIN_KEY.
   if (new URLSearchParams(window.location.search).has('admin')) return { name: 'admin' }
-  return currentUser() ? { name: 'home' } : { name: 'welcome' }
+  if (currentUser()) return { name: 'home' }
+  // Открыли из MAX — входим подписью мессенджера, без ника, пароля и кода.
+  return isMaxLaunch() ? { name: 'maxlogin' } : { name: 'welcome' }
 }
 
 export default function App() {
@@ -112,6 +117,17 @@ export default function App() {
     setRoute({ name: 'intro' })
   }, [])
 
+  /* Вход через MAX. Новому аккаунту — интро, как после регистрации. Согласия
+     на хранение записей у него НЕ спрашивали, поэтому явное «нет»: иначе
+     локальное значение по умолчанию уехало бы на сервер с первой же сменой
+     настроек. Включить можно в кабинете. */
+  const enterFromMax = useCallback((_u: AuthUser, created: boolean) => {
+    if (created) updateSettings({ corpusConsent: false })
+    void syncServerProgress(identityId())
+    void syncSettingsFromServer()
+    setRoute(created ? { name: 'intro' } : { name: 'home' })
+  }, [])
+
   const goHome = useCallback(() => setRoute({ name: 'home' }), [])
   const backToEge = useCallback(() => setRoute({ name: 'ege' }), [])
 
@@ -156,6 +172,9 @@ export default function App() {
   }
   if (route.name === 'login') {
     return <LoginScreen onDone={enterApp} onRegister={() => setRoute({ name: 'welcome' })} />
+  }
+  if (route.name === 'maxlogin') {
+    return <MaxLoginScreen onDone={enterFromMax} onFallback={() => setRoute({ name: 'login' })} />
   }
   if (route.name === 'admin') {
     return (
@@ -258,7 +277,7 @@ export default function App() {
             {route.name === 'profile' && (
               <ProfileScreen
                 onOpenStats={() => setRoute({ name: 'stats' })}
-                onLogout={() => setRoute({ name: 'welcome' })}
+                onLogout={() => setRoute(isMaxLaunch() ? { name: 'maxlogin' } : { name: 'welcome' })}
                 onClose={goHome}
               />
             )}

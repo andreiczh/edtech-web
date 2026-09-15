@@ -11,6 +11,7 @@
 import { getSettings } from '../account/me'
 import { backendUnreachableMessage, httpErrorMessage } from '../backendError'
 import { identityId } from '../auth/auth'
+import { audioFileName } from './audioMime'
 import type { DisputeContext, DisputeDraft, DisputeShot } from './dispute'
 import type { TaskKind } from './tasks'
 
@@ -76,7 +77,7 @@ export async function requestTaskFeedback(
   meta?: { variantId?: string; durationSec?: number; sessionDone?: boolean },
 ): Promise<FeedbackResponse> {
   const fd = new FormData()
-  fd.append('audio', blob, 'answer.webm')
+  fd.append('audio', blob, audioFileName('answer', blob))
   fd.append('kind', kind)
   fd.append('payload', JSON.stringify(payload))
   if (meta?.variantId) fd.append('variant', meta.variantId)

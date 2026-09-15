@@ -8,8 +8,13 @@
  * Держим ссылку на MediaStream и глушим дорожки в `onstop`: без этого в браузере
  * остаётся гореть индикатор микрофона после конца задания, и человек справедливо
  * решает, что его пишут дальше.
+ *
+ * Формат записи — лучший из поддержанных браузером (iPhone пишет mp4, а не
+ * webm), и blob подписывается тем, что реально записано: см. audioMime.ts.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+
+import { makeRecorder, recordedType } from './audioMime'
 
 export type RecorderState = 'idle' | 'recording'
 
@@ -35,14 +40,14 @@ export function useRecorder() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
-      const rec = new MediaRecorder(stream)
+      const rec = makeRecorder(stream)
       chunksRef.current = []
       rec.ondataavailable = (e) => {
         if (e.data.size) chunksRef.current.push(e.data)
       }
       rec.onstop = () => {
         stopStream()
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
+        const blob = new Blob(chunksRef.current, { type: recordedType(rec) })
         resolveRef.current?.(blob)
         resolveRef.current = null
         setState('idle')

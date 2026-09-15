@@ -165,3 +165,16 @@ export async function login(nickname: string, password: string): Promise<AuthUse
   saveUser(user)
   return user
 }
+
+/** Вход из мини-приложения MAX: личность подтверждает подпись мессенджера,
+    ника с паролем и кода доступа нет. Ник новому аккаунту генерируется здесь
+    же — сервер берёт первый свободный из предложенных. */
+export async function loginMax(initData: string): Promise<{ user: AuthUser; created: boolean }> {
+  const nicknames = Array.from({ length: 5 }, () => randomNickname())
+  const data = (await post('/auth/max', { init_data: initData, nicknames })) as AuthUser & {
+    created?: boolean
+  }
+  const user: AuthUser = { id: data.id, nickname: data.nickname, exam: data.exam }
+  saveUser(user)
+  return { user, created: data.created === true }
+}

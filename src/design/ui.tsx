@@ -248,7 +248,7 @@ export function TopBar({
 }) {
   return (
     <header className="topbar2">
-      <span className="topbar2__brand">SPEAKO</span>
+      <span className="topbar2__brand">GoSpeak</span>
 
       {tabs && tabs.length > 0 && (
         <SegmentedTabs tabs={tabs} active={active} onTab={onTab} />

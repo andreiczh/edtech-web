@@ -53,6 +53,7 @@ import ege_prompts
 import ege_scoring
 import disputes
 import fipi_import
+import max_auth
 import speak_check
 import storage
 
@@ -115,7 +116,11 @@ class GZipExceptStreams:
             await self._gzipped(scope, receive, send)
 
 
-app = FastAPI(title="Копилот — голосовая петля (free stack)")
+app = FastAPI(
+    title="GoSpeak API",
+    description="Голосовой тренажёр устной части ЕГЭ по английскому: разговор с ИИ "
+                "и разбор ответов по критериям ФИПИ.",
+)
 # CORS — чтобы позже дёргать бэкенд с фронта (localhost:5173).
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
@@ -393,7 +398,25 @@ def _stt_client() -> httpx.AsyncClient:
     return _stt_http
 
 
-async def transcribe_remote(data: bytes, filename: str = "speech.webm") -> str:
+# Имя и тип файла для /audio/transcriptions — по содержимому, а не по подписи
+# браузера. Mistral контейнер определяет сам (проверено 15.09.2026: mp4 с
+# iPhone под видом webm распознаётся так же, как с верной подписью), так что
+# это не лечение, а честная подпись: видно, что пришло на самом деле.
+_STT_UPLOAD = {
+    "mp4": ("speech.m4a", "audio/mp4"),
+    "ogg": ("speech.ogg", "audio/ogg"),
+    "wav": ("speech.wav", "audio/wav"),
+    "mp3": ("speech.mp3", "audio/mpeg"),
+    "flac": ("speech.flac", "audio/flac"),
+    "aac": ("speech.aac", "audio/aac"),
+}
+
+
+def _stt_upload_name(data: bytes) -> tuple[str, str]:
+    return _STT_UPLOAD.get(audio_check.sniff(data), ("speech.webm", "audio/webm"))
+
+
+async def transcribe_remote(data: bytes) -> str:
     """STT через Mistral (Voxtral). Возвращает распознанный текст.
 
     `language` передаём ЯВНО, и это не формальность. Voxtral понимает 13 языков и
@@ -402,11 +425,12 @@ async def transcribe_remote(data: bytes, filename: str = "speech.webm") -> str:
     (пользователь поймал это 22.07.2026: «я такого не говорил»). Тренажёр по
     определению англоязычный, гадать язык ему незачем.
     """
+    name, mime = _stt_upload_name(data)
     r = await _stt_client().post(
         f"{LLM_BASE_URL.rstrip('/')}/audio/transcriptions",
         headers={"Authorization": f"Bearer {_require('LLM_API_KEY')}"},
         data={"model": STT_REMOTE_MODEL, "language": STT_LANGUAGE},
-        files={"file": (filename, data, "audio/webm")},
+        files={"file": (name, data, mime)},
     )
     if r.status_code != 200:
         raise _RemoteSttError(r.status_code, r.text)
@@ -976,6 +1000,77 @@ async def auth_login(request: Request, body: dict = Body(...)):
         # Не различаем «нет такого» и «пароль не тот» — нечего дарить перебору.
         raise HTTPException(status_code=401, detail="Неверный никнейм или пароль.")
     return {"id": row[0], "nickname": row[1], "exam": row[3]}
+
+
+# ------------------------------------------------------------ Вход через MAX
+#
+# Мини-приложение в мессенджере MAX входит без ника, пароля и кода доступа:
+# личность подтверждает сам MAX подписью данных запуска (max_auth.verify).
+# Код доступа здесь не нужен — за аккаунтом стоит реальный пользователь
+# мессенджера, а не скрипт. Аварийный тормоз на НОВЫЕ аккаунты — MAX_SIGNUP=0
+# (уже созданные входят всегда).
+#
+# В базе нет ни имени, ни id из MAX: id аккаунта — хеш MAX-id с солью
+# (max_auth.account_id), пароль — случайная строка, по которой войти нельзя.
+# Токен бота живёт только в переменных окружения (MAX_BOT_TOKEN).
+
+def _max_token() -> str:
+    return os.environ.get("MAX_BOT_TOKEN", "").strip()
+
+
+def _max_salt() -> str:
+    # Соль нельзя менять после первых входов: id MAX-аккаунтов выведутся
+    # другие, и люди «потеряют» прогресс. Поэтому по умолчанию — константа.
+    return os.environ.get("MAX_ID_SALT", "").strip() or "gospeak-max-v1"
+
+
+@app.post("/auth/max")
+async def auth_max(request: Request, body: dict = Body(...)):
+    if not _rate_ok(f"a:{_client_ip(request)}", 12, 60.0):
+        raise HTTPException(status_code=429, detail="Слишком много попыток — подожди минутку.")
+    token = _max_token()
+    if not token:
+        raise HTTPException(status_code=503, detail="Вход через MAX ещё не включён на сервере.")
+    raw = str(body.get("init_data") or "")
+    if not raw or len(raw) > 8192:
+        raise HTTPException(status_code=422,
+                            detail="Нет данных запуска MAX — открой приложение из чата бота.")
+    res = max_auth.verify(raw, token)
+    if not res["valid"]:
+        print(f"[max] вход отклонён: {res['reason']}")
+        raise HTTPException(status_code=401, detail=f"MAX не подтвердил вход: {res['reason']}.")
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна — попробуй чуть позже.")
+    max_uid = res["user"]["id"]
+    acc_id = max_auth.account_id(max_uid, _max_salt())
+    row = await asyncio.to_thread(storage.get_account_by_id, acc_id)
+    if row is not None:
+        return {"id": row[0], "nickname": row[1], "exam": row[3], "created": False}
+    if os.environ.get("MAX_SIGNUP", "1").strip() == "0":
+        raise HTTPException(status_code=403, detail="Новые аккаунты через MAX сейчас не создаются.")
+    # Ник — первый свободный из предложенных фронтом (он генерирует их из тех же
+    # слов, что при регистрации); последний шанс — стабильный ник из хеша.
+    offered = body.get("nicknames") if isinstance(body.get("nicknames"), list) else []
+    candidates = [n for n in offered[:6]
+                  if isinstance(n, str) and re.fullmatch(r"[A-Za-z]{4,32}", n)]
+    candidates.append(max_auth.nickname(max_uid, _max_salt()))
+    # Пароля у MAX-аккаунта нет: вместо соли не hex, _check_pw на нём всегда False.
+    pass_hash = "max$" + secrets.token_hex(32)
+    for nick in candidates:
+        try:
+            await asyncio.to_thread(storage.create_account_with_id, acc_id, nick, pass_hash, "ege")
+            print("[max] новый аккаунт через MAX")
+            return {"id": acc_id, "nickname": nick, "exam": "ege", "created": True}
+        except Exception as e:  # noqa: BLE001
+            if not storage.is_unique_violation(e):
+                print(f"[max] аккаунт не создался: {type(e).__name__}: {str(e)[:120]}")
+                raise HTTPException(status_code=503,
+                                    detail="Не получилось создать аккаунт — попробуй ещё раз.")
+            # Занят ник — или этот же человек успел войти параллельным запросом.
+            row = await asyncio.to_thread(storage.get_account_by_id, acc_id)
+            if row is not None:
+                return {"id": row[0], "nickname": row[1], "exam": row[3], "created": False}
+    raise HTTPException(status_code=503, detail="Не получилось подобрать ник — попробуй ещё раз.")
 
 
 @app.get("/progress")
@@ -4693,6 +4788,105 @@ async def talk_review_endpoint(request: Request, body: dict = Body(...),
         asyncio.create_task(_remember_gist())
 
     return review
+
+
+# ------------------------------------------------- Проба MAX (/max-check)
+#
+# Страница public/max-check.html проверяет на настоящем телефоне то, чего не
+# узнать из документации MAX: пускает ли окно мини-приложения к микрофону,
+# в каком формате пишется запись и сходится ли подпись данных запуска. Ручки
+# ниже — её серверная половина. В базу они не пишут ничего, запись после
+# ответа забывается. После хакатона выключаются одной переменной MAX_PROBE=0.
+
+_PROBE_AUDIO_MAX = 2 * 1024 * 1024
+
+
+def _probe_on() -> bool:
+    return os.environ.get("MAX_PROBE", "1").strip() != "0"
+
+
+@app.get("/max-check", include_in_schema=False)
+def max_check_page():
+    if not _probe_on():
+        raise HTTPException(status_code=404, detail="Not Found")
+    for base in (_DIST, os.path.join(_HERE, "..", "public")):
+        path = os.path.join(base, "max-check.html")
+        if os.path.isfile(path):
+            return FileResponse(path, headers={"Cache-Control": "no-store"})
+    raise HTTPException(status_code=404, detail="Not Found")
+
+
+@app.post("/max/probe/initdata")
+async def max_probe_initdata(request: Request, body: dict = Body(...)):
+    """Сходится ли подпись данных запуска. Наружу — только вердикт и имена
+    полей: ни имени, ни id человека в ответе нет, отчёт пересылают руками."""
+    if not _probe_on():
+        raise HTTPException(status_code=404, detail="Not Found")
+    if not _rate_ok(f"probe:{_client_ip(request)}", 20, 60.0):
+        raise HTTPException(status_code=429, detail="Слишком часто — подожди минутку.")
+    raw = str(body.get("init_data") or "")[:8192]
+    token = _max_token()
+    res = max_auth.verify(raw, token)
+    return {
+        "token_set": bool(token),
+        "valid": res["valid"],
+        "variant": res["variant"],
+        "reason": res["reason"],
+        "age_s": res["age_s"],
+        "keys": res["keys"],
+        "start_param": res["start_param"],
+        "hash_len": len(max_auth.parse_init_data(raw).get("hash") or ""),
+        # Основной алгоритм не сошёлся — перебор покажет, какой сходится.
+        "diagnose": [] if res["valid"] else max_auth.diagnose(raw, token),
+    }
+
+
+@app.post("/max/probe/audio")
+async def max_probe_audio(request: Request, audio: UploadFile = File(...),
+                          stt: str = Form("0")):
+    """Что пришло с микрофона: формат по байтам, читается ли, длительность,
+    тишина; по желанию — распознавание тем же быстрым путём, что в разговоре.
+    Ручка открыта без аккаунта (проба идёт до входа), поэтому у распознавания
+    свои тесные лимиты: 4 в минуту с адреса, 12 в минуту всего, 300 в сутки."""
+    if not _probe_on():
+        raise HTTPException(status_code=404, detail="Not Found")
+    ip = _client_ip(request)
+    if not _rate_ok(f"probe:{ip}", 20, 60.0):
+        raise HTTPException(status_code=429, detail="Слишком часто — подожди минутку.")
+    data = await audio.read(_PROBE_AUDIO_MAX + 1)
+    if len(data) > _PROBE_AUDIO_MAX:
+        raise HTTPException(status_code=413,
+                            detail="Запись больше 2 МБ — для пробы хватит 5 секунд.")
+    ext = os.path.splitext(audio.filename or "")[1].lower()
+    out: dict = {
+        "bytes": len(data),
+        "declared_type": audio.content_type,
+        "filename_ext": ext,
+        "detected": audio_check.sniff(data),
+    }
+    info = await asyncio.to_thread(audio_check.inspect, data, ext or ".webm")
+    out["decoded"] = bool(info.get("ok"))
+    if not info.get("ok"):
+        out["error"] = "сервер не смог прочитать запись"
+        return out
+    out["duration_s"] = info.get("seconds")
+    out["speech_ratio"] = info.get("speech_ratio")
+    out["silence"] = audio_check.silence_reason(info)
+    if stt != "1" or out["silence"]:
+        return out
+    if (info.get("seconds") or 0) > 20:
+        out["stt_skipped"] = "запись длиннее 20 секунд"
+    elif not (_rate_ok(f"probe-stt:{ip}", 4, 60.0) and _rate_ok("probe-stt", 12, 60.0)
+              and _rate_ok("probe-stt-day", 300, 86400.0)):
+        out["stt_skipped"] = "лимит проверок распознавания — подожди минуту"
+    else:
+        t0 = time.time()
+        try:
+            out["text"] = await transcribe_auto(data)
+            out["stt_s"] = round(time.time() - t0, 2)
+        except Exception as e:  # noqa: BLE001
+            out["stt_error"] = type(e).__name__
+    return out
 
 
 # Раздаём собранный React-фронт (../dist) на "/", если он собран (npm run build).

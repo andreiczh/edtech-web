@@ -640,6 +640,19 @@ def get_account(nickname: str):
                  (nickname,)).fetchone()
 
 
+def create_account_with_id(acc_id: str, nickname: str, pass_hash: str, exam: str) -> None:
+    """Аккаунт с заранее известным id — вход через MAX, где id выводится из
+    пользователя мессенджера (max_auth.account_id). Занятый id или ник летят
+    наружу IntegrityError, как и в create_account."""
+    _exec("INSERT INTO accounts(id, nickname, pass_hash, exam, created_at)"
+          " VALUES(?,?,?,?,?)", (acc_id, nickname, pass_hash, exam, _now()))
+
+
+def get_account_by_id(acc_id: str):
+    return _exec("SELECT id, nickname, pass_hash, exam FROM accounts WHERE id=?",
+                 (acc_id,)).fetchone()
+
+
 def account_exists(acc_id: str) -> bool:
     """Для входного шлюза API: is этот id настоящим аккаунтом. Один SELECT по
     первичному ключу; main.py кэширует ответ, чтобы не ходить сюда на каждый

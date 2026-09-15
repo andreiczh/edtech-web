@@ -133,7 +133,7 @@ function SessionSummary({
   return (
     <div className="screen">
       <header className="topbar2">
-        <span className="topbar2__brand">SPEAKO</span>
+        <span className="topbar2__brand">GoSpeak</span>
         <span className="statrow__label" style={{ marginTop: 0 }}>
           итоги варианта
         </span>

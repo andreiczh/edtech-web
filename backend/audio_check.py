@@ -63,6 +63,30 @@ _WPM_MIN_SPEECH_SECONDS = 8.0
 _NOISE_MULT = 2.0
 
 
+def sniff(data: bytes) -> str:
+    """Контейнер записи по первым байтам, а не по имени файла.
+
+    Имя и тип файла назначает браузер, и они врут: iPhone пишет mp4, а фронт
+    до 15.09.2026 подписывал любую запись как webm. Байты не врут.
+    """
+    h = data[:12]
+    if len(h) >= 8 and h[4:8] == b"ftyp":
+        return "mp4"
+    if h[:4] == b"\x1a\x45\xdf\xa3":
+        return "webm"
+    if h[:4] == b"OggS":
+        return "ogg"
+    if h[:4] == b"RIFF" and h[8:12] == b"WAVE":
+        return "wav"
+    if h[:4] == b"fLaC":
+        return "flac"
+    if len(h) >= 2 and h[0] == 0xFF and (h[1] & 0xF6) == 0xF0:
+        return "aac"  # ADTS: синхрослово как у mp3, но биты слоя — 00
+    if h[:3] == b"ID3" or (len(h) >= 2 and h[0] == 0xFF and (h[1] & 0xE0) == 0xE0):
+        return "mp3"
+    return "unknown"
+
+
 def to_pcm(data: bytes, ext: str = ".webm") -> np.ndarray | None:
     """Байты записи -> моно float32 16 кГц. None, если декодировать не вышло.
 
