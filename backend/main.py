@@ -3090,6 +3090,10 @@ async def _count_http(request, call_next):
 
 @app.on_event("startup")
 async def _warmup():
+    # Имя бота для кнопки open_app — заранее, а не на первом сообщении:
+    # и в /health видно сразу, и приветствие не ждёт лишний запрос к /me.
+    if _max_token():
+        asyncio.create_task(_max_bot_name())
     # Локальные модели греем ТОЛЬКО если распознаём локально. Иначе не грузим их
     # вовсе: в этом и смысл перехода на Mistral — не занимать под whisper ~700 МБ
     # памяти, которых на бесплатном хостинге просто нет. Если Mistral однажды не
@@ -3258,7 +3262,8 @@ def health():
         # основная отвечает сама; активная подмена видна по active_until.
         # Бот MAX: есть ли токен на ЭТОМ сервере (без него вебхук отвечает 503
         # и бот молчит — 23.09.2026 так и было, пока переменной не было на Render).
-        "max_bot": {"token_set": bool(_max_token()), "app_url": _MAX_APP_URL, **_MAX_STATS},
+        "max_bot": {"token_set": bool(_max_token()), "app_url": _MAX_APP_URL,
+                    "bot_name": _MAX_BOT_NAME, **_MAX_STATS},
         "llm_fallback": {
             "model": LLM_FALLBACK_MODEL,
             "active": time.time() < _llm_fallback_until,
@@ -4981,6 +4986,32 @@ _MAX_APP_URL = os.environ.get("MAX_APP_URL", "").strip() or "https://pingo-ai-dp
 _MAX_STATS: dict = {"received": 0, "ignored": 0, "sent": 0, "failed": 0,
                     "last_error": "", "last_at": ""}
 
+# Username бота — для кнопки open_app (web_app = чьё мини-приложение открыть).
+# Задаётся MAX_BOT_USERNAME, иначе один раз спрашивается у /me.
+_MAX_BOT_NAME = os.environ.get("MAX_BOT_USERNAME", "").strip()
+
+
+async def _max_bot_name() -> str:
+    global _MAX_BOT_NAME
+    if _MAX_BOT_NAME:
+        return _MAX_BOT_NAME
+    try:
+        async with httpx.AsyncClient(timeout=10, trust_env=False) as c:
+            r = await c.get(f"{max_bot.API_BASE}/me", headers={"Authorization": _max_token()})
+        if r.status_code == 200:
+            _MAX_BOT_NAME = str((r.json() or {}).get("username") or "").strip()
+        else:
+            print(f"[max] /me ответил {r.status_code}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[max] /me не ответил: {type(e).__name__}")
+    return _MAX_BOT_NAME
+
+
+async def _max_welcome(user_id, chat_id) -> bool:
+    """Приветствие с кнопкой мини-приложения (имя бота — из /me, один раз)."""
+    name = await _max_bot_name()
+    return await _max_send(user_id, chat_id, max_bot.welcome_message(_MAX_APP_URL, name))
+
 
 async def _max_send(user_id, chat_id, body: dict) -> bool:
     """POST /messages в MAX. Если клавиатуру с open_app API отверг (формат
@@ -5022,8 +5053,7 @@ async def max_webhook(request: Request, body: dict = Body(...)):
     _MAX_STATS["last_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if ev and (ev.get("user_id") or ev.get("chat_id")):
         print(f"[max] {ev['kind']}")
-        asyncio.create_task(_max_send(ev.get("user_id"), ev.get("chat_id"),
-                                      max_bot.welcome_message(_MAX_APP_URL)))
+        asyncio.create_task(_max_welcome(ev.get("user_id"), ev.get("chat_id")))
     else:
         _MAX_STATS["ignored"] += 1
     return {"ok": True}

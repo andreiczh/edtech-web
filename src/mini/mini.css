@@ -18,7 +18,12 @@
 
 /* ------------------------------------------------------------ каркас */
 .mini {
-  --u: calc(min(100vw, 430px) / 402);
+  /* Кадр макета 402×874 вписывается в окно ЦЕЛИКОМ — и по ширине, и по
+     высоте. Раньше масштаб считался только по ширине, и на телефоне с
+     панелями браузера или шапкой MAX экран задания был выше окна и
+     скроллился (правка тестировщика 23.09.2026). Цена — на коротком окне
+     всё чуть мельче; svh — видимая высота с панелями, см. @supports ниже. */
+  --u: min(calc(min(100vw, 430px) / 402), calc(100vh / 874));
   --w: calc(402 * var(--u));
   /* низ нижней панели: 24.3 пункта в макете, но не меньше системного отступа */
   --sb: max(calc(24.3 * var(--u)), env(safe-area-inset-bottom, 0px));
@@ -35,6 +40,9 @@
   -webkit-font-smoothing: antialiased;
 }
 .mini--home { background: #fff; }
+@supports (height: 100svh) {
+  .mini { --u: min(calc(min(100vw, 430px) / 402), calc(100svh / 874)); }
+}
 .mini__frame {
   position: absolute;
   top: 0;
@@ -197,6 +205,8 @@
   text-align: justify;
   hyphens: none;
 }
+/* Текст на подготовке №39 — под инструкцией; кегль тот же, что на записи. */
+.m-read--prep { margin-top: calc(12 * var(--u)); }
 .m-note {
   width: calc(368.8 * var(--u));
   margin: calc(12 * var(--u)) auto 0;
@@ -480,7 +490,9 @@
   background: url('/mini/home-bg.jpg') 0 0 / 100% 100% no-repeat;
 }
 .h-sheet {
-  position: absolute; left: 0; right: 0; top: calc(157.2 * var(--u)); bottom: calc(-400 * var(--u));
+  /* До низа страницы, не ниже: лист с запасом −400 пунктов делал главную
+     выше окна на 370 px, и она скроллилась в пустоту (тестировщик, 23.09). */
+  position: absolute; left: 0; right: 0; top: calc(157.2 * var(--u)); bottom: 0;
   background: #fff;
   border-radius: calc(55.3 * var(--u)) calc(55.3 * var(--u)) 0 0;
 }
@@ -647,6 +659,8 @@
   overflow: hidden;
 }
 .mini-legacy > .screen { padding: 10px 12px; }
+/* Экран задания без вкладок снизу (№41/№42 в потоке тренажёра и DEMO). */
+.mini-legacy--full { bottom: 0; }
 
 /* С компьютера (?mini) оболочка стоит колонкой посередине окна: снаружи —
    чуть темнее, чтобы край телефона был виден. На телефоне правило не работает. */
@@ -802,4 +816,38 @@
   margin-top: calc(2 * var(--u));
   font: 700 calc(6.8 * var(--u)) / calc(8.5 * var(--u)) var(--nunito);
   color: #9b9595;
+}
+
+/* ------------------------------------------ выбор задания (макета нет) */
+/* Собран из элементов соседних макетов: карточка-градиент 33/35, подписи —
+   Inter как «ЗАДАНИЕ N», текст — Nunito как в карточках. */
+.tp-list { margin-top: calc(43.6 * var(--u)); }
+.tp-card {
+  display: block;
+  text-align: left;
+  margin-top: calc(12 * var(--u));
+  padding: calc(13 * var(--u)) calc(18 * var(--u)) calc(13 * var(--u)) calc(22 * var(--u));
+  box-shadow: 0 0 calc(3 * var(--u)) rgba(0, 0, 0, 0.1);
+  transition: transform 0.12s ease;
+}
+.tp-list .tp-card:first-child { margin-top: 0; }
+.tp-card:active { transform: scale(0.985); }
+.tp-card[disabled] { opacity: 0.5; cursor: not-allowed; }
+.tp-kicker {
+  display: block;
+  font: 700 calc(9 * var(--u)) / 1 var(--inter);
+  letter-spacing: 0.04em;
+  color: rgba(0, 0, 0, 0.39);
+}
+.tp-title {
+  display: block;
+  margin-top: calc(6 * var(--u));
+  font: 700 calc(17 * var(--u)) / calc(20 * var(--u)) var(--nunito);
+  color: var(--ink);
+}
+.tp-meta {
+  display: block;
+  margin-top: calc(4 * var(--u));
+  font: 700 calc(9.5 * var(--u)) / calc(12.5 * var(--u)) var(--nunito);
+  color: rgba(0, 0, 0, 0.55);
 }

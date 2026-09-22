@@ -1,26 +1,24 @@
 /**
  * Оболочка мини-приложения (телефон и MAX): главная по макету 72 с нижней
- * панелью, поток заданий по макетам 66·Redesign (сейчас №39 и №40), а
- * разделы без макетов (календарь, статистика, кабинет, разговор, демо) —
- * прежние экраны внутри той же оболочки, пока не пришёл их дизайн.
+ * панелью, выбор задания и поток заданий по макетам 66·Redesign (№39, №40;
+ * №41 и №42 — прежний экран задания внутри той же оболочки, пока не пришли
+ * их макеты), а разделы без макетов (календарь, статистика, кабинет,
+ * разговор) — прежние экраны внутри оболочки.
  */
 import { useCallback, useEffect, useState } from 'react'
 
 import type { TaskFeedback } from '../ege2/feedback'
-import { TASKS, pickDemoItems, pickSession, variantById, type TaskId } from '../ege2/tasks'
+import { TASK_ORDER, pickDemoItems, pickSession, variantById, type TaskId } from '../ege2/tasks'
 import { CalendarScreen } from '../screens/CalendarScreen'
 import { ConversationScreen } from '../screens/ConversationScreen'
 import { ProfileScreen } from '../screens/ProfileScreen'
-import { SessionScreen } from '../screens/SessionScreen'
 import { StatsScreen } from '../screens/StatsScreen'
 import { MiniHome, MiniTabs, type MiniTab } from './MiniHome'
 import { Practice, type PracticeItem } from './Practice'
 import { ResultScreen } from './ResultScreen'
 import { ResultScreen40 } from './ResultScreen40'
+import { TaskPicker } from './TaskPicker'
 import './mini.css'
-
-/** Номера, у которых уже есть мобильные макеты, — в порядке экзамена. */
-const MINI_TASKS: TaskId[] = [39, 40]
 
 interface Demo {
   taskId?: number
@@ -33,12 +31,15 @@ interface Demo {
 type View =
   | { name: 'tab'; tab: MiniTab }
   | { name: 'conversation' }
+  /** Тренажёр: сначала выбор задания 1–4, потом серия выбранного номера. */
+  | { name: 'picker' }
   | { name: 'practice'; items: PracticeItem[]; nonce: number }
-  | { name: 'demo'; nonce: number }
   /** Просмотр экрана разбора без микрофона и сервера: пример из sessionStorage
       (ключ gospeak.mini.demo, открывается по #mini-result). Нужен дизайнеру и
       приёмке — прогнать экран с готовым разбором. */
   | { name: 'result-demo'; taskId: TaskId; demo: Demo }
+
+const isTaskId = (n: number): n is TaskId => TASK_ORDER.includes(n as TaskId)
 
 function initialView(): View {
   // #mini-practice=40 — поток заданий только с указанными номерами: приёмка
@@ -48,7 +49,7 @@ function initialView(): View {
     const items = m[1]
       .split(',')
       .map(Number)
-      .filter((id): id is TaskId => MINI_TASKS.includes(id as TaskId))
+      .filter(isTaskId)
       .map((id) => ({ taskId: id, variantId: pickSession(id, 1)[0]?.id }))
       .filter((i): i is PracticeItem => typeof i.variantId === 'string')
     if (items.length) return { name: 'practice', items, nonce: Date.now() }
@@ -72,12 +73,18 @@ export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeed
   const [view, setView] = useState<View>(initialView)
   const home = useCallback(() => setView({ name: 'tab', tab: 'home' }), [])
 
-  const startPractice = useCallback(() => {
-    // Цепочка заданий, как на экзамене, — по одному варианту каждого номера,
-    // у которого уже есть мобильный макет (№41–42 ждут своих).
-    const items = MINI_TASKS.filter((id) => !TASKS[id].comingSoon)
-      .map((id) => ({ taskId: id, variantId: pickSession(id, 1)[0]?.id }))
-      .filter((i): i is PracticeItem => typeof i.variantId === 'string')
+  /** Выбранный номер: серия из пяти ещё не решённых вариантов, как в
+      настольном тренажёре; «К следующему заданию» на разборе ведёт к
+      следующему варианту той же серии. */
+  const startTask = useCallback((id: TaskId) => {
+    const items = pickSession(id, 5).map((v) => ({ taskId: id, variantId: v.id }))
+    if (items.length) setView({ name: 'practice', items, nonce: Date.now() })
+  }, [])
+
+  /** DEMO — полный экзамен: по одному варианту каждого номера по порядку,
+      каждый начинается с отсчёта «Preparation 5…1», как и в тренажёре. */
+  const startDemo = useCallback(() => {
+    const items = pickDemoItems()
     if (items.length) setView({ name: 'practice', items, nonce: Date.now() })
   }, [])
 
@@ -89,24 +96,16 @@ export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeed
     )
   }
 
-  if (view.name === 'result-demo') {
-    return <ResultDemo taskId={view.taskId} demo={view.demo} onExit={home} />
-  }
-
-  if (view.name === 'demo') {
+  if (view.name === 'picker') {
     return (
       <div className="mini">
-        <div className="mini__frame">
-          <div className="mini-legacy" style={{ bottom: 0 }} key={view.nonce}>
-            <SessionScreen
-              items={pickDemoItems()}
-              onExit={home}
-              onRestart={() => setView({ name: 'demo', nonce: Date.now() })}
-            />
-          </div>
-        </div>
+        <TaskPicker onPick={startTask} onQuit={home} />
       </div>
     )
+  }
+
+  if (view.name === 'result-demo') {
+    return <ResultDemo taskId={view.taskId} demo={view.demo} onExit={home} />
   }
 
   const tab: MiniTab = view.name === 'tab' ? view.tab : 'home'
@@ -118,9 +117,9 @@ export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeed
         {view.name === 'tab' && view.tab === 'home' ? (
           <div className="mini__scroll">
             <MiniHome
-              onPractice={startPractice}
+              onPractice={() => setView({ name: 'picker' })}
               onSpeaking={() => setView({ name: 'conversation' })}
-              onDemo={() => setView({ name: 'demo', nonce: Date.now() })}
+              onDemo={startDemo}
               onErrors={() => setView({ name: 'tab', tab: 'stats' })}
             />
           </div>

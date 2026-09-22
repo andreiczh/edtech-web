@@ -74,11 +74,18 @@ def parse_update(update: dict) -> dict | None:
     return None
 
 
-def welcome_message(app_url: str, with_open_app: bool = True) -> dict:
-    """Тело POST /messages: приветствие и клавиатура с кнопкой мини-приложения."""
+def welcome_message(app_url: str, bot_name: str = "", with_open_app: bool = True) -> dict:
+    """Тело POST /messages: приветствие и клавиатура с кнопкой мини-приложения.
+
+    `web_app` у кнопки open_app — по схеме MAX это username (или ссылка) БОТА,
+    чьё мини-приложение открыть, а не адрес сайта: адрес мини-приложения
+    владелец бота задаёт в партнёрской платформе (business.max.ru → Чат-боты →
+    бот → Настройки). До 23.09.2026 сюда уходил адрес сайта — и тестировщик
+    получал не мини-приложение, а веб-ссылку. Без имени бота кнопки нет:
+    остаётся запасная ссылка в браузер."""
     rows: list[list[dict]] = []
-    if with_open_app:
-        rows.append([{"type": "open_app", "text": "Открыть тренажёр", "web_app": app_url}])
+    if with_open_app and bot_name:
+        rows.append([{"type": "open_app", "text": "Открыть тренажёр", "web_app": bot_name}])
     rows.append([{"type": "link", "text": "Открыть в браузере", "url": app_url}])
     return {
         "text": WELCOME,

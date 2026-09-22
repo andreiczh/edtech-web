@@ -4,7 +4,9 @@
  *       (ожидание), 36 (разбор);
  *  №40: 18 (отсчёт), 20 (объявление, подготовка — по файлу без SKIP), 27–30
  *       (четыре вопроса по очереди над фото), 37 (ожидание), 31 (разбор).
- * №41 и №42 ждут своих макетов — цепочка заданий их пропускает.
+ * №41 и №42 ждут своих макетов: после того же отсчёта идёт прежний экран
+ * задания (TaskScreen) внутри оболочки — тестировщик 23.09.2026 просил
+ * выбор всех четырёх заданий и отсчёт перед каждым, в том числе в DEMO.
  *
  * Логика та же, что в TaskScreen: подготовка по таймингу экзамена, запись
  * одним куском на все шаги (перезапуск рекордера ломает контейнер записи),
@@ -24,6 +26,7 @@ import {
   type TaskVariant,
 } from '../ege2/tasks'
 import { useCountdown } from '../ege2/useCountdown'
+import { TaskScreen, type VariantResult } from '../screens/TaskScreen'
 import { useRecorder } from '../ege2/useRecorder'
 import { Ambient } from './Ambient'
 import { ResultScreen } from './ResultScreen'
@@ -34,11 +37,22 @@ export interface PracticeItem {
   variantId: string
 }
 
-type Stage = 'countdown' | 'intro' | 'run' | 'analyzing' | 'result'
+type Stage = 'countdown' | 'intro' | 'run' | 'analyzing' | 'result' | 'legacy'
+
+/** Есть ли у номера мобильные макеты; остальные идут прежним экраном. */
+const hasMiniScreens = (kind: string) => kind === 'reading' || kind === 'dialogue'
 
 /** Номер задания устной части по порядку: 39 → «ЗАДАНИЕ 1». */
 export function taskNo(id: TaskId): number {
   return id - 38
+}
+
+/** Номер уже стоит в подписи «ЗАДАНИЕ N» — «№39:» и «Task 1.» из текста
+    банка на экране лишние: тестировщик принял «№39: … a project with your
+    friend» за инструкцию монолога (23.09.2026), хотя это дословный текст
+    ФИПИ задания 1. */
+export function cleanBrief(text: string): string {
+  return text.replace(/^\s*(№\s*\d+\s*:|Task\s+\d+\s*\.)\s*/i, '')
 }
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
@@ -196,8 +210,12 @@ function ReadingTask({
       <span className="m-label">ЗАДАНИЕ {no}</span>
       {stage === 'intro' ? (
         <>
-          <div className="m-card m-instr">{variant.brief}</div>
+          <div className="m-card m-instr">{cleanBrief(variant.brief)}</div>
           {micError && <MicNote text={micError} onRetry={onStart} />}
+          {/* На экзамене текст виден все 1,5 минуты подготовки («read the text
+              silently, then be ready to read it aloud»). В макете 33 его нет,
+              но без текста подготовка теряет смысл — правка тестировщика. */}
+          <div className="m-card m-read m-read--prep">{variant.readText}</div>
         </>
       ) : (
         <div className="m-card m-read">{variant.readText}</div>
@@ -222,7 +240,7 @@ function splitBrief(variant: TaskVariant): { head: string; points: string[]; foo
   const lines = (variant.brief || '').split('\n').map((s) => s.trim()).filter(Boolean)
   let points = lines.filter((l) => /^\d+\.\s/.test(l)).map((l) => l.replace(/^\d+\.\s*/, ''))
   const foot = lines.find((l) => /^you have/i.test(l)) ?? ''
-  const head = lines.filter((l) => !/^\d+\.\s/.test(l) && l !== foot).join(' ')
+  const head = cleanBrief(lines.filter((l) => !/^\d+\.\s/.test(l) && l !== foot).join(' '))
   if (!points.length) points = (variant.steps ?? []).map((s) => s.replace(/^Question \d+:\s*/i, ''))
   return { head, points, foot }
 }
@@ -376,20 +394,6 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
     setStage('result')
   }, [index, item, items.length, stop, task, variant])
 
-  /** Конец 20 секунд на вопрос: следующий пункт или разбор. Запись не
-      прерывается — шаг переключает только заголовок и таймер. */
-  const onStepDone = useCallback(() => {
-    if (stageRef.current !== 'run') return
-    if (stepRef.current + 1 < stepCount) setStep((s) => s + 1)
-    else void finish()
-  }, [finish, stepCount])
-
-  const quit = useCallback(() => {
-    cancelledRef.current = true
-    void stop() // микрофон гаснет сразу
-    onExit()
-  }, [onExit, stop])
-
   const next = useCallback(() => {
     if (index + 1 >= items.length) {
       onExit()
@@ -405,6 +409,42 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
     setIndex((i) => i + 1)
     setStage('countdown')
   }, [index, items.length, onExit])
+
+  /** №41/№42 прошли прежним экраном: отметки — те же, что в SessionScreen. */
+  const onLegacyDone = useCallback(
+    (r: VariantResult) => {
+      if (r.feedback) {
+        markVariantSolved(r.variantId)
+        saveTaskFeedback(r.taskId, {
+          when: new Date().toISOString(),
+          summary: r.feedback.summary,
+          score: r.feedback.score,
+          max: r.feedback.max,
+          errors: (r.feedback.errors ?? []).map((e) => ({
+            quote: e.quote,
+            correction: e.correction,
+            explanation: e.explanation,
+          })),
+        })
+      }
+      next()
+    },
+    [next],
+  )
+
+  /** Конец 20 секунд на вопрос: следующий пункт или разбор. Запись не
+      прерывается — шаг переключает только заголовок и таймер. */
+  const onStepDone = useCallback(() => {
+    if (stageRef.current !== 'run') return
+    if (stepRef.current + 1 < stepCount) setStep((s) => s + 1)
+    else void finish()
+  }, [finish, stepCount])
+
+  const quit = useCallback(() => {
+    cancelledRef.current = true
+    void stop() // микрофон гаснет сразу
+    onExit()
+  }, [onExit, stop])
 
   // Битый id варианта — только при ошибке в коде; белый экран всё равно нельзя.
   useEffect(() => {
@@ -446,11 +486,31 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
     )
   }
 
+  if (stage === 'legacy') {
+    return (
+      <div className="mini__frame">
+        <Ambient />
+        <div className="mini-legacy mini-legacy--full">
+          <TaskScreen
+            key={variant.id}
+            taskId={item.taskId}
+            variant={variant}
+            progress={{ index: index + 1, total: items.length }}
+            onExit={quit}
+            onDone={onLegacyDone}
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="mini__frame">
       <Ambient />
       <div className="mini__scroll">
-        {stage === 'countdown' && <Countdown onDone={() => setStage('intro')} />}
+        {stage === 'countdown' && (
+          <Countdown onDone={() => setStage(hasMiniScreens(task.kind) ? 'intro' : 'legacy')} />
+        )}
         {(stage === 'intro' || stage === 'run') &&
           (task.kind === 'dialogue' ? (
             <DialogueTask
