@@ -1,13 +1,13 @@
 /**
  * Оболочка мини-приложения (телефон и MAX): главная по макету 72 с нижней
- * панелью, поток задания по макетам 66·Redesign, а разделы без макетов
- * (календарь, статистика, кабинет, разговор, демо) — прежние экраны внутри
- * той же оболочки, пока не пришёл их дизайн.
+ * панелью, поток заданий по макетам 66·Redesign (сейчас №39 и №40), а
+ * разделы без макетов (календарь, статистика, кабинет, разговор, демо) —
+ * прежние экраны внутри той же оболочки, пока не пришёл их дизайн.
  */
 import { useCallback, useEffect, useState } from 'react'
 
-import { pickDemoItems, pickSession, variantById } from '../ege2/tasks'
 import type { TaskFeedback } from '../ege2/feedback'
+import { TASKS, pickDemoItems, pickSession, variantById, type TaskId } from '../ege2/tasks'
 import { CalendarScreen } from '../screens/CalendarScreen'
 import { ConversationScreen } from '../screens/ConversationScreen'
 import { ProfileScreen } from '../screens/ProfileScreen'
@@ -16,7 +16,19 @@ import { StatsScreen } from '../screens/StatsScreen'
 import { MiniHome, MiniTabs, type MiniTab } from './MiniHome'
 import { Practice, type PracticeItem } from './Practice'
 import { ResultScreen } from './ResultScreen'
+import { ResultScreen40 } from './ResultScreen40'
 import './mini.css'
+
+/** Номера, у которых уже есть мобильные макеты, — в порядке экзамена. */
+const MINI_TASKS: TaskId[] = [39, 40]
+
+interface Demo {
+  taskId?: number
+  variantId: string
+  feedback: TaskFeedback
+  transcript: string
+  audio?: string
+}
 
 type View =
   | { name: 'tab'; tab: MiniTab }
@@ -26,17 +38,28 @@ type View =
   /** Просмотр экрана разбора без микрофона и сервера: пример из sessionStorage
       (ключ gospeak.mini.demo, открывается по #mini-result). Нужен дизайнеру и
       приёмке — прогнать экран с готовым разбором. */
-  | { name: 'result-demo'; variantId: string; feedback: TaskFeedback; transcript: string; audio?: string }
+  | { name: 'result-demo'; taskId: TaskId; demo: Demo }
 
 function initialView(): View {
+  // #mini-practice=40 — поток заданий только с указанными номерами: приёмка
+  // и дизайнер смотрят экраны №40, не проходя перед этим №39 с микрофоном.
+  const m = /^#mini-practice=([\d,]+)$/.exec(window.location.hash)
+  if (m) {
+    const items = m[1]
+      .split(',')
+      .map(Number)
+      .filter((id): id is TaskId => MINI_TASKS.includes(id as TaskId))
+      .map((id) => ({ taskId: id, variantId: pickSession(id, 1)[0]?.id }))
+      .filter((i): i is PracticeItem => typeof i.variantId === 'string')
+    if (items.length) return { name: 'practice', items, nonce: Date.now() }
+  }
   if (window.location.hash === '#mini-result') {
     try {
       const raw = sessionStorage.getItem('gospeak.mini.demo')
-      const d = raw
-        ? (JSON.parse(raw) as { variantId: string; feedback: TaskFeedback; transcript: string; audio?: string })
-        : null
-      if (d && d.feedback && variantById(39, d.variantId)) {
-        return { name: 'result-demo', variantId: d.variantId, feedback: d.feedback, transcript: d.transcript, audio: d.audio }
+      const d = raw ? (JSON.parse(raw) as Demo) : null
+      const taskId: TaskId = d?.taskId === 40 ? 40 : 39
+      if (d && d.feedback && variantById(taskId, d.variantId)) {
+        return { name: 'result-demo', taskId, demo: d }
       }
     } catch {
       /* нет примера — обычная главная */
@@ -50,9 +73,11 @@ export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeed
   const home = useCallback(() => setView({ name: 'tab', tab: 'home' }), [])
 
   const startPractice = useCallback(() => {
-    // Пока в новом дизайне живёт только №39: серия из его вариантов, как в
-    // тренажёре. Когда придут макеты остальных номеров — цепочка 39→42.
-    const items = pickSession(39).map((v) => ({ taskId: 39 as const, variantId: v.id }))
+    // Цепочка заданий, как на экзамене, — по одному варианту каждого номера,
+    // у которого уже есть мобильный макет (№41–42 ждут своих).
+    const items = MINI_TASKS.filter((id) => !TASKS[id].comingSoon)
+      .map((id) => ({ taskId: id, variantId: pickSession(id, 1)[0]?.id }))
+      .filter((i): i is PracticeItem => typeof i.variantId === 'string')
     if (items.length) setView({ name: 'practice', items, nonce: Date.now() })
   }, [])
 
@@ -65,7 +90,7 @@ export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeed
   }
 
   if (view.name === 'result-demo') {
-    return <ResultDemo view={view} onExit={home} />
+    return <ResultDemo taskId={view.taskId} demo={view.demo} onExit={home} />
   }
 
   if (view.name === 'demo') {
@@ -125,40 +150,28 @@ export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeed
 
 /** Экран разбора с примером: запись (если в примере есть адрес) подтягивается
     файлом, чтобы плеер и волна были видны без микрофона. */
-function ResultDemo({
-  view,
-  onExit,
-}: {
-  view: { variantId: string; feedback: TaskFeedback; transcript: string; audio?: string }
-  onExit: () => void
-}) {
+function ResultDemo({ taskId, demo, onExit }: { taskId: TaskId; demo: Demo; onExit: () => void }) {
   const [blob, setBlob] = useState<Blob | null>(null)
   useEffect(() => {
-    if (!view.audio) return
+    if (!demo.audio) return
     let alive = true
-    void fetch(view.audio)
+    void fetch(demo.audio)
       .then((r) => (r.ok ? r.blob() : null))
       .then((b) => alive && b && setBlob(b))
       .catch(() => undefined)
     return () => {
       alive = false
     }
-  }, [view.audio])
-  const variant = variantById(39, view.variantId)!
+  }, [demo.audio])
+  const variant = variantById(taskId, demo.variantId)!
+  const common = { taskId, variant, feedback: demo.feedback, failure: null, blob, seconds: 0, onQuit: onExit, onNext: onExit }
   return (
     <div className="mini">
-      <ResultScreen
-        no={1}
-        taskId={39}
-        variant={variant}
-        feedback={view.feedback}
-        transcript={view.transcript}
-        failure={null}
-        blob={blob}
-        seconds={0}
-        onQuit={onExit}
-        onNext={onExit}
-      />
+      {taskId === 40 ? (
+        <ResultScreen40 no={2} {...common} />
+      ) : (
+        <ResultScreen no={1} transcript={demo.transcript} {...common} />
+      )}
     </div>
   )
 }

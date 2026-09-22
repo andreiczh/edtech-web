@@ -275,7 +275,13 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
                 })
             criteria.append(criterion)
         errors += _errors_from(obs.get("errors"), limit=8 - len(errors))
-        return {"summary": summary, "score": res["score"], "max": res["max"],
+        # Итог — по ОКОНЧАТЕЛЬНЫМ вердиктам, а не по ответу модели: код выше
+        # отклоняет и спасает пункты (question_rejected, rejection_refuted,
+        # answer_too_short), и до 23.09.2026 эти правки в сумму не попадали —
+        # ученик видел «вопрос 3 не засчитан» и балл 4 из 4 на одном экране
+        # (поймано живым прогоном №40 в мини-приложении).
+        score = sum(c["score"] for c in criteria) if criteria else res["score"]
+        return {"summary": summary, "score": score, "max": res["max"],
                 "errors": errors, "criteria": criteria}
 
     # monologue: модель отвечает признаками «да/нет», вердикты выводит шкала

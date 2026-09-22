@@ -461,6 +461,10 @@ curl -X POST https://pingo-ai-dpd9.onrender.com/admin/fipi/import \
   Bearer). `PATCH /me` не существует — имя бота меняется в приложении MAX.
 - Подписка и команды: `max_subscribe.py` (токен из `.env`, в вывод не
   попадает). Тест — `test_max_bot.py`. Подробности — `docs/DECISIONS.md` §6.39.
+- Бот молчит? Сначала `/health.max_bot`: `token_set` (без токена вебхук
+  отвечает 503), `received/sent/failed/last_error` — счётчики вебхука.
+- **Балл №40/№41 — сумма по окончательным критериям**, после правок кода
+  (§6.41); `res["score"]` от модели больше не используется.
 
 ## Ник и избранное (16.09.2026)
 

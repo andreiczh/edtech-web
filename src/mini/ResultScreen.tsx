@@ -110,7 +110,7 @@ function paragraphs(text: string): Array<{ from: number; to: number }> {
   return out
 }
 
-function Player({
+export function Player({
   blob,
   seconds,
   onProgress,

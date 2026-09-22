@@ -3256,6 +3256,9 @@ def health():
         "llm_model": LLM_MODEL,
         # Запасная модель: сколько раз подменяла основную и почему. Ноль —
         # основная отвечает сама; активная подмена видна по active_until.
+        # Бот MAX: есть ли токен на ЭТОМ сервере (без него вебхук отвечает 503
+        # и бот молчит — 23.09.2026 так и было, пока переменной не было на Render).
+        "max_bot": {"token_set": bool(_max_token()), "app_url": _MAX_APP_URL, **_MAX_STATS},
         "llm_fallback": {
             "model": LLM_FALLBACK_MODEL,
             "active": time.time() < _llm_fallback_until,
@@ -4971,6 +4974,13 @@ async def talk_review_endpoint(request: Request, body: dict = Body(...),
 
 _MAX_APP_URL = os.environ.get("MAX_APP_URL", "").strip() or "https://pingo-ai-dpd9.onrender.com/"
 
+# Что видел вебхук — наружу в /health: логи Render владельцу недоступны, а
+# вопрос «бот молчит — почему?» возникает первым (23.09.2026: молчал, потому
+# что токена не было на Render). Только счётчики и код последней ошибки —
+# ни текстов сообщений, ни id людей.
+_MAX_STATS: dict = {"received": 0, "ignored": 0, "sent": 0, "failed": 0,
+                    "last_error": "", "last_at": ""}
+
 
 async def _max_send(user_id, chat_id, body: dict) -> bool:
     """POST /messages в MAX. Если клавиатуру с open_app API отверг (формат
@@ -4986,11 +4996,16 @@ async def _max_send(user_id, chat_id, body: dict) -> bool:
                                  headers={"Authorization": token}, json=payload)
             except Exception as e:  # noqa: BLE001
                 print(f"[max] отправка не удалась: {type(e).__name__}")
+                _MAX_STATS["failed"] += 1
+                _MAX_STATS["last_error"] = type(e).__name__
                 return False
             if r.status_code == 200:
+                _MAX_STATS["sent"] += 1
                 return True
             print(f"[max] отправка не удалась ({r.status_code}): {r.text[:160]}")
+            _MAX_STATS["last_error"] = f"{r.status_code}: {r.text[:120]}"
             if r.status_code >= 500 or attempt == 2:
+                _MAX_STATS["failed"] += 1
                 return False
     return False
 
@@ -5003,10 +5018,14 @@ async def max_webhook(request: Request, body: dict = Body(...)):
     if not max_bot.secret_ok(request.headers.get("x-max-bot-api-secret"), token):
         raise HTTPException(status_code=403, detail="Forbidden")
     ev = max_bot.parse_update(body)
+    _MAX_STATS["received"] += 1
+    _MAX_STATS["last_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if ev and (ev.get("user_id") or ev.get("chat_id")):
         print(f"[max] {ev['kind']}")
         asyncio.create_task(_max_send(ev.get("user_id"), ev.get("chat_id"),
                                       max_bot.welcome_message(_MAX_APP_URL)))
+    else:
+        _MAX_STATS["ignored"] += 1
     return {"ok": True}
 
 

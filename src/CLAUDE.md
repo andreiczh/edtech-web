@@ -75,7 +75,12 @@ React 19 + Vite 6 + TypeScript, **обычный CSS** (`index.css`). Tailwind �
 `Practice.tsx` (сейчас только №39), разбор — `ResultScreen.tsx`. Разделы без
 макетов (календарь, статистика, кабинет, разговор, демо) — старые экраны в
 `.mini-legacy`. Просмотр разбора без микрофона: `/#mini-result` + пример в
-`sessionStorage['gospeak.mini.demo']`.
+`sessionStorage['gospeak.mini.demo']` (`taskId` выбирает экран); поток только
+с нужными номерами — `/#mini-practice=40`; телефонная версия с компьютера —
+`/?mini`. Проверка потока без ожидания: в консоли подменить `Date.now`
+(сдвиг вперёд заканчивает таймер) и `getUserMedia` (осциллятор в
+MediaStreamDestination) — §6.41. №40: `DialogueTask` + `ResultScreen40.tsx`;
+общие звёздочка и нижняя панель разбора — `ResultBits.tsx`.
 
 ## Ник и избранное (16.09.2026)
 - Ник генерирует `auth/nickname.ts` (два слова, от 15 букв — длиннее любого

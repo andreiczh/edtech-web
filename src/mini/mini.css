@@ -460,9 +460,11 @@
   color: rgba(0, 0, 0, 0.39);
   white-space: nowrap;
 }
+/* От правого края, а не от левого: стрелка лежит внутри кнопки-зоны
+   .r-next-hit, и left считался бы от неё, а не от кадра. */
 .r-next-arrow {
   position: absolute;
-  left: calc(360.3 * var(--u)); top: calc(17.9 * var(--u));
+  right: calc(23.9 * var(--u)); top: calc(17.9 * var(--u));
   width: calc(17.82 * var(--u)); height: calc(16.96 * var(--u));
 }
 .r-next-hit {
@@ -645,3 +647,159 @@
   overflow: hidden;
 }
 .mini-legacy > .screen { padding: 10px 12px; }
+
+/* С компьютера (?mini) оболочка стоит колонкой посередине окна: снаружи —
+   чуть темнее, чтобы край телефона был виден. На телефоне правило не работает. */
+@media (min-width: 461px) {
+  .mini { background: #eeece6; }
+  .mini--home { background: #ecebef; }
+  .mini__frame { background: #f8f7f2; box-shadow: 0 0 0 1px rgba(83, 78, 137, 0.08), 0 0 48px rgba(23, 20, 38, 0.12); }
+  .mini--home .mini__frame { background: #fff; }
+}
+
+/* Ошибка микрофона — кнопка: нажатие пробует снова (SKIP на №39 делает то же). */
+.m-note { display: block; cursor: pointer; }
+
+/* --------------------------------------- задание №40: объявление (20) */
+/* Три карточки объявления: инструкция, пункты, «20 секунд на вопрос». Кегли
+   подобраны по переносам строк макета (Nunito 700 9.05: все три строки
+   ложатся как в файле) и по ширине списка (9.15). */
+.d-instr {
+  margin-top: calc(32.1 * var(--u));
+  padding: calc(9.55 * var(--u)) calc(12.5 * var(--u)) calc(12.65 * var(--u)) calc(15.1 * var(--u));
+  font: 700 calc(9.05 * var(--u)) / calc(12.1 * var(--u)) var(--nunito);
+}
+.d-points {
+  margin-top: calc(9.9 * var(--u));
+  padding: calc(8.96 * var(--u)) calc(12 * var(--u)) calc(9.64 * var(--u)) calc(18.3 * var(--u));
+  font: 700 calc(9.15 * var(--u)) / calc(12.15 * var(--u)) var(--nunito);
+}
+.d-points ol { list-style: none; margin: 0; padding: 0; }
+.d-foot {
+  margin-top: calc(9.9 * var(--u));
+  min-height: calc(37.7 * var(--u));
+  border-radius: calc(12.5 * var(--u));
+  display: flex;
+  align-items: center;
+  padding: calc(4 * var(--u)) calc(12 * var(--u)) calc(4 * var(--u)) calc(15.3 * var(--u));
+  font: 700 calc(9.09 * var(--u)) / calc(12.1 * var(--u)) var(--nunito);
+}
+.d-caption {
+  margin: calc(88.1 * var(--u)) auto 0;
+  width: calc(354.8 * var(--u));
+  text-align: center;
+  font: 700 calc(15.14 * var(--u)) / calc(18 * var(--u)) var(--nunito);
+  color: var(--ink);
+  text-wrap: balance;
+}
+.d-photo {
+  display: block;
+  width: calc(354.8 * var(--u));
+  height: calc(236.2 * var(--u));
+  margin: calc(1.5 * var(--u)) auto 0;
+  border-radius: calc(22.73 * var(--u));
+  object-fit: cover;
+  background: #e9e7f0;
+}
+/* Запись (27–30): «N. пункт» над тем же фото. */
+.d-title {
+  margin: calc(196.4 * var(--u)) auto 0;
+  width: calc(354.8 * var(--u));
+  text-align: center;
+  font: 700 calc(24.3 * var(--u)) / calc(29 * var(--u)) var(--nunito);
+  color: var(--ink);
+  text-wrap: balance;
+}
+.d-title + .d-photo { margin-top: calc(2.4 * var(--u)); }
+
+/* ------------------------------------------------- разбор №40 (31) */
+.q-summary {
+  position: relative;
+  width: calc(368.8 * var(--u));
+  height: calc(121.4 * var(--u));
+  margin: calc(22 * var(--u)) auto 0;
+  border-radius: calc(16.67 * var(--u));
+  background: linear-gradient(90deg, #f2ebff 0%, #ced9ff 100%);
+}
+.q-ring {
+  position: absolute;
+  left: calc(6.65 * var(--u)); top: calc(32.2 * var(--u));
+  width: calc(57.4 * var(--u)); height: calc(57.4 * var(--u));
+  border-radius: 50%;
+  border: calc(7.46 * var(--u)) solid #9bcec1;
+  box-sizing: border-box;
+}
+.q-ring--zero { border-color: #ffb6a6; }
+.q-ring--none { border-color: #c5c5c5; }
+.q-score {
+  position: absolute;
+  left: calc(6.65 * var(--u)); width: calc(57.4 * var(--u)); top: calc(48.5 * var(--u));
+  text-align: center;
+  font: 700 calc(24 * var(--u)) / 1 var(--nunito);
+  color: #4a4a4a;
+}
+.q-of {
+  position: absolute;
+  left: calc(6.65 * var(--u)); width: calc(57.4 * var(--u)); top: calc(70.9 * var(--u));
+  text-align: center;
+  font: 700 calc(4.52 * var(--u)) / 1 var(--nunito);
+  color: #c5c5c5;
+  white-space: nowrap;
+}
+.q-list {
+  position: absolute;
+  left: calc(88.6 * var(--u)); top: calc(31.2 * var(--u));
+  margin: 0; padding: 0; list-style: none;
+  font: 700 calc(9.07 * var(--u)) / calc(14.8 * var(--u)) var(--nunito);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.q-list .ok { color: #9bcec1; }
+.q-list .no { color: #ffb6a6; }
+.q-fail {
+  position: absolute;
+  left: calc(88.6 * var(--u)); right: calc(12 * var(--u)); top: calc(31.2 * var(--u));
+  font: 700 calc(9.07 * var(--u)) / calc(12 * var(--u)) var(--nunito);
+  color: var(--ink);
+}
+.q-summary .r-player { left: calc(213.5 * var(--u)); top: calc(41.9 * var(--u)); height: calc(36.6 * var(--u)); }
+
+/* Карточки вопросов: значок номера над левым краем, карточка с жёсткой
+   тенью 1.33 пт вправо-вниз (в макете — dx=dy=7 без размытия). */
+.q-item { width: calc(368.8 * var(--u)); margin: calc(16 * var(--u)) auto 0; }
+.q-item--first { margin-top: calc(35 * var(--u)); }
+.q-badge {
+  width: calc(12.1 * var(--u)); height: calc(12.1 * var(--u));
+  border-radius: calc(2.84 * var(--u));
+  background: #e2e0f8;
+  box-shadow: calc(0.76 * var(--u)) calc(0.57 * var(--u)) 0 var(--ink);
+  display: grid; place-items: center;
+  font: 700 calc(11.7 * var(--u)) / 1 var(--nunito);
+  color: #000;
+}
+.q-card {
+  margin-top: calc(2.1 * var(--u));
+  min-height: calc(69.1 * var(--u));
+  box-sizing: border-box;
+  padding: calc(4.45 * var(--u)) calc(8.6 * var(--u)) calc(5.9 * var(--u));
+  border-radius: calc(8.34 * var(--u));
+  background: linear-gradient(90deg, #f2ebff 0%, #ced9ff 100%);
+  box-shadow: calc(1.33 * var(--u)) calc(1.33 * var(--u)) 0 var(--ink);
+}
+.q-k { display: block; font: 700 calc(6.8 * var(--u)) / 1 var(--nunito); color: #9b9595; }
+.q-v {
+  display: block;
+  margin-top: calc(2.35 * var(--u));
+  font: 700 calc(12.1 * var(--u)) / calc(14.5 * var(--u)) var(--nunito);
+  color: #000;
+  overflow-wrap: anywhere;
+}
+.q-v + .q-k { margin-top: calc(11.45 * var(--u)); }
+.q-v--better { color: #9bcec1; }
+.q-v--muted { color: #9b9595; }
+.q-why {
+  display: block;
+  margin-top: calc(2 * var(--u));
+  font: 700 calc(6.8 * var(--u)) / calc(8.5 * var(--u)) var(--nunito);
+  color: #9b9595;
+}
