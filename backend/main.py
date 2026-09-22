@@ -263,6 +263,15 @@ TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AvaMultilingualNeural")
 # OpenRouter за Cloudflare-блоком РФ — 403.) Свапается через .env, см. .env.example.
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.mistral.ai/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "mistral-small-latest")
+# Запасная модель на случай, когда у ключа НЕТ квоты на основную: 22.09.2026
+# Mistral стал отвечать на mistral-small/medium «429 Rate limit exceeded» с
+# заголовком x-ratelimit-limit-req-minute: 0 (не всплеск, а нулевой лимит
+# тарифа), и разбор на проде умер целиком, пока ministral-8b на том же ключе
+# отвечал с лимитом 188 запросов/мин. Переключение автоматическое и громкое
+# (/health.llm_fallback), на 10 минут, потом основная модель пробуется снова.
+# Качество ministral-8b по сетке ФИПИ не мерялось — это костыль, а не выбор.
+# Пусто = выключено.
+LLM_FALLBACK_MODEL = os.environ.get("LLM_FALLBACK_MODEL", "ministral-8b-latest").strip()
 
 # Отправлять НАШ трафик мимо VPN, привязав сокеты к физическому интерфейсу.
 #
@@ -2713,6 +2722,92 @@ _LLM_TIMEOUT = 30.0
 _LLM_RETRIES = 1
 
 
+# ------------------------------------------------- Запасная модель LLM
+#
+# Все вызовы модели идут через client.chat.completions.create(model=LLM_MODEL,
+# ...) — двенадцать мест. Чтобы не трогать каждое, клиенты SDK отдаются в
+# тонкой обёртке: она подменяет модель на запасную, когда основная отвечает
+# «429 с нулевым лимитом», и держит замену _LLM_FALLBACK_HOLD секунд.
+
+_LLM_FALLBACK_HOLD = 600.0
+_llm_fallback_until = 0.0
+_llm_fallback_count = 0
+_llm_fallback_reason = ""
+
+
+def _llm_limit_zero(e: Exception) -> bool:
+    """429, у которого лимит запросов в минуту равен нулю: у ключа нет квоты
+    на эту модель. Обычный всплеск (лимит есть, запросы кончились) сюда не
+    попадает — его лечит повтор, а не другая модель."""
+    if getattr(e, "status_code", None) != 429:
+        return False
+    headers = getattr(getattr(e, "response", None), "headers", None) or {}
+    try:
+        return str(headers.get("x-ratelimit-limit-req-minute", "")).strip() == "0"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _llm_use_fallback(kw: dict) -> bool:
+    return bool(LLM_FALLBACK_MODEL) and kw.get("model") == LLM_MODEL and time.time() < _llm_fallback_until
+
+
+def _llm_note_fallback(e: Exception) -> None:
+    global _llm_fallback_until, _llm_fallback_count, _llm_fallback_reason
+    _llm_fallback_until = time.time() + _LLM_FALLBACK_HOLD
+    _llm_fallback_count += 1
+    _llm_fallback_reason = f"{type(e).__name__}: {str(e)[:120]}"
+    print(f"[llm] у ключа нет квоты на {LLM_MODEL} — {int(_LLM_FALLBACK_HOLD)} с отвечает {LLM_FALLBACK_MODEL}")
+
+
+class _Completions:
+    def __init__(self, inner):
+        self._inner = inner
+
+    def create(self, **kw):
+        global _llm_fallback_count
+        if _llm_use_fallback(kw):
+            _llm_fallback_count += 1
+            return self._inner.create(**{**kw, "model": LLM_FALLBACK_MODEL})
+        try:
+            return self._inner.create(**kw)
+        except Exception as e:  # noqa: BLE001
+            if not (LLM_FALLBACK_MODEL and kw.get("model") == LLM_MODEL and _llm_limit_zero(e)):
+                raise
+            _llm_note_fallback(e)
+            return self._inner.create(**{**kw, "model": LLM_FALLBACK_MODEL})
+
+
+class _AsyncCompletions:
+    def __init__(self, inner):
+        self._inner = inner
+
+    async def create(self, **kw):
+        global _llm_fallback_count
+        if _llm_use_fallback(kw):
+            _llm_fallback_count += 1
+            return await self._inner.create(**{**kw, "model": LLM_FALLBACK_MODEL})
+        try:
+            return await self._inner.create(**kw)
+        except Exception as e:  # noqa: BLE001
+            if not (LLM_FALLBACK_MODEL and kw.get("model") == LLM_MODEL and _llm_limit_zero(e)):
+                raise
+            _llm_note_fallback(e)
+            return await self._inner.create(**{**kw, "model": LLM_FALLBACK_MODEL})
+
+
+class _LlmProxy:
+    """Обёртка над клиентом SDK: наружу только chat.completions.create."""
+
+    class _Chat:
+        def __init__(self, completions):
+            self.completions = completions
+
+    def __init__(self, inner, is_async: bool):
+        self.chat = self._Chat(_AsyncCompletions(inner.chat.completions) if is_async
+                               else _Completions(inner.chat.completions))
+
+
 def llm_client() -> OpenAI:
     global _llm
     if _llm is None:
@@ -2725,7 +2820,7 @@ def llm_client() -> OpenAI:
                 limits=_KEEPALIVE,
             ),
         )
-    return _llm
+    return _LlmProxy(_llm, is_async=False)  # type: ignore[return-value]
 
 
 def llm_http_client() -> httpx.AsyncClient:
@@ -2753,7 +2848,7 @@ def async_llm_client() -> AsyncOpenAI:
             timeout=_LLM_TIMEOUT, max_retries=_LLM_RETRIES,
             http_client=llm_http_client(),
         )
-    return _async_llm
+    return _LlmProxy(_async_llm, is_async=True)  # type: ignore[return-value]
 
 
 async def _ping_pool(client: httpx.AsyncClient) -> bool:
@@ -3159,6 +3254,14 @@ def health():
         "tts": _tts_health(),
         "llm_base": LLM_BASE_URL,
         "llm_model": LLM_MODEL,
+        # Запасная модель: сколько раз подменяла основную и почему. Ноль —
+        # основная отвечает сама; активная подмена видна по active_until.
+        "llm_fallback": {
+            "model": LLM_FALLBACK_MODEL,
+            "active": time.time() < _llm_fallback_until,
+            "count": _llm_fallback_count,
+            "reason": _llm_fallback_reason,
+        },
         "llm_key": bool(os.environ.get("LLM_API_KEY")),
         "memory": _storage_health(),
         # Показываем ТОЛЬКО число кодов, не сами коды. «закрыта» здесь — не

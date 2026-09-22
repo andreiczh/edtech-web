@@ -444,6 +444,12 @@ curl -X POST https://pingo-ai-dpd9.onrender.com/admin/fipi/import \
 
 Тест: `test_max_auth.py` (без сети).
 
+## Запасная модель LLM (22.09.2026)
+`_LlmProxy` оборачивает клиенты SDK: 429 с `x-ratelimit-limit-req-minute: 0`
+у основной модели → повтор `LLM_FALLBACK_MODEL` и 10 минут подмены, видно в
+`/health.llm_fallback`. Обычные 429 и прочие ошибки — наружу как раньше.
+Тест `test_llm_fallback.py`. Причина и что делать владельцу — §6.40.
+
 ## Бот в MAX (22.09.2026)
 - `max_bot.py` — чистый модуль: секрет вебхука из токена, разбор обновлений
   (`bot_started`, `message_created`, `message_callback`), приветствие с

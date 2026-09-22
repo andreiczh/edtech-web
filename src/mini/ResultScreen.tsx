@@ -40,23 +40,45 @@ interface Mark {
 }
 
 function markKind(e: FeedbackError): Kind {
-  if (e.cat === 'missing') return 'skip'
+  // Пропуск: сервер помечает cat=missing, а модель иногда пишет «пропущено»
+  // в поле услышанного — это тот же пропуск, а не «прочитано другое слово».
+  if (e.cat === 'missing' || /^пропущен/i.test(e.quote || '')) return 'skip'
   if (/форм[аы] слова|окончани/i.test(e.explanation)) return 'phon'
   return 'sense'
 }
 
 /** Позиции ошибок в эталоне — по слову из эталона (correction), как в ResultView. */
+/** Текст без регистра и знаков препинания + карта «нормализованный индекс →
+    исходный»: сервер цитирует пропущенный кусок без запятых, а в эталоне
+    они есть, и по буквам это один и тот же фрагмент. */
+function normalized(s: string): { text: string; map: number[] } {
+  let text = ''
+  const map: number[] = []
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i].toLowerCase()
+    if (/[\p{L}\p{N}']/u.test(ch)) {
+      text += ch
+      map.push(i)
+    } else if (/\s/.test(ch) && text.length && text[text.length - 1] !== ' ') {
+      text += ' '
+      map.push(i)
+    }
+  }
+  return { text, map }
+}
+
 function findMarks(reference: string, errors: FeedbackError[]): Mark[] {
-  const low = reference.toLowerCase()
+  const ref = normalized(reference)
   const marks: Mark[] = []
   for (const e of errors) {
-    const needle = (e.correction || '').trim().toLowerCase()
+    const needle = normalized(e.correction || '').text.trim()
     if (needle.length < 2) continue
-    const at = low.indexOf(needle)
+    const at = ref.text.indexOf(needle)
     if (at < 0) continue
-    const to = at + needle.length
-    if (marks.some((m) => at < m.to && to > m.from)) continue
-    marks.push({ from: at, to, kind: markKind(e), err: e })
+    const from = ref.map[at]
+    const to = ref.map[at + needle.length - 1] + 1
+    if (marks.some((m) => from < m.to && to > m.from)) continue
+    marks.push({ from, to, kind: markKind(e), err: e })
   }
   return marks.sort((a, b) => a.from - b.from)
 }

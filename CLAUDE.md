@@ -60,7 +60,7 @@ ICP: 17–25 лет, РФ. Solo-dev, bootstrap, бюджет $0.
 | Узел | Решение |
 |---|---|
 | STT | **Mistral Voxtral**: `mini` в разговоре (быстро), `small` в оцениваемых заданиях (точно) — `docs/DECISIONS.md` §6.3 |
-| LLM | **Mistral** — `api.mistral.ai/v1`, `mistral-small-latest` |
+| LLM | **Mistral** — `api.mistral.ai/v1`, `mistral-small-latest`; ⚠️ с 22.09.2026 у ключа лимит 0 на small/medium (§6.40), сервер сам уходит на `LLM_FALLBACK_MODEL` = `ministral-8b-latest` — видно в `/health.llm_fallback` |
 | TTS | **Mistral** — `voxtral-mini-tts`, эмоция зашита в голос (`en_paul_cheerful` и ещё 6). Диктор один. Запасной путь и три разных голоса — `TTS_PROVIDER=edge` (edge-tts, без ключа) |
 
 Нужен **ОДИН** ключ: `LLM_API_KEY` в `backend/.env` (только на Windows, в git его нет).

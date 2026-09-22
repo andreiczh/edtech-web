@@ -4,7 +4,7 @@
  * (календарь, статистика, кабинет, разговор, демо) — прежние экраны внутри
  * той же оболочки, пока не пришёл их дизайн.
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { pickDemoItems, pickSession, variantById } from '../ege2/tasks'
 import type { TaskFeedback } from '../ege2/feedback'
@@ -26,15 +26,17 @@ type View =
   /** Просмотр экрана разбора без микрофона и сервера: пример из sessionStorage
       (ключ gospeak.mini.demo, открывается по #mini-result). Нужен дизайнеру и
       приёмке — прогнать экран с готовым разбором. */
-  | { name: 'result-demo'; variantId: string; feedback: TaskFeedback; transcript: string }
+  | { name: 'result-demo'; variantId: string; feedback: TaskFeedback; transcript: string; audio?: string }
 
 function initialView(): View {
   if (window.location.hash === '#mini-result') {
     try {
       const raw = sessionStorage.getItem('gospeak.mini.demo')
-      const d = raw ? (JSON.parse(raw) as { variantId: string; feedback: TaskFeedback; transcript: string }) : null
+      const d = raw
+        ? (JSON.parse(raw) as { variantId: string; feedback: TaskFeedback; transcript: string; audio?: string })
+        : null
       if (d && d.feedback && variantById(39, d.variantId)) {
-        return { name: 'result-demo', variantId: d.variantId, feedback: d.feedback, transcript: d.transcript }
+        return { name: 'result-demo', variantId: d.variantId, feedback: d.feedback, transcript: d.transcript, audio: d.audio }
       }
     } catch {
       /* нет примера — обычная главная */
@@ -63,23 +65,7 @@ export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeed
   }
 
   if (view.name === 'result-demo') {
-    const variant = variantById(39, view.variantId)!
-    return (
-      <div className="mini">
-        <ResultScreen
-          no={1}
-          taskId={39}
-          variant={variant}
-          feedback={view.feedback}
-          transcript={view.transcript}
-          failure={null}
-          blob={null}
-          seconds={0}
-          onQuit={home}
-          onNext={home}
-        />
-      </div>
-    )
+    return <ResultDemo view={view} onExit={home} />
   }
 
   if (view.name === 'demo') {
@@ -133,6 +119,46 @@ export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeed
         )}
         <MiniTabs active={tab} onTab={onTab} />
       </div>
+    </div>
+  )
+}
+
+/** Экран разбора с примером: запись (если в примере есть адрес) подтягивается
+    файлом, чтобы плеер и волна были видны без микрофона. */
+function ResultDemo({
+  view,
+  onExit,
+}: {
+  view: { variantId: string; feedback: TaskFeedback; transcript: string; audio?: string }
+  onExit: () => void
+}) {
+  const [blob, setBlob] = useState<Blob | null>(null)
+  useEffect(() => {
+    if (!view.audio) return
+    let alive = true
+    void fetch(view.audio)
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((b) => alive && b && setBlob(b))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [view.audio])
+  const variant = variantById(39, view.variantId)!
+  return (
+    <div className="mini">
+      <ResultScreen
+        no={1}
+        taskId={39}
+        variant={variant}
+        feedback={view.feedback}
+        transcript={view.transcript}
+        failure={null}
+        blob={blob}
+        seconds={0}
+        onQuit={onExit}
+        onNext={onExit}
+      />
     </div>
   )
 }
