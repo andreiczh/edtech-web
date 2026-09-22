@@ -444,6 +444,18 @@ curl -X POST https://pingo-ai-dpd9.onrender.com/admin/fipi/import \
 
 Тест: `test_max_auth.py` (без сети).
 
+## Бот в MAX (22.09.2026)
+- `max_bot.py` — чистый модуль: секрет вебхука из токена, разбор обновлений
+  (`bot_started`, `message_created`, `message_callback`), приветствие с
+  кнопкой `open_app` + запасной `link`, список команд.
+- `POST /max/webhook` — проверяет `X-Max-Bot-Api-Secret`, отвечает `{ok}`
+  сразу, приветствие шлёт фоном (`_max_send`; если MAX отверг клавиатуру —
+  повтор с одной ссылкой). Без `MAX_BOT_TOKEN` — 503.
+- API: `https://botapi.max.ru`, заголовок `Authorization: <токен>` (без
+  Bearer). `PATCH /me` не существует — имя бота меняется в приложении MAX.
+- Подписка и команды: `max_subscribe.py` (токен из `.env`, в вывод не
+  попадает). Тест — `test_max_bot.py`. Подробности — `docs/DECISIONS.md` §6.39.
+
 ## Ник и избранное (16.09.2026)
 
 - **Ник от 15 букв** (`NICK_MIN`, `_nick_ok`): регистрация, `/me/nickname` и

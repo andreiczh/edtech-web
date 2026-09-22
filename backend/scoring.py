@@ -170,6 +170,9 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
         return {
             "summary": " ".join(p for p in parts if p).strip(),
             "score": score, "max": ege_scoring.MAX_SCORE["reading"], "errors": errors,
+            # Счёт грубых ошибок наружу: экран разбора пишет «N ошибок из 2,
+            # искажающих смысл» тем же числом, по которому поставлен балл.
+            "misread_words": misread_words,
         }
 
     if kind in ("dialogue", "interview"):

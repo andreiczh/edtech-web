@@ -54,6 +54,7 @@ import ege_scoring
 import disputes
 import fipi_import
 import max_auth
+import max_bot
 import speak_check
 import storage
 
@@ -4855,6 +4856,55 @@ async def talk_review_endpoint(request: Request, body: dict = Body(...),
         asyncio.create_task(_remember_gist())
 
     return review
+
+
+# ------------------------------------------------------------ Бот MAX
+#
+# Вебхук бота: MAX присылает сюда события (старт диалога, сообщения, нажатия),
+# бот отвечает приветствием с кнопкой мини-приложения. Ответ MAX ждёт не
+# дольше 30 с, поэтому отправка уходит фоном, а вебхук отвечает сразу.
+# Секрет вебхука выводится из токена (max_bot.webhook_secret) — отдельной
+# переменной нет; чужие запросы получают 403. Подписка — backend/max_subscribe.py.
+
+_MAX_APP_URL = os.environ.get("MAX_APP_URL", "").strip() or "https://pingo-ai-dpd9.onrender.com/"
+
+
+async def _max_send(user_id, chat_id, body: dict) -> bool:
+    """POST /messages в MAX. Если клавиатуру с open_app API отверг (формат
+    кнопки может отличаться от клиента 0.3.1) — шлём то же с одной ссылкой:
+    приветствие без кнопки хуже, чем с запасной."""
+    token = _max_token()
+    params = {"user_id": user_id} if user_id else {"chat_id": chat_id}
+    fallback = max_bot.welcome_message(_MAX_APP_URL, with_open_app=False)
+    async with httpx.AsyncClient(timeout=15, trust_env=False) as c:
+        for attempt, payload in ((1, body), (2, fallback)):
+            try:
+                r = await c.post(f"{max_bot.API_BASE}/messages", params=params,
+                                 headers={"Authorization": token}, json=payload)
+            except Exception as e:  # noqa: BLE001
+                print(f"[max] отправка не удалась: {type(e).__name__}")
+                return False
+            if r.status_code == 200:
+                return True
+            print(f"[max] отправка не удалась ({r.status_code}): {r.text[:160]}")
+            if r.status_code >= 500 or attempt == 2:
+                return False
+    return False
+
+
+@app.post("/max/webhook", include_in_schema=False)
+async def max_webhook(request: Request, body: dict = Body(...)):
+    token = _max_token()
+    if not token:
+        raise HTTPException(status_code=503, detail="Бот MAX не настроен на сервере.")
+    if not max_bot.secret_ok(request.headers.get("x-max-bot-api-secret"), token):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    ev = max_bot.parse_update(body)
+    if ev and (ev.get("user_id") or ev.get("chat_id")):
+        print(f"[max] {ev['kind']}")
+        asyncio.create_task(_max_send(ev.get("user_id"), ev.get("chat_id"),
+                                      max_bot.welcome_message(_MAX_APP_URL)))
+    return {"ok": True}
 
 
 # ------------------------------------------------- Проба MAX (/max-check)

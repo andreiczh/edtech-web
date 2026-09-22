@@ -35,6 +35,8 @@ import {
 } from './ege2/tasks'
 import { favoriteSessionItems, syncFavorites } from './ege2/favorites'
 import { isMaxLaunch } from './max/bridge'
+import { MiniApp } from './mini/MiniApp'
+import { useMobileShell } from './mini/useMobileShell'
 import { AdminScreen } from './screens/AdminScreen'
 import { CalendarScreen } from './screens/CalendarScreen'
 import { IntroScreen, LoginScreen, MaxLoginScreen, RegisterScreen } from './screens/AuthScreens'
@@ -75,6 +77,8 @@ function initialRoute(): Route {
 export default function App() {
   const [route, setRoute] = useState<Route>(initialRoute)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  // Телефон и MAX — мини-оболочка по мобильным макетам, см. mini/MiniApp.tsx.
+  const mobile = useMobileShell()
   /* Тема (тёмная/светлая) — настройка кабинета, применяется атрибутом на
      корневом .app: CSS-переменные переопределяются одним селектором. */
   const { theme } = useSettings()
@@ -202,6 +206,25 @@ export default function App() {
             setRoute(currentUser() ? { name: 'home' } : { name: 'welcome' })
           }}
         />
+      </div>
+    )
+  }
+
+  // Мини-оболочка (телефон, MAX): своя главная, поток задания и панель разделов.
+  if (mobile) {
+    return (
+      <div className="app" data-theme={paint} data-mode={mode}>
+        <MiniApp
+          onLogout={() => setRoute(isMaxLaunch() ? { name: 'maxlogin' } : { name: 'welcome' })}
+          onFeedback={onFeedback}
+        />
+        {feedbackOpen && (
+          <DisagreeModal
+            ctx={{ kind: 'app', target: 'app', targetLabel: 'Отзыв о приложении' }}
+            onClose={() => setFeedbackOpen(false)}
+            onSent={() => undefined}
+          />
+        )}
       </div>
     )
   }
