@@ -1,5 +1,6 @@
 /**
- * Разбор задания №40 — макет «66 · Redesign 31» один в один.
+ * Разбор задания №40 — макет «66 · Redesign 31» один в один; тем же экраном
+ * идёт интервью №41 (пять вопросов, макета разбора у него нет).
  *
  * Сверху карточка: кольцо с баллом (мятное — балл есть, коралловое — ноль),
  * список «ВОПРОС №N засчитан / не засчитан» по критериям сервера, плеер
@@ -42,6 +43,7 @@ export function ResultScreen40({
 }) {
   const criteria = feedback?.criteria ?? []
   const count = Math.max(variant.steps?.length ?? 0, criteria.length, 1)
+  const interview = taskId === 41
   const score = feedback?.score ?? null
   const max = feedback?.max ?? count
   const ringClass = feedback === null ? 'q-ring--none' : score ? '' : 'q-ring--zero'
@@ -91,9 +93,14 @@ export function ResultScreen40({
           Array.from({ length: count }, (_, i) => {
             const c = criteria[i]
             const ok = !!c && c.score >= c.max
-            const heard = c?.quote?.trim() || '— вопрос не прозвучал —'
-            const better = ok ? PRAISE : c?.correction?.trim() || c?.comment?.trim() || 'вопрос не засчитан'
-            const why = !ok && c?.correction?.trim() && c?.comment?.trim() ? c.comment.trim() : ''
+            const heard = c?.quote?.trim() || (interview ? '— ответа не было —' : '— вопрос не прозвучал —')
+            // «лучше» — когда есть чем заменить (correction). У интервью сервер
+            // даёт только причину отказа: под подписью «лучше» она читалась бы как
+            // совет, поэтому подпись честная — «почему не засчитан».
+            const correction = c?.correction?.trim() || ''
+            const better = ok ? PRAISE : correction || c?.comment?.trim() || (interview ? 'ответ не засчитан' : 'вопрос не засчитан')
+            const betterLabel = ok || correction ? 'лучше' : 'почему не засчитан'
+            const why = !ok && correction && c?.comment?.trim() ? c.comment.trim() : ''
             return (
               <div className={`q-item${i === 0 ? ' q-item--first' : ''}`} key={i}>
                 <div className="q-badge" aria-hidden="true">
@@ -102,7 +109,7 @@ export function ResultScreen40({
                 <div className="q-card">
                   <span className="q-k">ваш ответ</span>
                   <span className={`q-v${c?.quote?.trim() ? '' : ' q-v--muted'}`}>{heard}</span>
-                  <span className="q-k">лучше</span>
+                  <span className="q-k">{betterLabel}</span>
                   <span className="q-v q-v--better">{better}</span>
                   {why && <span className="q-why">{why}</span>}
                 </div>
