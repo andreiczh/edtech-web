@@ -279,7 +279,8 @@ export interface KindAnalytics {
 
 export interface MeAnalytics {
   kinds: Record<string, KindAnalytics>
-  history: Array<{ d: string; k: string; p: number }>
+  /** день, тип, процент; v/s/m — вариант и балл (пусто у старых записей) */
+  history: Array<{ d: string; k: string; p: number; v?: string; s?: number; m?: number }>
   mistakes: {
     total: number
     by_cat: Array<{ cat: string; n: number; example: { quote: string; correction: string } | null }>

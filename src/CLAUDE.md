@@ -89,6 +89,13 @@ React 19 + Vite 6 + TypeScript, **обычный CSS** (`index.css`). Tailwind �
 MediaStreamDestination) — §6.41. №40: `DialogueTask` + `ResultScreen40.tsx`;
 общие звёздочка и нижняя панель разбора — `ResultBits.tsx`.
 
+Основные экраны (24.09.2026, §6.43): `MiniHome.tsx` (макет 69),
+`MiniTalk.tsx` (39, логика — `useConversation`), `MiniStats.tsx`,
+`MiniSettings.tsx`; вкладки `MiniTabs`: home | talk | stats | settings,
+иконки красятся currentColor. «Вариант по ошибкам» — `mini/mistakes.ts` из
+`history.v/s/m`. Открыть вкладку без кликов — `/?mini#mini-tab=stats`.
+Кабинет (ник, согласие, выход) — прежний `ProfileScreen` из настроек.
+
 ## Ник и избранное (16.09.2026)
 - Ник генерирует `auth/nickname.ts` (два слова, от 15 букв — длиннее любого
   приветствия из `account/greeting.ts`); `auth.ts` его только реэкспортирует.

@@ -37,7 +37,10 @@ export interface PracticeItem {
   variantId: string
 }
 
-type Stage = 'countdown' | 'intro' | 'run' | 'analyzing' | 'result' | 'legacy'
+/** ready — второй отсчёт «Preparation 5…1» между подготовкой и записью №39
+    (макет 38 рядом с 32; в раскладке владельца от 24.09.2026 он стоит после
+    инструкции). У №40 второго отсчёта в раскладке нет. */
+type Stage = 'countdown' | 'intro' | 'ready' | 'run' | 'analyzing' | 'result' | 'legacy'
 
 /** Есть ли у номера мобильные макеты; остальные идут прежним экраном. */
 const hasMiniScreens = (kind: string) => kind === 'reading' || kind === 'dialogue'
@@ -197,7 +200,7 @@ function ReadingTask({
   variant: TaskVariant
   stage: 'intro' | 'run'
   micError: string | null
-  /** SKIP и конец подготовки: включить микрофон и начать запись */
+  /** SKIP и конец подготовки: у №39 — отсчёт перед записью, потом микрофон */
   onStart: () => void
   onQuit: () => void
   onRunDone: () => void
@@ -338,6 +341,7 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
     setMicError(null)
     if (!(await start())) {
       setMicError(MIC_NOTE)
+      setStage('intro')
       return
     }
     startedAtRef.current = Date.now()
@@ -529,11 +533,12 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
               variant={variant}
               stage={stage}
               micError={micError}
-              onStart={() => void startRun()}
+              onStart={() => setStage('ready')}
               onRunDone={() => void finish()}
               onQuit={quit}
             />
           ))}
+        {stage === 'ready' && <Countdown onDone={() => void startRun()} />}
         {stage === 'analyzing' && <Analyzing no={no} onQuit={quit} />}
       </div>
     </div>

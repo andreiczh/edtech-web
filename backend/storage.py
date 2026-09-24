@@ -1569,12 +1569,12 @@ def analytics_summary(student_id: str) -> dict:
     (сотни строк максимум).
     """
     rows = _exec(
-        "SELECT kind, score, max_score, created_at FROM results"
+        "SELECT kind, score, max_score, created_at, variant FROM results"
         " WHERE student_id=? ORDER BY created_at ASC", (student_id,)).fetchall()
 
     kinds: dict = {}
     history = []
-    for kind, score, mx, at in rows:
+    for kind, score, mx, at, variant in rows:
         if not mx:
             continue
         k = kinds.setdefault(kind, {"attempts": 0, "pcts": []})
@@ -1583,7 +1583,11 @@ def analytics_summary(student_id: str) -> dict:
         k["pcts"].append(pct)
         # История для графика прогресса: день + тип + процент. Объём — сотни
         # строк на ученика, агрегирует фронт (неделя/месяц/год из одного ряда).
-        history.append({"d": str(at)[:10], "k": kind, "p": round(pct)})
+        # v/s/m — вариант и балл: из них мини-приложение собирает «вариант по
+        # ошибкам» (24.09.2026) — последние работы каждого номера, где балл
+        # ниже максимума. Вариант может быть пустым у старых записей.
+        history.append({"d": str(at)[:10], "k": kind, "p": round(pct),
+                        "v": variant or "", "s": score or 0, "m": mx})
 
     out_kinds = {}
     for kind, k in kinds.items():

@@ -1,19 +1,22 @@
 /**
- * Оболочка мини-приложения (телефон и MAX): главная по макету 72 с нижней
- * панелью, выбор задания и поток заданий по макетам 66·Redesign (№39, №40;
- * №41 и №42 — прежний экран задания внутри той же оболочки, пока не пришли
- * их макеты), а разделы без макетов (календарь, статистика, кабинет,
- * разговор) — прежние экраны внутри оболочки.
+ * Оболочка мини-приложения (телефон и MAX). Четыре вкладки по макетам от
+ * 24.09.2026: главная (69), разговор (66·Redesign 39), статистика и
+ * настройки; выбор задания и поток заданий по макетам 66·Redesign (№39, №40;
+ * №41 и №42 — прежний экран задания внутри оболочки, пока не пришли их
+ * макеты). Кабинет (ник, согласие, выход) — прежний экран из настроек.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import { fetchMeAnalytics, type MeAnalytics } from '../account/me'
+import { favoriteSessionItems, useFavorites } from '../ege2/favorites'
 import type { TaskFeedback } from '../ege2/feedback'
 import { TASK_ORDER, pickDemoItems, pickSession, variantById, type TaskId } from '../ege2/tasks'
-import { CalendarScreen } from '../screens/CalendarScreen'
-import { ConversationScreen } from '../screens/ConversationScreen'
 import { ProfileScreen } from '../screens/ProfileScreen'
-import { StatsScreen } from '../screens/StatsScreen'
 import { MiniHome, MiniTabs, type MiniTab } from './MiniHome'
+import { MiniSettings } from './MiniSettings'
+import { MiniStats } from './MiniStats'
+import { MiniTalk } from './MiniTalk'
+import { mistakesSessionItems } from './mistakes'
 import { Practice, type PracticeItem } from './Practice'
 import { ResultScreen } from './ResultScreen'
 import { ResultScreen40 } from './ResultScreen40'
@@ -30,10 +33,11 @@ interface Demo {
 
 type View =
   | { name: 'tab'; tab: MiniTab }
-  | { name: 'conversation' }
   /** Тренажёр: сначала выбор задания 1–4, потом серия выбранного номера. */
   | { name: 'picker' }
   | { name: 'practice'; items: PracticeItem[]; nonce: number }
+  /** Прежний кабинет из настроек: ник, согласие, выход — макета нет. */
+  | { name: 'profile' }
   /** Просмотр экрана разбора без микрофона и сервера: пример из sessionStorage
       (ключ gospeak.mini.demo, открывается по #mini-result). Нужен дизайнеру и
       приёмке — прогнать экран с готовым разбором. */
@@ -54,6 +58,9 @@ function initialView(): View {
       .filter((i): i is PracticeItem => typeof i.variantId === 'string')
     if (items.length) return { name: 'practice', items, nonce: Date.now() }
   }
+  // #mini-tab=stats — открыть сразу вкладку (приёмка экранов без кликов)
+  const t = /^#mini-tab=(home|talk|stats|settings)$/.exec(window.location.hash)
+  if (t) return { name: 'tab', tab: t[1] as MiniTab }
   if (window.location.hash === '#mini-result') {
     try {
       const raw = sessionStorage.getItem('gospeak.mini.demo')
@@ -73,20 +80,34 @@ export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeed
   const [view, setView] = useState<View>(initialView)
   const home = useCallback(() => setView({ name: 'tab', tab: 'home' }), [])
 
-  /** Выбранный номер: серия из пяти ещё не решённых вариантов, как в
-      настольном тренажёре; «К следующему заданию» на разборе ведёт к
-      следующему варианту той же серии. */
-  const startTask = useCallback((id: TaskId) => {
-    const items = pickSession(id, 5).map((v) => ({ taskId: id, variantId: v.id }))
+  // Главная: карточкам «по ошибкам» и «избранное» нужно знать, есть ли данные.
+  // История работ подтягивается при каждом возвращении на главную — после
+  // серии заданий она уже другая.
+  const homeShown = view.name === 'tab' && view.tab === 'home'
+  const [analytics, setAnalytics] = useState<MeAnalytics | null>(null)
+  useEffect(() => {
+    if (!homeShown) return
+    let alive = true
+    void fetchMeAnalytics().then((a) => alive && setAnalytics(a))
+    return () => {
+      alive = false
+    }
+  }, [homeShown])
+  const mistakeItems = useMemo(() => mistakesSessionItems(analytics?.history), [analytics])
+  const favorites = useFavorites()
+  const favoritesReady = favorites.length > 0
+
+  const startItems = useCallback((items: PracticeItem[]) => {
     if (items.length) setView({ name: 'practice', items, nonce: Date.now() })
   }, [])
 
-  /** DEMO — полный экзамен: по одному варианту каждого номера по порядку,
-      каждый начинается с отсчёта «Preparation 5…1», как и в тренажёре. */
-  const startDemo = useCallback(() => {
-    const items = pickDemoItems()
-    if (items.length) setView({ name: 'practice', items, nonce: Date.now() })
-  }, [])
+  /** Выбранный номер: серия из пяти ещё не решённых вариантов, как в
+      настольном тренажёре; «К следующему заданию» на разборе ведёт к
+      следующему варианту той же серии. */
+  const startTask = useCallback(
+    (id: TaskId) => startItems(pickSession(id, 5).map((v) => ({ taskId: id, variantId: v.id }))),
+    [startItems],
+  )
 
   if (view.name === 'practice') {
     return (
@@ -108,37 +129,48 @@ export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeed
     return <ResultDemo taskId={view.taskId} demo={view.demo} onExit={home} />
   }
 
-  const tab: MiniTab = view.name === 'tab' ? view.tab : 'home'
+  const tab: MiniTab = view.name === 'tab' ? view.tab : 'settings'
   const onTab = (t: MiniTab) => setView({ name: 'tab', tab: t })
+  const shell = view.name === 'profile' ? 'settings' : tab
 
   return (
-    <div className={`mini${tab === 'home' && view.name === 'tab' ? ' mini--home' : ''}`}>
+    <div className={`mini mini--${shell}`}>
       <div className="mini__frame">
-        {view.name === 'tab' && view.tab === 'home' ? (
+        {view.name === 'profile' ? (
+          <div className="mini-legacy">
+            <div className="screen">
+              <ProfileScreen
+                onOpenStats={() => setView({ name: 'tab', tab: 'stats' })}
+                onLogout={onLogout}
+                onClose={() => setView({ name: 'tab', tab: 'settings' })}
+              />
+            </div>
+          </div>
+        ) : tab === 'home' ? (
           <div className="mini__scroll">
             <MiniHome
               onPractice={() => setView({ name: 'picker' })}
-              onSpeaking={() => setView({ name: 'conversation' })}
-              onDemo={startDemo}
-              onErrors={() => setView({ name: 'tab', tab: 'stats' })}
+              onMistakes={() => startItems(mistakeItems)}
+              mistakesReady={mistakeItems.length > 0}
+              onDemo={() => startItems(pickDemoItems())}
+              onFavorites={() => startItems(favoriteSessionItems())}
+              favoritesReady={favoritesReady}
             />
           </div>
+        ) : tab === 'talk' ? (
+          <MiniTalk />
+        ) : tab === 'stats' ? (
+          <div className="mini__scroll">
+            <MiniStats />
+          </div>
         ) : (
-          <div className="mini-legacy">
-            <div className="screen">
-              <div className="swap" key={view.name === 'tab' ? view.tab : view.name}>
-                {view.name === 'conversation' && <ConversationScreen onFeedback={onFeedback} />}
-                {view.name === 'tab' && view.tab === 'calendar' && <CalendarScreen />}
-                {view.name === 'tab' && view.tab === 'stats' && <StatsScreen onBack={home} />}
-                {view.name === 'tab' && view.tab === 'settings' && (
-                  <ProfileScreen
-                    onOpenStats={() => setView({ name: 'tab', tab: 'stats' })}
-                    onLogout={onLogout}
-                    onClose={home}
-                  />
-                )}
-              </div>
-            </div>
+          <div className="mini__scroll">
+            <MiniSettings
+              onProfile={() => setView({ name: 'profile' })}
+              onFavorites={() => startItems(favoriteSessionItems())}
+              favoritesReady={favoritesReady}
+              onSupport={onFeedback}
+            />
           </div>
         )}
         <MiniTabs active={tab} onTab={onTab} />

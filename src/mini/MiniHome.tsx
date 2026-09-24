@@ -1,25 +1,28 @@
 /**
- * Главная мини-приложения — макет «iPhone 16 & 17 Pro - 72» один в один.
+ * Главная мини-приложения — макет «iPhone 16 & 17 Pro - 69» один в один
+ * (24.09.2026; сменил макет 72: SPEAKING ушёл во вкладку-микрофон, вместо
+ * него «Вариант по ошибкам», вместо «Ошибок» — «Избранное», аватар справа,
+ * серии на главной больше нет).
  *
- * Живое: имя из аккаунта, серия из /me/stats, переходы. Тексты карточек — из
- * макета дословно (в нём подписи «Теория»/«Ошибки» повторяют текст SPEAKING;
- * так в файле). Чего в системе нет — раздела теории — карточка не ведёт
- * никуда и помечена как недоступная, а не притворяется.
+ * Живое: имя из аккаунта, переходы, состояние карточек. Тексты — из макета
+ * дословно. Чего в системе нет (раздел теории) — карточка не ведёт никуда
+ * и помечена как недоступная, а не притворяется. «По ошибкам» и «Избранное»
+ * без данных приглушены, и подпись говорит, откуда данные возьмутся.
  */
-import { useEffect, useState } from 'react'
-
 import { greeting } from '../account/greeting'
-import { fetchMeStats } from '../account/me'
 import { currentUser } from '../auth/auth'
 import { Icon } from './Ambient'
 import { ICONS } from './icons'
 
-export type MiniTab = 'home' | 'calendar' | 'stats' | 'settings'
+export type MiniTab = 'home' | 'talk' | 'stats' | 'settings'
 
+/** Нижняя панель: во втором слоте — разговор (микрофон), как на экране
+    разговора макета 39; календарь, нарисованный в трёх других макетах,
+    вёл бы в раздел без входа с главной. */
 export function MiniTabs({ active, onTab }: { active: MiniTab; onTab: (t: MiniTab) => void }) {
   const tabs: Array<{ id: MiniTab; title: string; icon: keyof typeof ICONS }> = [
     { id: 'home', title: 'Главная', icon: 'home' },
-    { id: 'calendar', title: 'Календарь', icon: 'calendarGlyph' },
+    { id: 'talk', title: 'Разговор', icon: 'micTab' },
     { id: 'stats', title: 'Статистика', icon: 'statsBars' },
     { id: 'settings', title: 'Настройки', icon: 'gear' },
   ]
@@ -43,24 +46,21 @@ export function MiniTabs({ active, onTab }: { active: MiniTab; onTab: (t: MiniTa
 
 export function MiniHome({
   onPractice,
-  onSpeaking,
+  onMistakes,
+  mistakesReady,
   onDemo,
-  onErrors,
+  onFavorites,
+  favoritesReady,
 }: {
   onPractice: () => void
-  onSpeaking: () => void
+  onMistakes: () => void
+  /** Есть ли работы с ошибками, из которых собирается вариант */
+  mistakesReady: boolean
   onDemo: () => void
-  onErrors: () => void
+  onFavorites: () => void
+  favoritesReady: boolean
 }) {
   const nick = currentUser()?.nickname ?? ''
-  const [streak, setStreak] = useState<number | null>(null)
-  useEffect(() => {
-    let alive = true
-    void fetchMeStats().then((s) => alive && s && setStreak(s.streak.days))
-    return () => {
-      alive = false
-    }
-  }, [])
 
   return (
     <div className="h-page">
@@ -68,10 +68,6 @@ export function MiniHome({
       <div className="h-sheet" aria-hidden="true" />
 
       <div className="h-ava" role="img" aria-label="Аватар" />
-      <Icon icon={ICONS.flame} className="h-flame" />
-      <span className="h-streak" aria-label={`Серия: ${streak ?? 0} дней`}>
-        {streak ?? '·'}
-      </span>
       <h1 className="h-hi">
         {greeting()},
         <br />
@@ -90,20 +86,44 @@ export function MiniHome({
         <span className="h-sub h-sub--1">
           Все 4 задания ЕГЭ с подсказками и
           <br />
-          мгновенной обратной связью.
+          мгновенной обратной связью
         </span>
         <span className="h-btn1">Начать практику</span>
       </button>
 
-      <button type="button" className="m-btn h-card h-card--2 h-card--btn" onClick={onSpeaking}>
+      <button
+        type="button"
+        className="m-btn h-card h-card--2 h-card--btn"
+        onClick={onMistakes}
+        disabled={!mistakesReady}
+        aria-label={
+          mistakesReady
+            ? 'Вариант по ошибкам: отработай ошибки из решённых заданий'
+            : 'Вариант по ошибкам появится после первых решённых заданий'
+        }
+      >
         <span className="h-tile h-tile--2" aria-hidden="true" />
         <Icon icon={ICONS.aa} className="h-aa" />
-        <Icon icon={ICONS.speakWord} className="h-speak" />
-        <span className="h-title h-title--2">SPEAKING</span>
-        <span className="h-sub h-sub--2">
-          Свободные разговоры с AI-
+        <Icon icon={ICONS.retryWord} className="h-retry" />
+        <span className="h-title h-title--2">
+          ВАРИАНТ ПО
           <br />
-          собеседником
+          ОШИБКАМ
+        </span>
+        <span className="h-sub h-sub--2">
+          {mistakesReady ? (
+            <>
+              Отработай ошибки из решенных
+              <br />
+              заданий
+            </>
+          ) : (
+            <>
+              Соберётся из решённых заданий,
+              <br />
+              где балл ниже максимума
+            </>
+          )}
         </span>
       </button>
 
@@ -123,18 +143,19 @@ export function MiniHome({
       >
         <span className="h-title">ТЕОРИЯ</span>
         <span className="h-sub">
-          Свободные разговоры с AI-
-          <br />
-          собеседником
+          Чек-листы для подготовки
+          <br />к заданиям
         </span>
       </div>
-      <button type="button" className="m-btn h-small h-small--errors h-card--btn" onClick={onErrors}>
-        <span className="h-title">ОШИБКИ</span>
-        <span className="h-sub">
-          Свободные разговоры с AI-
-          <br />
-          собеседником
-        </span>
+      <button
+        type="button"
+        className="m-btn h-small h-small--fav h-card--btn"
+        onClick={onFavorites}
+        disabled={!favoritesReady}
+        aria-label={favoritesReady ? 'Избранное: сохранённые задания' : 'Избранное пусто — отмечай ☆ в задании'}
+      >
+        <span className="h-title">ИЗБРАННОЕ</span>
+        <span className="h-sub">{favoritesReady ? 'Сохраненные задания' : 'Отмечай ☆ в задании'}</span>
       </button>
     </div>
   )
