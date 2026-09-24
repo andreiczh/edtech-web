@@ -1,9 +1,8 @@
 /**
  * Оболочка мини-приложения (телефон и MAX). Четыре вкладки по макетам от
  * 24.09.2026: главная (69), разговор (66·Redesign 39), статистика и
- * настройки; выбор задания и поток заданий по макетам 66·Redesign (№39, №40;
- * №41 и №42 — прежний экран задания внутри оболочки, пока не пришли их
- * макеты). Кабинет (ник, согласие, выход) — прежний экран из настроек.
+ * настройки; выбор задания и поток всех четырёх заданий по макетам
+ * 66·Redesign. Кабинет (ник, согласие, выход) — прежний экран из настроек.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
@@ -20,6 +19,7 @@ import { mistakesSessionItems } from './mistakes'
 import { Practice, type PracticeItem } from './Practice'
 import { ResultScreen } from './ResultScreen'
 import { ResultScreen40 } from './ResultScreen40'
+import { ResultScreen42 } from './ResultScreen42'
 import { TaskPicker } from './TaskPicker'
 import './mini.css'
 
@@ -65,7 +65,7 @@ function initialView(): View {
     try {
       const raw = sessionStorage.getItem('gospeak.mini.demo')
       const d = raw ? (JSON.parse(raw) as Demo) : null
-      const taskId: TaskId = d?.taskId === 40 ? 40 : 39
+      const taskId: TaskId = d && isTaskId(Number(d.taskId)) ? (Number(d.taskId) as TaskId) : 39
       if (d && d.feedback && variantById(taskId, d.variantId)) {
         return { name: 'result-demo', taskId, demo: d }
       }
@@ -198,8 +198,10 @@ function ResultDemo({ taskId, demo, onExit }: { taskId: TaskId; demo: Demo; onEx
   const common = { taskId, variant, feedback: demo.feedback, failure: null, blob, seconds: 0, onQuit: onExit, onNext: onExit }
   return (
     <div className="mini">
-      {taskId === 40 ? (
-        <ResultScreen40 no={2} {...common} />
+      {taskId === 42 ? (
+        <ResultScreen42 transcript={demo.transcript} {...common} />
+      ) : taskId === 40 || taskId === 41 ? (
+        <ResultScreen40 no={taskId - 38} {...common} />
       ) : (
         <ResultScreen no={1} transcript={demo.transcript} {...common} />
       )}

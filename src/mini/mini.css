@@ -1076,3 +1076,123 @@
 }
 .st-choice__b--on { background: #e8e2ff; }
 .st-choice__d { display: block; margin-top: calc(2 * var(--u)); font: 400 calc(10 * var(--u)) / calc(12.5 * var(--u)) var(--inter); color: #777b91; }
+
+/* --------------------------------------- №41: интервью (13/16/24/26) */
+/* Карточка «Question N»: 368.8 × 80.1 на 113.7, текст Nunito 700 24.3 слева
+   с отступом 15.1, по вертикали по центру. Слово отсчёта «Be ready to
+   answer» в макете 16 стоит выше «Preparation» (капитель 285.3 против 311.8). */
+.iv-card {
+  margin-top: calc(32.1 * var(--u));
+  height: calc(80.1 * var(--u));
+  box-sizing: border-box;
+  display: flex; align-items: center;
+  padding: 0 calc(15 * var(--u)) 0 calc(15.1 * var(--u));
+  font: 700 calc(24.3 * var(--u)) / calc(29 * var(--u)) var(--nunito);
+  overflow-wrap: anywhere;
+}
+.iv-card--text { font-size: calc(13 * var(--u)); line-height: calc(17 * var(--u)); }
+.cd-word--iv { top: calc(282 * var(--u)); }
+.cd-word--mo { top: calc(303.9 * var(--u)); }
+
+/* --------------------------------------- №42: монолог (7/17, разбор 6) */
+/* Подпись на подготовке (7) стоит выше обычной: капитель 61.3; карточка
+   инструкции 79.9 (на записи 17 — 68.2, без подписи); два фото 368.8 × 245
+   с радиусом 22.7; текст Nunito 700 9.05 / 12.3 по ширине, буллеты с
+   висячим отступом (точка на 5.2, текст на 13.6 от края текста). */
+.mo-label { margin-top: calc(59.6 * var(--u)); }
+.mo-instr {
+  margin-top: calc(8 * var(--u));
+  padding: calc(7.25 * var(--u)) calc(13.4 * var(--u)) calc(8 * var(--u)) calc(11.5 * var(--u));
+  font: 700 calc(9.05 * var(--u)) / calc(12.3 * var(--u)) var(--nunito);
+  text-align: justify;
+  hyphens: none;
+}
+.mo-instr--run { margin-top: calc(68.2 * var(--u)); }
+.mo-instr p { margin: 0; }
+.mo-instr ul { list-style: none; margin: calc(12.3 * var(--u)) 0; padding: 0; }
+.mo-instr li { position: relative; padding-left: calc(13.6 * var(--u)); }
+.mo-instr li::before { content: '•'; position: absolute; left: calc(5.2 * var(--u)); }
+.mo-photo {
+  display: block;
+  width: calc(368.8 * var(--u)); height: calc(245 * var(--u));
+  margin: calc(6.6 * var(--u)) auto 0;
+  border-radius: calc(22.7 * var(--u));
+  object-fit: cover;
+  background: #e6e3f2;
+}
+.mo-photo + .mo-photo { margin-top: calc(7.4 * var(--u)); }
+.mo-pad { height: calc(90 * var(--u)); }
+
+/* Разбор №42 (6): подписи нет — сводка с 82.0; критерии строками справа от
+   кольца (Nunito 700 9.07 / 12.7, значения мятные); карточка расшифровки
+   #EEEFF8 → #D6E9E2, текст 12.5 / 16.5 по ширине; карточки критериев —
+   градиент карточек заданий, первая раскрыта, остальные свёрнуты. */
+.q-summary.mr-summary { margin-top: calc(82 * var(--u)); }
+.mr-crit {
+  position: absolute; left: calc(80.6 * var(--u)); top: calc(44.5 * var(--u));
+  margin: 0; padding: 0; list-style: none;
+  font: 700 calc(9.07 * var(--u)) / calc(12.7 * var(--u)) var(--nunito);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.mr-crit b { display: inline-block; width: calc(63.6 * var(--u)); font-weight: 700; }
+.mr-crit span { color: #9bcec1; }
+.mr-card {
+  width: calc(368.8 * var(--u));
+  box-sizing: border-box;
+  margin: calc(7.3 * var(--u)) auto 0;
+  padding: calc(12.4 * var(--u)) calc(21.7 * var(--u)) calc(14 * var(--u)) calc(22.5 * var(--u));
+  border-radius: calc(16.67 * var(--u));
+  background: linear-gradient(90deg, #eeeff8 0%, #d6e9e2 100%);
+  color: var(--ink);
+}
+.mr-title { margin: 0; font: 700 calc(13.3 * var(--u)) / 1 var(--nunito); letter-spacing: 0.01em; }
+.mr-text {
+  margin: calc(9 * var(--u)) 0 0;
+  font: 700 calc(12.5 * var(--u)) / calc(16.5 * var(--u)) var(--nunito);
+  text-align: justify;
+  hyphens: none;
+  overflow-wrap: anywhere;
+}
+.mr-h2 {
+  width: calc(368.8 * var(--u));
+  margin: calc(18.4 * var(--u)) auto 0;
+  padding-left: calc(0.9 * var(--u));
+  font: 700 calc(16 * var(--u)) / 1 var(--nunito);
+  color: var(--ink);
+}
+.mr-item { width: calc(368.8 * var(--u)); margin: calc(9.6 * var(--u)) auto 0; }
+.mr-h2 + .mr-item { margin-top: calc(12.2 * var(--u)); }
+.mr-head {
+  position: relative;
+  height: calc(9.8 * var(--u));
+  padding-left: calc(12.6 * var(--u));
+  font: 700 calc(9.07 * var(--u)) / calc(9.8 * var(--u)) var(--nunito);
+  color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mr-badge {
+  position: absolute; left: 0; top: 0;
+  width: calc(8 * var(--u)); height: calc(8 * var(--u));
+  border-radius: calc(3 * var(--u));
+  background: #e2e0f8;
+  box-shadow: calc(0.5 * var(--u)) calc(0.5 * var(--u)) 0 var(--ink);
+  font: 700 calc(5.8 * var(--u)) / calc(8 * var(--u)) var(--nunito);
+  text-align: center;
+  color: var(--ink);
+}
+.mr-val { margin-left: calc(6.2 * var(--u)); color: #9bcec1; }
+.mr-comment {
+  display: block; width: 100%;
+  box-sizing: border-box;
+  margin-top: calc(1.5 * var(--u));
+  padding: calc(6.3 * var(--u)) calc(8.6 * var(--u)) calc(6.8 * var(--u)) calc(8.5 * var(--u));
+  border-radius: calc(8.34 * var(--u));
+  background: linear-gradient(90deg, #f2ebff 0%, #ced9ff 100%);
+  font: 700 calc(12.5 * var(--u)) / calc(16.5 * var(--u)) var(--nunito);
+  color: var(--ink);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.mr-comment--toggle { padding: calc(8.6 * var(--u)) calc(8.6 * var(--u)) calc(8.6 * var(--u)) calc(12.9 * var(--u)); cursor: pointer; }
+.mr-comment--toggle:active { opacity: 0.85; }

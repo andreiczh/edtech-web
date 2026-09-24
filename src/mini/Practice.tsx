@@ -4,9 +4,13 @@
  *       (ожидание), 36 (разбор);
  *  №40: 18 (отсчёт), 20 (объявление, подготовка — по файлу без SKIP), 27–30
  *       (четыре вопроса по очереди над фото), 37 (ожидание), 31 (разбор).
- * №41 и №42 ждут своих макетов: после того же отсчёта идёт прежний экран
- * задания (TaskScreen) внутри оболочки — тестировщик 23.09.2026 просил
- * выбор всех четырёх заданий и отсчёт перед каждым, в том числе в DEMO.
+ *  №41: 13/24/26 (карточка «Question N», вопрос ЗВУЧИТ), 16 («Be ready to
+ *       answer 5…1» перед каждым вопросом); инструкция и разбор — по
+ *       образцу 33 и 31, их макетов нет.
+ *  №42: 9 (отсчёт), 7 (инструкция и два фото, 2,5 мин), 10 («Be ready to
+ *       answer»), 17 (те же инструкция и фото под запись, 3 мин), 6 (разбор).
+ * Прежний экран (TaskScreen) остаётся запасным путём на случай номера без
+ * макетов.
  *
  * Логика та же, что в TaskScreen: подготовка по таймингу экзамена, запись
  * одним куском на все шаги (перезапуск рекордера ломает контейнер записи),
@@ -25,12 +29,14 @@ import {
   type TaskId,
   type TaskVariant,
 } from '../ege2/tasks'
+import { askAloud } from '../ege2/askAloud'
 import { useCountdown } from '../ege2/useCountdown'
 import { TaskScreen, type VariantResult } from '../screens/TaskScreen'
 import { useRecorder } from '../ege2/useRecorder'
 import { Ambient } from './Ambient'
 import { ResultScreen } from './ResultScreen'
 import { ResultScreen40 } from './ResultScreen40'
+import { ResultScreen42 } from './ResultScreen42'
 
 export interface PracticeItem {
   taskId: TaskId
@@ -43,7 +49,12 @@ export interface PracticeItem {
 type Stage = 'countdown' | 'intro' | 'ready' | 'run' | 'analyzing' | 'result' | 'legacy'
 
 /** Есть ли у номера мобильные макеты; остальные идут прежним экраном. */
-const hasMiniScreens = (kind: string) => kind === 'reading' || kind === 'dialogue'
+const hasMiniScreens = (kind: string) =>
+  kind === 'reading' || kind === 'dialogue' || kind === 'interview' || kind === 'monologue'
+
+/** С чего начинается номер: у интервью первого отсчёта в раскладке нет —
+    сразу инструкция; у остальных «Preparation 5…1». */
+const firstStage = (kind: string): Stage => (kind === 'interview' ? 'intro' : 'countdown')
 
 /** Номер задания устной части по порядку: 39 → «ЗАДАНИЕ 1». */
 export function taskNo(id: TaskId): number {
@@ -65,7 +76,16 @@ const MIC_NOTE = 'Нет доступа к микрофону — разреши
 
 /* ------------------------------------------------------------ отсчёт */
 
-function Countdown({ onDone }: { onDone: () => void }) {
+function Countdown({
+  onDone,
+  word = 'Preparation',
+  wordClass = '',
+}: {
+  onDone: () => void
+  word?: string
+  /** cd-word--iv (макет 16, №41) / cd-word--mo (макет 10, №42): слово стоит выше */
+  wordClass?: string
+}) {
   const [n, setN] = useState(5)
   const doneRef = useRef(onDone)
   doneRef.current = onDone
@@ -79,7 +99,7 @@ function Countdown({ onDone }: { onDone: () => void }) {
   }, [n])
   return (
     <>
-      <div className="cd-word">Preparation</div>
+      <div className={`cd-word${wordClass ? ` ${wordClass}` : ''}`}>{word}</div>
       {n > 0 && (
         <div className="cd-digit" key={n} aria-live="assertive">
           {n}
@@ -308,24 +328,186 @@ function DialogueTask({
   )
 }
 
+
+/* -------------------------------------------- №41: интервью (13/16/24/26) */
+
+/** Вопрос интервью ЗВУЧИТ (как в TaskScreen): на карточке только «Question N»,
+    микрофон на время вопроса ставится на паузу, время ответа идёт после.
+    Не прозвучало — вопрос показывается текстом: задание проще, но выполнимо. */
+function InterviewTask({
+  no,
+  variant,
+  stage,
+  step,
+  micError,
+  onStart,
+  onStepDone,
+  onQuit,
+  pause,
+  resume,
+}: {
+  no: number
+  variant: TaskVariant
+  stage: 'intro' | 'run'
+  step: number
+  micError: string | null
+  /** SKIP и конец подготовки: включить микрофон и перейти к первому отсчёту */
+  onStart: () => void
+  onStepDone: () => void
+  onQuit: () => void
+  pause: () => void
+  resume: () => void
+}) {
+  const task = TASKS[41]
+  const steps = variant.steps ?? []
+  const [asking, setAsking] = useState(false)
+  const [showText, setShowText] = useState(false)
+  const askingRef = useRef(false)
+  askingRef.current = asking
+
+  useEffect(() => {
+    if (stage !== 'run') return
+    const text = steps[step]
+    if (!text) return
+    const ac = new AbortController()
+    let alive = true
+    setAsking(true)
+    setShowText(false)
+    pause()
+    void askAloud(text, ac.signal).then((ok) => {
+      if (!alive) return
+      if (!ok) setShowText(true)
+      resume()
+      setAsking(false)
+    })
+    return () => {
+      alive = false
+      ac.abort()
+      resume()
+    }
+  }, [pause, resume, stage, step, steps])
+
+  const total = stage === 'intro' ? task.prepSeconds : task.answerSeconds
+  const left = useCountdown(
+    total,
+    stage === 'intro'
+      ? onStart
+      : () => {
+          if (!askingRef.current) onStepDone()
+        },
+    true,
+    `${stage}:${step}:${asking}`,
+  )
+  return (
+    <>
+      <span className="m-label">ЗАДАНИЕ {no}</span>
+      {stage === 'intro' ? (
+        <>
+          <div className="m-card m-instr">{cleanBrief(variant.brief)}</div>
+          {micError && <MicNote text={micError} onRetry={onStart} />}
+        </>
+      ) : (
+        <div className={`m-card iv-card${showText ? ' iv-card--text' : ''}`} aria-live="polite">
+          {showText ? steps[step] : `Question ${step + 1}`}
+        </div>
+      )}
+      <div className="m-pad" />
+      <TimerBar
+        left={asking || left <= 0 ? total : left}
+        total={total}
+        side={stage === 'intro' ? 'skip' : 'quit'}
+        onButton={stage === 'intro' ? onStart : onQuit}
+      />
+    </>
+  )
+}
+
+/* ------------------------------------------- №42: монолог (7/17) */
+
+/** Инструкция и два фото — и на подготовке (2,5 мин), и на записи (3 мин).
+    По файлу: подпись «ЗАДАНИЕ N» только на подготовке, и стоит выше обычной;
+    на записи карточка начинается с 68.2 пункта. Кнопки SKIP нет ни там, ни там. */
+function MonologueTask({
+  no,
+  variant,
+  stage,
+  micError,
+  onStart,
+  onRunDone,
+  onQuit,
+}: {
+  no: number
+  variant: TaskVariant
+  stage: 'intro' | 'run'
+  micError: string | null
+  onStart: () => void
+  onRunDone: () => void
+  onQuit: () => void
+}) {
+  const task = TASKS[42]
+  const total = stage === 'intro' ? task.prepSeconds : task.answerSeconds
+  const left = useCountdown(total, stage === 'intro' ? onStart : onRunDone, true, stage)
+  const lines = (variant.brief || '').split('\n')
+  const blocks: Array<{ kind: 'p' | 'ul'; items: string[] }> = []
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (!line) continue
+    if (/^[•\-–]\s*/.test(line)) {
+      const li = line.replace(/^[•\-–]\s*/, '')
+      const last = blocks[blocks.length - 1]
+      if (last && last.kind === 'ul') last.items.push(li)
+      else blocks.push({ kind: 'ul', items: [li] })
+    } else blocks.push({ kind: 'p', items: [line] })
+  }
+  return (
+    <>
+      {stage === 'intro' && <span className="m-label mo-label">ЗАДАНИЕ {no}</span>}
+      <div className={`m-card mo-instr${stage === 'run' ? ' mo-instr--run' : ''}`}>
+        {blocks.map((b, i) =>
+          b.kind === 'ul' ? (
+            <ul key={i}>
+              {b.items.map((t, j) => (
+                <li key={j}>{t}</li>
+              ))}
+            </ul>
+          ) : (
+            <p key={i}>{b.items[0]}</p>
+          ),
+        )}
+      </div>
+      {micError && stage === 'intro' && <MicNote text={micError} onRetry={onStart} />}
+      {(variant.images ?? []).slice(0, 2).map((src, i) => (
+        <img key={i} className="mo-photo" src={src} alt={`Фото ${i + 1}`} />
+      ))}
+      <div className="mo-pad" />
+      <TimerBar left={left > 0 ? left : total} total={total} side="quit" onButton={onQuit} />
+    </>
+  )
+}
+
 /* ------------------------------------------------------------- поток */
 
 export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () => void }) {
   const [index, setIndex] = useState(0)
-  const [stage, setStage] = useState<Stage>('countdown')
+  const [stage, setStage] = useState<Stage>(() =>
+    items[0] ? firstStage(TASKS[items[0].taskId].kind) : 'countdown',
+  )
   const [step, setStep] = useState(0)
   const [feedback, setFeedback] = useState<TaskFeedback | null>(null)
   const [transcript, setTranscript] = useState<string | undefined>(undefined)
   const [failure, setFailure] = useState<string | null>(null)
   const [blob, setBlob] = useState<Blob | null>(null)
   const [micError, setMicError] = useState<string | null>(null)
-  const { start, stop, error: recError } = useRecorder()
+  const { start, stop, pause, resume, error: recError } = useRecorder()
 
   const item = items[index]
   const variant = item ? variantById(item.taskId, item.variantId) : undefined
   const task = item ? TASKS[item.taskId] : undefined
   // Шаги ответа: у №40 — по одному на пункт объявления, у чтения — один.
-  const stepCount = task?.kind === 'dialogue' ? Math.max(1, variant?.steps?.length ?? 0) : 1
+  const stepCount =
+    task?.kind === 'dialogue' || task?.kind === 'interview'
+      ? Math.max(1, variant?.steps?.length ?? 0)
+      : 1
 
   const startedAtRef = useRef(0)
   const finishingRef = useRef(false)
@@ -336,7 +518,9 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
   const stepRef = useRef(step)
   stepRef.current = step
 
-  const startRun = useCallback(async () => {
+  /** next — куда после микрофона: у интервью сначала отсчёт «Be ready to
+      answer» (запись уже идёт, вопрос ещё не прозвучал). */
+  const startRun = useCallback(async (next: 'run' | 'ready' = 'run') => {
     if (stageRef.current === 'run') return
     setMicError(null)
     if (!(await start())) {
@@ -347,7 +531,7 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
     startedAtRef.current = Date.now()
     finishingRef.current = false
     setStep(0)
-    setStage('run')
+    setStage(next)
   }, [start])
 
   useEffect(() => {
@@ -411,8 +595,9 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
     finishingRef.current = false
     setStep(0)
     setIndex((i) => i + 1)
-    setStage('countdown')
-  }, [index, items.length, onExit])
+    const following = items[index + 1]
+    setStage(following ? firstStage(TASKS[following.taskId].kind) : 'countdown')
+  }, [index, items, onExit])
 
   /** №41/№42 прошли прежним экраном: отметки — те же, что в SessionScreen. */
   const onLegacyDone = useCallback(
@@ -440,9 +625,12 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
       прерывается — шаг переключает только заголовок и таймер. */
   const onStepDone = useCallback(() => {
     if (stageRef.current !== 'run') return
-    if (stepRef.current + 1 < stepCount) setStep((s) => s + 1)
-    else void finish()
-  }, [finish, stepCount])
+    if (stepRef.current + 1 < stepCount) {
+      setStep((s) => s + 1)
+      // интервью: перед каждым вопросом — свой отсчёт (макет 16)
+      if (task?.kind === 'interview') setStage('ready')
+    } else void finish()
+  }, [finish, stepCount, task?.kind])
 
   const quit = useCallback(() => {
     cancelledRef.current = true
@@ -459,7 +647,22 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
   const seconds = Math.max(0, Math.round((Date.now() - startedAtRef.current) / 1000))
 
   if (stage === 'result') {
-    if (task.kind === 'dialogue') {
+    if (task.kind === 'monologue') {
+      return (
+        <ResultScreen42
+          taskId={item.taskId}
+          variant={variant}
+          feedback={feedback}
+          transcript={transcript}
+          failure={failure}
+          blob={blob}
+          seconds={seconds}
+          onQuit={onExit}
+          onNext={next}
+        />
+      )
+    }
+    if (task.kind === 'dialogue' || task.kind === 'interview') {
       return (
         <ResultScreen40
           no={no}
@@ -515,30 +718,61 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
         {stage === 'countdown' && (
           <Countdown onDone={() => setStage(hasMiniScreens(task.kind) ? 'intro' : 'legacy')} />
         )}
-        {(stage === 'intro' || stage === 'run') &&
-          (task.kind === 'dialogue' ? (
-            <DialogueTask
-              no={no}
-              variant={variant}
-              stage={stage}
-              step={step}
-              micError={micError}
-              onStart={() => void startRun()}
-              onStepDone={onStepDone}
-              onQuit={quit}
-            />
-          ) : (
-            <ReadingTask
-              no={no}
-              variant={variant}
-              stage={stage}
-              micError={micError}
-              onStart={() => setStage('ready')}
-              onRunDone={() => void finish()}
-              onQuit={quit}
-            />
-          ))}
-        {stage === 'ready' && <Countdown onDone={() => void startRun()} />}
+        {(stage === 'intro' || stage === 'run') && task.kind === 'dialogue' && (
+          <DialogueTask
+            no={no}
+            variant={variant}
+            stage={stage}
+            step={step}
+            micError={micError}
+            onStart={() => void startRun()}
+            onStepDone={onStepDone}
+            onQuit={quit}
+          />
+        )}
+        {(stage === 'intro' || stage === 'run') && task.kind === 'interview' && (
+          <InterviewTask
+            no={no}
+            variant={variant}
+            stage={stage}
+            step={step}
+            micError={micError}
+            onStart={() => void startRun('ready')}
+            onStepDone={onStepDone}
+            onQuit={quit}
+            pause={pause}
+            resume={resume}
+          />
+        )}
+        {(stage === 'intro' || stage === 'run') && task.kind === 'monologue' && (
+          <MonologueTask
+            no={no}
+            variant={variant}
+            stage={stage}
+            micError={micError}
+            onStart={() => setStage('ready')}
+            onRunDone={() => void finish()}
+            onQuit={quit}
+          />
+        )}
+        {(stage === 'intro' || stage === 'run') && task.kind === 'reading' && (
+          <ReadingTask
+            no={no}
+            variant={variant}
+            stage={stage}
+            micError={micError}
+            onStart={() => setStage('ready')}
+            onRunDone={() => void finish()}
+            onQuit={quit}
+          />
+        )}
+        {stage === 'ready' && task.kind === 'reading' && <Countdown onDone={() => void startRun()} />}
+        {stage === 'ready' && task.kind === 'monologue' && (
+          <Countdown word="Be ready to answer" wordClass="cd-word--mo" onDone={() => void startRun()} />
+        )}
+        {stage === 'ready' && task.kind === 'interview' && (
+          <Countdown word="Be ready to answer" wordClass="cd-word--iv" onDone={() => setStage('run')} />
+        )}
         {stage === 'analyzing' && <Analyzing no={no} onQuit={quit} />}
       </div>
     </div>
