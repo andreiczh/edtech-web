@@ -22,6 +22,7 @@ import { sayWord, speakable } from '../ege2/sayWord'
 import type { TaskId, TaskVariant } from '../ege2/tasks'
 import { audioPeaks, type Peaks } from './audioPeaks'
 import { Ambient, Icon } from './Ambient'
+import { BackButton } from './ResultBits'
 import { ICONS } from './icons'
 
 const BARS = 58
@@ -208,6 +209,7 @@ export function ResultScreen({
   seconds,
   onQuit,
   onNext,
+  onBack,
 }: {
   no: number
   taskId: TaskId
@@ -219,6 +221,7 @@ export function ResultScreen({
   seconds: number
   onQuit: () => void
   onNext: () => void
+  onBack?: () => void
 }) {
   const reference = variant.readText ?? transcript ?? ''
   const errors = useMemo(() => feedback?.errors ?? [], [feedback])
@@ -316,6 +319,7 @@ export function ResultScreen({
   return (
     <div className="mini__frame">
       <Ambient />
+      {onBack && <BackButton onBack={onBack} />}
       <button
         type="button"
         className={`m-btn r-star${fav ? ' r-star--on' : ''}`}

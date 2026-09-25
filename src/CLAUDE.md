@@ -56,8 +56,10 @@ React 19 + Vite 6 + TypeScript, **обычный CSS** (`index.css`). Tailwind �
 
 ## MAX и запись с микрофона (15.09.2026)
 - `max/bridge.ts` — признак запуска из MAX (фрагмент `#WebAppData=` → флаг
-  в sessionStorage) и ленивая загрузка MAX Bridge. В обычном браузере
-  библиотека MAX не грузится вовсе.
+  в sessionStorage) и ленивая загрузка MAX Bridge. `bootMax()` в `main.tsx`
+  ждёт библиотеку ДО первой отрисовки, если мы во фрейме или пришли с
+  max.ru (веб-версия MAX данных в адрес не кладёт, §6.45). В обычном
+  браузере библиотека MAX не грузится вовсе.
 - Маршрут `maxlogin` (`MaxLoginScreen` в `AuthScreens.tsx`): вход сам, при
   ошибке — повтор и запасной вход по нику. Новому MAX-аккаунту согласие на
   корпус выставляется в «нет»: экрана согласия в MAX нет.
@@ -90,7 +92,8 @@ React 19 + Vite 6 + TypeScript, **обычный CSS** (`index.css`). Tailwind �
 консоли подменить `Date.now`
 (сдвиг вперёд заканчивает таймер) и `getUserMedia` (осциллятор в
 MediaStreamDestination) — §6.41. №40: `DialogueTask` + `ResultScreen40.tsx`;
-общие звёздочка и нижняя панель разбора — `ResultBits.tsx`.
+общие звёздочка, нижняя панель разбора и «Назад» (`BackButton`, `useMaxBack`)
+— `ResultBits.tsx`; «Назад» ведёт на экран, с которого пришли (§6.45).
 
 Основные экраны (24.09.2026, §6.43): `MiniHome.tsx` (макет 69),
 `MiniTalk.tsx` (39, логика — `useConversation`), `MiniStats.tsx`,

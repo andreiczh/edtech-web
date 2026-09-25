@@ -15,7 +15,7 @@ import { useCallback, useState } from 'react'
 import type { TaskFeedback } from '../ege2/feedback'
 import type { TaskId, TaskVariant } from '../ege2/tasks'
 import { Ambient } from './Ambient'
-import { ResultBar, StarButton } from './ResultBits'
+import { BackButton, ResultBar, StarButton } from './ResultBits'
 import { Player } from './ResultScreen'
 
 const PRAISE = 'Ваш ответ хорош! Так держать!'
@@ -30,6 +30,7 @@ export function ResultScreen40({
   seconds,
   onQuit,
   onNext,
+  onBack,
 }: {
   no: number
   taskId: TaskId
@@ -40,6 +41,7 @@ export function ResultScreen40({
   seconds: number
   onQuit: () => void
   onNext: () => void
+  onBack?: () => void
 }) {
   const criteria = feedback?.criteria ?? []
   const count = Math.max(variant.steps?.length ?? 0, criteria.length, 1)
@@ -55,6 +57,7 @@ export function ResultScreen40({
   return (
     <div className="mini__frame">
       <Ambient />
+      {onBack && <BackButton onBack={onBack} />}
       <StarButton taskId={taskId} variantId={variant.id} />
       <div className="mini__scroll">
         <span className="m-label">ЗАДАНИЕ {no}</span>

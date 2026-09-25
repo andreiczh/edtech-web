@@ -7,6 +7,7 @@
  */
 import { TASKS, TASK_ORDER, taskProgress, type TaskId, type TaskDef } from '../ege2/tasks'
 import { Ambient } from './Ambient'
+import { BackButton, useMaxBack } from './ResultBits'
 import { taskNo } from './Practice'
 
 const u = (v: number) => `calc(${v} * var(--u))`
@@ -47,9 +48,11 @@ export function timing(task: TaskDef): string {
 }
 
 export function TaskPicker({ onPick, onQuit }: { onPick: (id: TaskId) => void; onQuit: () => void }) {
+  useMaxBack(onQuit)
   return (
     <div className="mini__frame">
       <Ambient />
+      <BackButton onBack={onQuit} />
       <div className="mini__scroll">
         <span className="m-label">ТРЕНАЖЁР</span>
         <div className="tp-list">

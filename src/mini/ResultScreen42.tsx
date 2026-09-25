@@ -13,7 +13,7 @@ import { useCallback, useState } from 'react'
 import type { TaskFeedback } from '../ege2/feedback'
 import type { TaskId, TaskVariant } from '../ege2/tasks'
 import { Ambient } from './Ambient'
-import { ResultBar, StarButton } from './ResultBits'
+import { BackButton, ResultBar, StarButton } from './ResultBits'
 import { Player } from './ResultScreen'
 
 const SHORT = ['Содержание', 'Организация', 'Лексика']
@@ -35,6 +35,7 @@ export function ResultScreen42({
   seconds,
   onQuit,
   onNext,
+  onBack,
 }: {
   taskId: TaskId
   variant: TaskVariant
@@ -45,6 +46,7 @@ export function ResultScreen42({
   seconds: number
   onQuit: () => void
   onNext: () => void
+  onBack?: () => void
 }) {
   const criteria = (feedback?.criteria ?? []).slice(0, 3)
   const score = feedback?.score ?? null
@@ -57,6 +59,7 @@ export function ResultScreen42({
   return (
     <div className="mini__frame">
       <Ambient />
+      {onBack && <BackButton onBack={onBack} />}
       <StarButton taskId={taskId} variantId={variant.id} />
       <div className="mini__scroll">
         <div className="q-summary mr-summary">

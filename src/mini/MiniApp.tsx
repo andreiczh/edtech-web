@@ -35,7 +35,7 @@ type View =
   | { name: 'tab'; tab: MiniTab }
   /** Тренажёр: сначала выбор задания 1–4, потом серия выбранного номера. */
   | { name: 'picker' }
-  | { name: 'practice'; items: PracticeItem[]; nonce: number }
+  | { name: 'practice'; items: PracticeItem[]; nonce: number; from: 'picker' | 'home' }
   /** Прежний кабинет из настроек: ник, согласие, выход — макета нет. */
   | { name: 'profile' }
   /** Просмотр экрана разбора без микрофона и сервера: пример из sessionStorage
@@ -56,7 +56,7 @@ function initialView(): View {
       .filter(isTaskId)
       .map((id) => ({ taskId: id, variantId: pickSession(id, 1)[0]?.id }))
       .filter((i): i is PracticeItem => typeof i.variantId === 'string')
-    if (items.length) return { name: 'practice', items, nonce: Date.now() }
+    if (items.length) return { name: 'practice', items, nonce: Date.now(), from: 'home' }
   }
   // #mini-tab=stats — открыть сразу вкладку (приёмка экранов без кликов)
   const t = /^#mini-tab=(home|talk|stats|settings)$/.exec(window.location.hash)
@@ -97,22 +97,27 @@ export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeed
   const favorites = useFavorites()
   const favoritesReady = favorites.length > 0
 
-  const startItems = useCallback((items: PracticeItem[]) => {
-    if (items.length) setView({ name: 'practice', items, nonce: Date.now() })
+  const startItems = useCallback((items: PracticeItem[], from: 'picker' | 'home' = 'home') => {
+    if (items.length) setView({ name: 'practice', items, nonce: Date.now(), from })
   }, [])
 
   /** Выбранный номер: серия из пяти ещё не решённых вариантов, как в
       настольном тренажёре; «К следующему заданию» на разборе ведёт к
       следующему варианту той же серии. */
   const startTask = useCallback(
-    (id: TaskId) => startItems(pickSession(id, 5).map((v) => ({ taskId: id, variantId: v.id }))),
+    (id: TaskId) => startItems(pickSession(id, 5).map((v) => ({ taskId: id, variantId: v.id })), 'picker'),
     [startItems],
   )
 
   if (view.name === 'practice') {
     return (
       <div className="mini">
-        <Practice key={view.nonce} items={view.items} onExit={home} />
+        <Practice
+          key={view.nonce}
+          items={view.items}
+          onExit={home}
+          onBack={view.from === 'picker' ? () => setView({ name: 'picker' }) : home}
+        />
       </div>
     )
   }

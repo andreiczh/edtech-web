@@ -3263,7 +3263,7 @@ def health():
         # Бот MAX: есть ли токен на ЭТОМ сервере (без него вебхук отвечает 503
         # и бот молчит — 23.09.2026 так и было, пока переменной не было на Render).
         "max_bot": {"token_set": bool(_max_token()), "app_url": _MAX_APP_URL,
-                    "bot_name": _MAX_BOT_NAME, **_MAX_STATS},
+                    "bot_name": _MAX_BOT_NAME, "bot_id": _MAX_BOT_ID, **_MAX_STATS},
         "llm_fallback": {
             "model": LLM_FALLBACK_MODEL,
             "active": time.time() < _llm_fallback_until,
@@ -4989,17 +4989,23 @@ _MAX_STATS: dict = {"received": 0, "ignored": 0, "sent": 0, "failed": 0,
 # Username бота — для кнопки open_app (web_app = чьё мини-приложение открыть).
 # Задаётся MAX_BOT_USERNAME, иначе один раз спрашивается у /me.
 _MAX_BOT_NAME = os.environ.get("MAX_BOT_USERNAME", "").strip()
+_MAX_BOT_ID = 0  # user_id бота из /me — contact_id кнопки open_app
 
 
 async def _max_bot_name() -> str:
-    global _MAX_BOT_NAME
-    if _MAX_BOT_NAME:
+    global _MAX_BOT_NAME, _MAX_BOT_ID
+    if _MAX_BOT_NAME and _MAX_BOT_ID:
         return _MAX_BOT_NAME
     try:
         async with httpx.AsyncClient(timeout=10, trust_env=False) as c:
             r = await c.get(f"{max_bot.API_BASE}/me", headers={"Authorization": _max_token()})
         if r.status_code == 200:
-            _MAX_BOT_NAME = str((r.json() or {}).get("username") or "").strip()
+            me = r.json() or {}
+            _MAX_BOT_NAME = str(me.get("username") or "").strip() or _MAX_BOT_NAME
+            try:
+                _MAX_BOT_ID = int(me.get("user_id") or 0)
+            except (TypeError, ValueError):
+                _MAX_BOT_ID = 0
         else:
             print(f"[max] /me ответил {r.status_code}")
     except Exception as e:  # noqa: BLE001
@@ -5010,7 +5016,8 @@ async def _max_bot_name() -> str:
 async def _max_welcome(user_id, chat_id) -> bool:
     """Приветствие с кнопкой мини-приложения (имя бота — из /me, один раз)."""
     name = await _max_bot_name()
-    return await _max_send(user_id, chat_id, max_bot.welcome_message(_MAX_APP_URL, name))
+    return await _max_send(user_id, chat_id,
+                           max_bot.welcome_message(_MAX_APP_URL, name, bot_id=_MAX_BOT_ID or None))
 
 
 async def _max_send(user_id, chat_id, body: dict) -> bool:

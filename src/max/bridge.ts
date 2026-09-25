@@ -73,6 +73,39 @@ export function isMaxLaunch(): boolean {
   }
 }
 
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return ''
+  }
+}
+
+/** Похоже ли, что нас открыли внутри MAX, ещё ДО загрузки библиотеки:
+    данные запуска во фрагменте адреса (мобильный клиент), либо мы во фрейме
+    (веб-версия MAX встраивает мини-приложение и данных в адрес не кладёт),
+    либо пришли с max.ru. В обычном браузере — false, и библиотека не грузится. */
+export function probablyInsideMax(): boolean {
+  if (launchParamsFromHash()) return true
+  try {
+    if (window.self !== window.top) return true
+  } catch {
+    return true
+  }
+  return /(^|\.)max\.ru$/.test(hostOf(document.referrer))
+}
+
+/** Перед первой отрисовкой: если мы, вероятно, в MAX — дождаться MAX Bridge
+    (не дольше 3,5 с), чтобы isMaxLaunch() увидел initData и приложение
+    открылось как мини-приложение со входом по подписи, а не как сайт со
+    входом по нику. Именно так выглядела веб-версия MAX 25.09.2026:
+    «открывается как сторонний сайт». */
+export async function bootMax(): Promise<void> {
+  if (!probablyInsideMax()) return
+  await loadMaxBridge()
+  isMaxLaunch()
+}
+
 let loading: Promise<MaxWebApp | null> | null = null
 
 /** Подгрузить MAX Bridge. Не загрузился за 3,5 с — работаем без него. */

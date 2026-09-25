@@ -74,7 +74,8 @@ def parse_update(update: dict) -> dict | None:
     return None
 
 
-def welcome_message(app_url: str, bot_name: str = "", with_open_app: bool = True) -> dict:
+def welcome_message(app_url: str, bot_name: str = "", with_open_app: bool = True,
+                    bot_id: int | None = None) -> dict:
     """Тело POST /messages: приветствие и клавиатура с кнопкой мини-приложения.
 
     `web_app` у кнопки open_app — по схеме MAX это username (или ссылка) БОТА,
@@ -82,10 +83,20 @@ def welcome_message(app_url: str, bot_name: str = "", with_open_app: bool = True
     владелец бота задаёт в партнёрской платформе (business.max.ru → Чат-боты →
     бот → Настройки). До 23.09.2026 сюда уходил адрес сайта — и тестировщик
     получал не мини-приложение, а веб-ссылку. Без имени бота кнопки нет:
-    остаётся запасная ссылка в браузер."""
+    остаётся запасная ссылка в браузер.
+
+    Кнопка откроет мини-приложение ТОЛЬКО если его адрес привязан к боту в
+    партнёрской платформе MAX (business.max.ru/self → Чат-боты → бот →
+    Настройки → адрес мини-приложения). Проверка без API: страница
+    https://max.ru/<бот>?startapp у бота без мини-приложения предлагает лишь
+    «Запустить бота» (25.09.2026 — именно так у нашего). contact_id — id бота:
+    в схеме MAX у open_app есть оба поля, клиенты могут смотреть на любое."""
     rows: list[list[dict]] = []
     if with_open_app and bot_name:
-        rows.append([{"type": "open_app", "text": "Открыть тренажёр", "web_app": bot_name}])
+        btn: dict = {"type": "open_app", "text": "Открыть тренажёр", "web_app": bot_name}
+        if bot_id:
+            btn["contact_id"] = int(bot_id)
+        rows.append([btn])
     rows.append([{"type": "link", "text": "Открыть в браузере", "url": app_url}])
     return {
         "text": WELCOME,

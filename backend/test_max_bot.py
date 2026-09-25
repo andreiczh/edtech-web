@@ -59,10 +59,11 @@ check(max_bot.parse_update({"update_type": "dialog_muted", "chat_id": 1}) is Non
       "служебные события пропускаются")
 check(max_bot.parse_update("junk") is None, "мусор вместо словаря — None")
 
-w = max_bot.welcome_message("https://example.test/", "gospeak_bot")
+w = max_bot.welcome_message("https://example.test/", "gospeak_bot", bot_id=42)
 rows = w["attachments"][0]["payload"]["buttons"]
 check(w["attachments"][0]["type"] == "inline_keyboard" and rows[0][0]["type"] == "open_app"
-      and rows[0][0]["web_app"] == "gospeak_bot" and rows[1][0]["type"] == "link"
+      and rows[0][0]["web_app"] == "gospeak_bot" and rows[0][0]["contact_id"] == 42
+      and rows[1][0]["type"] == "link"
       and rows[1][0]["url"] == "https://example.test/",
       "приветствие: open_app с именем БОТА (не адресом сайта) и запасная ссылка", str(rows))
 check([b["type"] for r in max_bot.welcome_message("https://example.test/")["attachments"][0]["payload"]["buttons"] for b in r] == ["link"],
@@ -89,6 +90,7 @@ async def fake_send(user_id, chat_id, body):  # noqa: ANN001
 
 main._max_send = fake_send  # type: ignore[attr-defined]
 main._MAX_BOT_NAME = "gospeak_bot"  # без сети: /me не спрашивается
+main._MAX_BOT_ID = 42
 
 
 def req(secret: str | None) -> Request:

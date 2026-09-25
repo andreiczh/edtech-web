@@ -1196,3 +1196,19 @@
 }
 .mr-comment--toggle { padding: calc(8.6 * var(--u)) calc(8.6 * var(--u)) calc(8.6 * var(--u)) calc(12.9 * var(--u)); cursor: pointer; }
 .mr-comment--toggle:active { opacity: 0.85; }
+
+/* ------------------------------------------ «Назад» на экранах задания */
+/* Макета нет: та же строка, кегль и цвет, что у подписи «ЗАДАНИЕ N»; шеврон —
+   тот же, что в настройках, отражённый. */
+.m-back {
+  position: absolute; left: calc(12.5 * var(--u)); top: calc(66 * var(--u));
+  height: calc(18 * var(--u)); padding: 0 calc(4 * var(--u));
+  display: flex; align-items: center; gap: calc(4 * var(--u));
+  font: 700 calc(12.33 * var(--u)) / 1 var(--inter);
+  letter-spacing: -0.033em;
+  color: rgba(0, 0, 0, 0.39);
+  z-index: 3;
+}
+.m-back__ic { width: calc(7.67 * var(--u)); height: calc(13.29 * var(--u)); transform: scaleX(-1); }
+.m-back svg [fill]:not([fill='none']) { fill: currentColor; }
+.m-back:active { opacity: 0.6; }

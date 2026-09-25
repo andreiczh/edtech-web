@@ -34,6 +34,7 @@ import { useCountdown } from '../ege2/useCountdown'
 import { TaskScreen, type VariantResult } from '../screens/TaskScreen'
 import { useRecorder } from '../ege2/useRecorder'
 import { Ambient } from './Ambient'
+import { BackButton, useMaxBack } from './ResultBits'
 import { ResultScreen } from './ResultScreen'
 import { ResultScreen40 } from './ResultScreen40'
 import { ResultScreen42 } from './ResultScreen42'
@@ -487,7 +488,16 @@ function MonologueTask({
 
 /* ------------------------------------------------------------- поток */
 
-export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () => void }) {
+export function Practice({
+  items,
+  onExit,
+  onBack,
+}: {
+  items: PracticeItem[]
+  onExit: () => void
+  /** «Назад»: на экран, с которого пришли; без него — как QUIT */
+  onBack?: () => void
+}) {
   const [index, setIndex] = useState(0)
   const [stage, setStage] = useState<Stage>(() =>
     items[0] ? firstStage(TASKS[items[0].taskId].kind) : 'countdown',
@@ -632,6 +642,13 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
     } else void finish()
   }, [finish, stepCount, task?.kind])
 
+  const back = useCallback(() => {
+    cancelledRef.current = true
+    void stop()
+    ;(onBack ?? onExit)()
+  }, [onBack, onExit, stop])
+  useMaxBack(back)
+
   const quit = useCallback(() => {
     cancelledRef.current = true
     void stop() // микрофон гаснет сразу
@@ -659,6 +676,7 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
           seconds={seconds}
           onQuit={onExit}
           onNext={next}
+          onBack={back}
         />
       )
     }
@@ -674,6 +692,7 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
           seconds={seconds}
           onQuit={onExit}
           onNext={next}
+          onBack={back}
         />
       )
     }
@@ -689,6 +708,7 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
         seconds={seconds}
         onQuit={onExit}
         onNext={next}
+        onBack={back}
       />
     )
   }
@@ -697,6 +717,7 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
     return (
       <div className="mini__frame">
         <Ambient />
+        <BackButton onBack={back} />
         <div className="mini-legacy mini-legacy--full">
           <TaskScreen
             key={variant.id}
@@ -714,6 +735,7 @@ export function Practice({ items, onExit }: { items: PracticeItem[]; onExit: () 
   return (
     <div className="mini__frame">
       <Ambient />
+      <BackButton onBack={back} />
       <div className="mini__scroll">
         {stage === 'countdown' && (
           <Countdown onDone={() => setStage(hasMiniScreens(task.kind) ? 'intro' : 'legacy')} />
