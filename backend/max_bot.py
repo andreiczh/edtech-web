@@ -42,7 +42,9 @@ def webhook_secret(bot_token: str) -> str:
 def secret_ok(header_value: str | None, bot_token: str) -> bool:
     if not header_value or not bot_token:
         return False
-    return hmac.compare_digest(header_value.strip(), webhook_secret(bot_token))
+    # Байты, а не str: не-ASCII в заголовке иначе роняет сравнение TypeError (500).
+    return hmac.compare_digest(header_value.strip().encode("utf-8"),
+                               webhook_secret(bot_token).encode("utf-8"))
 
 
 def parse_update(update: dict) -> dict | None:

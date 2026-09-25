@@ -1,4 +1,4 @@
-# Pingo AI — образ для Hugging Face Spaces (SDK: docker).
+# GoSpeak — один образ для любого Docker-хостинга (Render, compose, HF Spaces).
 #
 # Один контейнер = весь продукт: FastAPI отдаёт и API, и собранный React-фронт,
 # поэтому публичная ссылка одна и CORS никого не волнует.
@@ -47,10 +47,11 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 USER user
 
-# Веса whisper (~150 МБ) кладём в образ на этапе сборки, а не тянем при старте.
-# Иначе каждое пробуждение Space после сна = минуты ожидания первого запроса,
-# и это ровно те грабли, на которых мы уже стояли локально (DECISIONS §5, п.3).
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base.en', device='cpu', compute_type='int8')"
+# Веса whisper в образ НЕ кладём (снято 26.09.2026): распознавание идёт через
+# Mistral (STT_PROVIDER=mistral, на Render ещё и STT_FALLBACK_LOCAL=0), а 150 МБ
+# весов удлиняли сборку — сдача хакатона требует сборку не дольше 5 минут.
+# Локальный whisper остаётся запасным путём: при STT_PROVIDER=local веса
+# скачаются при первом запросе (DECISIONS §6.47).
 
 COPY --chown=user backend/ backend/
 COPY --chown=user --from=front /build/dist dist/

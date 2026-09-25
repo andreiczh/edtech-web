@@ -1,7 +1,7 @@
 /**
  * Настройки — макет «settings-exact-editable 1» (24.09.2026): профиль и три
- * раздела. Ряды привязаны к тому, что в системе есть: тёмная тема и
- * транскрибирование — настройки аккаунта (/me/settings), режим общения —
+ * раздела. Ряды привязаны к тому, что в системе есть: транскрибирование и
+ * громкость — настройки аккаунта (/me/settings), режим общения —
  * выбор собеседника (с тем же подтверждением для грубого, что в кабинете),
  * избранное — серия из отмеченных заданий, «помощь и поддержка» — форма
  * обратной связи. Чего нет (уведомления, язык системы) — ряд нарисован по
@@ -96,7 +96,6 @@ export function MiniSettings({
 
   const current = personas.find((p) => p.id === settings.persona)
   const nick = currentUser()?.nickname ?? ''
-  const dark = settings.theme === 'dark'
 
   const choose = (p: Persona) => {
     if (p.adult && !adultAccepted(p.id)) {
@@ -131,14 +130,13 @@ export function MiniSettings({
           <span className="st-row__l">Уведомления</span>
           <Toggle on={false} disabled label="Уведомления — пока недоступно" onChange={() => undefined} />
         </div>
-        <div className="st-row">
+        {/* Тёмных цветов у мини-экранов пока нет (макеты светлые), а тумблер,
+            который ничего не меняет, — обман. Ряд стоит по макету, но выключен,
+            как «Уведомления» (аудит 26.09.2026, §6.47). */}
+        <div className="st-row st-row--off" aria-disabled="true" title="Тёмная тема на телефоне появится позже">
           <RowIcon icon={ICONS.moon} />
           <span className="st-row__l">Тёмная тема</span>
-          <Toggle
-            on={dark}
-            label="Тёмная тема"
-            onChange={() => updateSettings({ theme: dark ? 'light' : 'dark' })}
-          />
+          <Toggle on={false} disabled label="Тёмная тема — пока недоступно" onChange={() => undefined} />
         </div>
         <div className="st-row st-row--off" aria-disabled="true" title="Пока только русский">
           <RowIcon icon={ICONS.aaSmall} />

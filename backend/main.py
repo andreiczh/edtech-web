@@ -495,7 +495,7 @@ def _invite_env_ok(code: str) -> bool:
     подсказывать перебором, похож ли код на настоящий."""
     ok = False
     for c in INVITE_CODES:
-        if hmac.compare_digest(code, c):
+        if _safe_eq(code, c):
             ok = True
     return ok
 
@@ -544,12 +544,45 @@ async def _check_invite(code: str) -> None:
 _ACCOUNT_CACHE: dict[str, float] = {}
 _ACCOUNT_CACHE_TTL = 600.0
 
+# Потолок на загружаемую запись: 3 минуты монолога в webm — около 3 МБ, запас
+# восьмикратный. Без потолка один запрос в сотни мегабайт съедает всю память
+# бесплатного Render (512 МБ) — и падает сервис для всех (аудит 26.09.2026, §6.47).
+_AUDIO_MAX = 25 * 1024 * 1024
+
+# Фоновые задачи держим за ссылку: asyncio хранит задачи слабо, и без ссылки
+# сборщик мусора может убить задачу до конца — «бот иногда молчит без ошибки».
+_BG_TASKS: set = set()
+
+
+def _spawn(coro):
+    t = asyncio.create_task(coro)
+    _BG_TASKS.add(t)
+    t.add_done_callback(_BG_TASKS.discard)
+    return t
+
+
+def _safe_eq(a: str | None, b: str | None) -> bool:
+    """Сравнение секретов за постоянное время. hmac.compare_digest над str
+    бросает TypeError на не-ASCII (кириллица в заголовке → 500 вместо 401),
+    поэтому сравниваем байты: любой мусор просто «не совпал»."""
+    if not a or not b:
+        return False
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
+async def _read_audio(audio: UploadFile) -> bytes:
+    data = await audio.read(_AUDIO_MAX + 1)
+    if len(data) > _AUDIO_MAX:
+        raise HTTPException(status_code=413,
+                            detail="Запись слишком большая (больше 25 МБ) — запиши ответ заново.")
+    return data
+
 
 async def _require_account(x_device: str | None, x_admin_key: str | None = None) -> None:
     if not REQUIRE_ACCOUNT:
         return
     admin = os.environ.get("ADMIN_KEY", "")
-    if admin and x_admin_key and hmac.compare_digest(x_admin_key, admin):
+    if admin and _safe_eq(x_admin_key, admin):
         return
     if not x_device:
         raise HTTPException(status_code=401, detail="Нужен аккаунт — войди в приложение.")
@@ -664,7 +697,7 @@ def _budget_sync_bg() -> None:
             print(f"[budget] сверка с базой не удалась ({type(e).__name__})")
 
     try:
-        asyncio.create_task(run())
+        _spawn(run())
     except RuntimeError:
         pass
 
@@ -871,7 +904,7 @@ def _track_usage(**metrics) -> None:
     async def run():
         await asyncio.to_thread(write)
 
-    asyncio.create_task(run())
+    _spawn(run())
 
 
 def _track_latency(stage: str, seconds: float) -> None:
@@ -912,7 +945,7 @@ def _remember(device: str | None, kind: str, variant: str, feedback: dict,
         except Exception as e:  # noqa: BLE001
             print(f"[memory] запись не удалась ({type(e).__name__}: {str(e)[:80]})")
 
-    asyncio.create_task(run())
+    _spawn(run())
 
 
 def _note_reply_bg(device: str | None) -> None:
@@ -928,7 +961,7 @@ def _note_reply_bg(device: str | None) -> None:
         except Exception as e:  # noqa: BLE001
             print(f"[xp] реплика не записана ({type(e).__name__}: {str(e)[:60]})")
 
-    asyncio.create_task(run())
+    _spawn(run())
 
 
 # ---------------------------------------------------------------- Аккаунты
@@ -1742,7 +1775,7 @@ ADMIN_KEY = os.environ.get("ADMIN_KEY", "").strip()
 def _require_admin(key: str | None) -> None:
     if not ADMIN_KEY:
         raise HTTPException(status_code=503, detail="ADMIN_KEY не задан в окружении сервера.")
-    if not key or not hmac.compare_digest(key, ADMIN_KEY):
+    if not _safe_eq(key, ADMIN_KEY):
         raise HTTPException(status_code=401, detail="Неверный админ-ключ.")
 
 
@@ -1934,13 +1967,16 @@ async def admin_fipi_import(body: dict = Body(default={}),
     _require_admin(x_admin_key)
     if _FIPI_JOB["state"] == "running":
         raise HTTPException(status_code=409, detail="Импорт уже идёт.")
-    pages = max(1, min(int(body.get("pages") or 25), 40))
+    try:
+        pages = max(1, min(int(body.get("pages") or 25), 40))
     # Потолок 500, а не 100: с фильтром qkind=ILI_STD_FULL вся устная часть
     # (377 заданий) приезжает ОДНОЙ страницей, и это один запрос вместо
     # двадцати пяти. Сервер ФИПИ 300 и 500 принимает без урезания.
-    pagesize = max(10, min(int(body.get("pagesize") or 500), 500))
-    limit = max(0, int(body.get("limit") or 0))
-    asyncio.create_task(asyncio.to_thread(_fipi_import_job, pages, pagesize, limit))
+        pagesize = max(10, min(int(body.get("pagesize") or 500), 500))
+        limit = max(0, int(body.get("limit") or 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="pages, pagesize и limit — целые числа.")
+    _spawn(asyncio.to_thread(_fipi_import_job, pages, pagesize, limit))
     return {"started": True, "pages": pages, "pagesize": pagesize, "limit": limit}
 
 
@@ -1957,6 +1993,8 @@ async def admin_fipi_purge(x_admin_key: str | None = Header(None)):
     """Убрать всё импортированное. Существует ровно на случай, если
     правообладатель попросит удалить материалы: одна кнопка, а не чистка базы руками."""
     _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
     removed = await asyncio.to_thread(storage.tasks_purge_source, fipi_import.SOURCE)
     return {"removed": removed}
 
@@ -2055,6 +2093,8 @@ async def admin_task_list(x_admin_key: str | None = Header(None)):
 @app.post("/admin/tasks/{tid}/toggle")
 async def admin_task_toggle(tid: str, x_admin_key: str | None = Header(None)):
     _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
     state = await asyncio.to_thread(storage.task_toggle, tid)
     _tasks_cache_drop()  # банк изменился — кэш /tasks недействителен
     if state is None:
@@ -2327,6 +2367,8 @@ async def admin_task_delete(tid: str, x_admin_key: str | None = Header(None)):
     """Удаление задания насовсем — для бракованных черновиков импорта
     (кривой OCR, картинка не о том). Выключение (toggle) — для «отложить»."""
     _require_admin(x_admin_key)
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="База недоступна.")
     ok = await asyncio.to_thread(storage.task_delete, tid)
     _tasks_cache_drop()  # банк изменился — кэш /tasks недействителен
     if not ok:
@@ -2931,6 +2973,17 @@ class TtsFailed(Exception):
 _SENTENCE_END = re.compile(r"[.!?…]+(?=\s|$)")
 
 
+_MD_EMPH = re.compile(r"(\*{1,3}|_{1,3})(?=\S)(.+?)(?<=\S)\1")
+
+
+def _strip_md(text: str) -> str:
+    """Модель иногда пишет *курсив* и **жирный** вопреки промпту: звёздочки
+    видны в карточке и попадают в озвучку («звёздочка Хоббит звёздочка»).
+    Снимаем разметку, слова оставляем (живой прогон 26.09.2026, §6.47)."""
+    out = _MD_EMPH.sub(r"\2", text)
+    return out.replace("*", "") if "*" in out else out
+
+
 def _split_sentence(buf: str) -> tuple[str, str]:
     """Отрезает первое законченное предложение из буфера.
     Возвращает (предложение | '', остаток)."""
@@ -3093,7 +3146,10 @@ async def _warmup():
     # Имя бота для кнопки open_app — заранее, а не на первом сообщении:
     # и в /health видно сразу, и приветствие не ждёт лишний запрос к /me.
     if _max_token():
-        asyncio.create_task(_max_bot_name())
+        _spawn(_max_bot_name())
+        if not os.environ.get("MAX_ID_SALT", "").strip():
+            print("[max] MAX_ID_SALT не задан: id MAX-аккаунтов выводятся из соли по умолчанию. "
+                  "Задай соль ДО первых настоящих входов — потом менять нельзя (§6.37).")
     # Локальные модели греем ТОЛЬКО если распознаём локально. Иначе не грузим их
     # вовсе: в этом и смысл перехода на Mistral — не занимать под whisper ~700 МБ
     # памяти, которых на бесплатном хостинге просто нет. Если Mistral однажды не
@@ -3115,14 +3171,14 @@ async def _warmup():
         print(f"[startup] соединения с Mistral прогреты за {time.time() - t:.1f}с"
               if ok else "[startup] прогрев не удался — первая реплика будет медленнее")
         # И держим их тёплыми: прогрев со сроком жизни в пять секунд бесполезен.
-        asyncio.create_task(_keep_pools_warm())
+        _spawn(_keep_pools_warm())
     else:
         for name in dict.fromkeys([WHISPER_MODEL, WHISPER_MODEL_FAST]):
             print(f"[startup] Загружаю faster-whisper:{name} (первый раз качает модель, подожди)...")
             await asyncio.to_thread(get_whisper, name)
         print("[startup] STT-модели готовы.")
     if KEEP_AWAKE_URL:
-        asyncio.create_task(_keep_awake_loop())
+        _spawn(_keep_awake_loop())
         print(f"[startup] самопинг раз в 10 мин на {KEEP_AWAKE_URL}, "
               f"окно {KEEP_AWAKE_FROM_HOUR_UTC:02d}:00-{KEEP_AWAKE_TO_HOUR_UTC:02d}:00 UTC")
 
@@ -3143,7 +3199,7 @@ async def _warmup():
         _storage_ok = False
         print(f"[startup] память НЕдоступна ({type(e).__name__}: {e}) — работаю без неё")
         # Не навсегда: фоном пробуем снова, пока база не ответит.
-        asyncio.create_task(_storage_reconnect())
+        _spawn(_storage_reconnect())
 
     # Дневные лимиты переживают деплой: поднимаем сегодняшние счётчики из базы.
     if _storage_ok:
@@ -3262,7 +3318,7 @@ def health():
         # основная отвечает сама; активная подмена видна по active_until.
         # Бот MAX: есть ли токен на ЭТОМ сервере (без него вебхук отвечает 503
         # и бот молчит — 23.09.2026 так и было, пока переменной не было на Render).
-        "max_bot": {"token_set": bool(_max_token()), "app_url": _MAX_APP_URL,
+        "max_bot": {"token_set": bool(_max_token()), "id_salt_set": bool(os.environ.get("MAX_ID_SALT", "").strip()), "app_url": _MAX_APP_URL,
                     "bot_name": _MAX_BOT_NAME, "bot_id": _MAX_BOT_ID, **_MAX_STATS},
         "llm_fallback": {
             "model": LLM_FALLBACK_MODEL,
@@ -3317,7 +3373,7 @@ async def talk(audio: UploadFile = File(...),
     await _require_account(x_device, x_admin_key)
     _check_voice_rate(x_device or "admin")
     t0 = time.time()
-    data = await audio.read()
+    data = await _read_audio(audio)
 
     # 1) STT
     try:
@@ -3582,7 +3638,7 @@ async def monologue(audio: UploadFile = File(...),
     """
     await _require_account(x_device, x_admin_key)
     _check_voice_rate(x_device or "admin")
-    data = await audio.read()
+    data = await _read_audio(audio)
     return StreamingResponse(
         _json_with_heartbeat(_monologue_work(data)),
         # text/event-stream вместо application/json — намеренно. Тело у нас не SSE,
@@ -3877,7 +3933,7 @@ LABELER_KEY = os.environ.get("LABELER_KEY", "").strip()
 def _require_labeler(key: str | None) -> None:
     if not LABELER_KEY:
         raise HTTPException(status_code=403, detail="Разметка выключена: LABELER_KEY не задан.")
-    if (key or "").strip() != LABELER_KEY:
+    if not _safe_eq((key or "").strip(), LABELER_KEY):
         raise HTTPException(status_code=403, detail="Неверный ключ разметчика.")
 
 
@@ -4402,7 +4458,7 @@ async def task_feedback(
     _check_voice_rate(x_device or "admin")
     if kind not in {"reading", "dialogue", "interview", "monologue"}:
         raise HTTPException(status_code=422, detail=f"Неизвестный тип задания: {kind}")
-    data = await audio.read()
+    data = await _read_audio(audio)
     return StreamingResponse(
         _json_with_heartbeat(
             _task_feedback_work(kind, payload, data, x_device, variant, duration,
@@ -4490,7 +4546,7 @@ async def talk_stream(audio: UploadFile = File(...),
     пока генерится остальное. Финальный чанк: `{done, user, reply, latency}`,
     где latency.first_audio = время до первого озвученного предложения.
     """
-    data = await audio.read()
+    data = await _read_audio(audio)
     who = persona_of(persona)
 
     async def gen():
@@ -4540,6 +4596,7 @@ async def talk_stream(audio: UploadFile = File(...),
 
         async def emit(sentence: str):
             nonlocal first_audio_at, emitted
+            sentence = _strip_md(sentence)
             t_tts = time.time()
             try:
                 wav = await synthesize(sentence, who)
@@ -4750,7 +4807,7 @@ async def talk_stream(audio: UploadFile = File(...),
         # сюда всё равно не входят — это честный минимум ожидания, что виден
         # серверу; фронт больше не складывает её со stt.
         yield json.dumps(
-            {"done": True, "user": user_text, "reply": reply_full.strip(),
+            {"done": True, "user": user_text, "reply": _strip_md(reply_full).strip(),
              "latency": {"stt": round(t1 - t0, 2),
                          "first_audio": round((first_audio_at or t2) - t0, 2),
                          "total": round(t2 - t0, 2)}}
@@ -4949,7 +5006,7 @@ async def talk_review_endpoint(request: Request, body: dict = Body(...),
             except Exception as e:  # noqa: BLE001
                 print(f"[memory] разговорные ошибки не записал ({type(e).__name__})")
 
-        asyncio.create_task(_remember_talk())
+        _spawn(_remember_talk())
 
     # Память беседы для СЛЕДУЮЩЕГО разговора: темы и интересы, без дословной
     # речи. Пишется только отсюда — то есть только когда ученик сам нажал
@@ -4964,7 +5021,7 @@ async def talk_review_endpoint(request: Request, body: dict = Body(...),
             except Exception as e:  # noqa: BLE001
                 print(f"[memory] выжимку беседы не записал ({type(e).__name__})")
 
-        asyncio.create_task(_remember_gist())
+        _spawn(_remember_gist())
 
     return review
 
@@ -5060,7 +5117,7 @@ async def max_webhook(request: Request, body: dict = Body(...)):
     _MAX_STATS["last_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if ev and (ev.get("user_id") or ev.get("chat_id")):
         print(f"[max] {ev['kind']}")
-        asyncio.create_task(_max_welcome(ev.get("user_id"), ev.get("chat_id")))
+        _spawn(_max_welcome(ev.get("user_id"), ev.get("chat_id")))
     else:
         _MAX_STATS["ignored"] += 1
     return {"ok": True}

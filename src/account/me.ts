@@ -46,7 +46,8 @@ export const DEFAULT_SETTINGS: Settings = {
 function normalize(raw: unknown): Settings {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   return {
-    theme: r.theme === 'light' || r.theme === 'auto' ? r.theme : 'dark',
+    theme:
+      r.theme === 'light' || r.theme === 'dark' || r.theme === 'auto' ? r.theme : DEFAULT_SETTINGS.theme,
     volume:
       typeof r.volume === 'number' && r.volume >= 0 && r.volume <= 1
         ? Math.round(r.volume * 100) / 100
@@ -219,6 +220,7 @@ export async function syncSettingsFromServer(): Promise<void> {
     const res = await fetch(`${BACKEND}/me/settings`, {
       headers: { 'X-Device': identityId() },
     })
+    noteUnauthorized(res)
     if (!res.ok) return
     const data = (await res.json()) as { settings?: Record<string, unknown> }
     const s = data.settings ?? {}
@@ -257,10 +259,26 @@ export interface MeStats {
 
 /** null — сервер недоступен или база лежит: экран покажет прочерки, а не
     выдуманные числа (принцип честности данных из StatsScreen). */
+/** Сервер ответил 401: аккаунта с таким id нет (база переехала, аккаунт
+    удалён). Держать человека в приложении с прочерками и без выхода нечестно —
+    App выходит из аккаунта и показывает вход. Срабатывает один раз (§6.47). */
+let unauthorized: (() => void) | null = null
+export function onUnauthorized(fn: (() => void) | null) {
+  unauthorized = fn
+}
+function noteUnauthorized(res: Response) {
+  if (res.status === 401 && unauthorized) {
+    const fn = unauthorized
+    unauthorized = null
+    fn()
+  }
+}
+
 export async function fetchMeStats(): Promise<MeStats | null> {
   if (!currentUser()) return null
   try {
     const res = await fetch(`${BACKEND}/me/stats`, { headers: { 'X-Device': identityId() } })
+    noteUnauthorized(res)
     if (!res.ok) return null
     return (await res.json()) as MeStats
   } catch {
@@ -294,6 +312,7 @@ export async function fetchMeAnalytics(): Promise<MeAnalytics | null> {
   if (!currentUser()) return null
   try {
     const res = await fetch(`${BACKEND}/me/analytics`, { headers: { 'X-Device': identityId() } })
+    noteUnauthorized(res)
     if (!res.ok) return null
     return (await res.json()) as MeAnalytics
   } catch {

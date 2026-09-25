@@ -470,6 +470,19 @@ def _msk_day() -> str:
     return (datetime.now(timezone.utc) + timedelta(hours=3)).strftime("%Y-%m-%d")
 
 
+def _day_msk_of(at) -> str:
+    """Дата работы по МСК — та же шкала, что у active_days и «сегодня».
+    Раньше история графика брала дату из UTC-метки: занятие после 21:00 UTC
+    уезжало во вчера, неделя расходилась с календарём, а «Решено сегодня»
+    показывало 0 сразу после разбора (живой прогон 26.09.2026, §6.47)."""
+    raw = str(at).replace("T", " ")[:19]
+    try:
+        dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return str(at)[:10]
+    return (dt + timedelta(hours=3)).strftime("%Y-%m-%d")
+
+
 def _bump_activity(student_id: str, replies: int, tasks: int, xp: int) -> None:
     _exec("INSERT INTO activity_days(student_id, day, replies, tasks, xp)"
           " VALUES(?,?,?,?,?)"
@@ -1586,7 +1599,7 @@ def analytics_summary(student_id: str) -> dict:
         # v/s/m — вариант и балл: из них мини-приложение собирает «вариант по
         # ошибкам» (24.09.2026) — последние работы каждого номера, где балл
         # ниже максимума. Вариант может быть пустым у старых записей.
-        history.append({"d": str(at)[:10], "k": kind, "p": round(pct),
+        history.append({"d": _day_msk_of(at), "k": kind, "p": round(pct),
                         "v": variant or "", "s": score or 0, "m": mx})
 
     out_kinds = {}

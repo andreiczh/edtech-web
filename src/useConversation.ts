@@ -57,6 +57,7 @@ export interface ConversationApi {
   toggle: () => void
   transcript: string // что распознали из речи пользователя
   reply: string // текст ответа ИИ (наполняется по мере стрима)
+  silentReply: boolean // ответ пришёл без звука (сервер не расслышал) — показать текст всегда
   error: string | null // текст последней ошибки (или null)
   latency: Record<string, number> | null // { stt, first_audio, total }
   /** Сколько раз ученик говорил: по этому числу решается, есть ли что разбирать. */
@@ -76,6 +77,10 @@ export function useConversation(): ConversationApi {
   const [state, setState] = useState<ConversationState>('idle')
   const [transcript, setTranscript] = useState('')
   const [reply, setReply] = useState('')
+  // Ответ пришёл без звука: сервер не расслышал и ответил текстом — экран
+  // покажет его даже при выключенных субтитрах (§6.47).
+  const [silentReply, setSilentReply] = useState(false)
+  const audioInTurnRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [latency, setLatency] = useState<Record<string, number> | null>(null)
   const [turns, setTurns] = useState(
@@ -276,6 +281,8 @@ export function useConversation(): ConversationApi {
       setState('processing')
       setError(null)
       setReply('')
+      setSilentReply(false)
+      audioInTurnRef.current = false
       setTranscript('')
       setLatency(null)
       queueRef.current = []
@@ -283,6 +290,13 @@ export function useConversation(): ConversationApi {
       streamDoneRef.current = false
       const ac = new AbortController()
       abortRef.current = ac
+      // Сторож: холодный старт Render или зависший запрос не должны держать
+      // кнопку в «думаю» вечно (аудит 26.09.2026).
+      let timedOut = false
+      const watchdog = setTimeout(() => {
+        timedOut = true
+        ac.abort()
+      }, 75_000)
 
       // Получили ли мы хоть что-то из потока. Решает, можно ли повторить запрос:
       // после первого чанка повтор проиграл бы часть ответа дважды.
@@ -354,7 +368,10 @@ export function useConversation(): ConversationApi {
             if (msg.user != null) setTranscript(msg.user)
             if (msg.text) {
               setReply((r) => (r ? `${r} ${msg.text}` : (msg.text as string)))
-              if (msg.audio_b64) enqueueAudio(msg.audio_b64)
+              if (msg.audio_b64) {
+                audioInTurnRef.current = true
+                enqueueAudio(msg.audio_b64)
+              }
             }
             if (msg.done) {
               if (msg.reply) setReply(msg.reply)
@@ -365,6 +382,7 @@ export function useConversation(): ConversationApi {
           }
         }
         streamDoneRef.current = true
+        setSilentReply(!audioInTurnRef.current)
         // Реплика состоялась целиком — дописываем пару в историю сессии.
         // Ошибочные и пустые обмены в историю не попадают.
         if (finalUser && finalReply) {
@@ -398,9 +416,10 @@ export function useConversation(): ConversationApi {
           await runOnce()
         }
       } catch (e) {
-        if (ac.signal.aborted) return // barge-in: состояние уже переведено в listening
-        const msg =
-          e instanceof TypeError
+        if (ac.signal.aborted && !timedOut) return // barge-in: состояние уже переведено в listening
+        const msg = timedOut
+          ? 'Сервер не ответил за 75 секунд. Подожди немного и попробуй ещё раз.'
+          : e instanceof TypeError
             ? backendUnreachableMessage()
             : e instanceof Error
               ? e.message
@@ -408,6 +427,7 @@ export function useConversation(): ConversationApi {
         setError(msg)
         setState('idle')
       } finally {
+        clearTimeout(watchdog)
         if (abortRef.current === ac) abortRef.current = null
       }
     },
@@ -447,6 +467,16 @@ export function useConversation(): ConversationApi {
   }, [])
 
   const toggle = useCallback(() => {
+    // iOS / WebView MAX: контекст звука создаётся и запускается СТРОГО по жесту,
+    // иначе ответ приходит беззвучным, а onended не наступает (§6.47).
+    const Ctor = window.AudioContext ?? (window as unknown as {
+      webkitAudioContext?: typeof AudioContext
+    }).webkitAudioContext
+    if (Ctor && (!ctxRef.current || ctxRef.current.state === 'closed')) {
+      ctxRef.current = new Ctor()
+      nextStartRef.current = 0
+    }
+    void ctxRef.current?.resume().catch(() => {})
     switch (stateRef.current) {
       case 'idle':
         void startRecording()
@@ -490,6 +520,7 @@ export function useConversation(): ConversationApi {
     toggle,
     transcript,
     reply,
+    silentReply,
     error,
     latency,
     turns,

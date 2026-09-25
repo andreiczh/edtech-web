@@ -1,0 +1,265 @@
+# DATA-API.yaml — обязательные проверки собственного API GoSpeak
+# (формат сдачи хакатона MAX 2026, «Образовательные решения», раздел
+# «Только для решений с собственным API», п. 5). Полное описание методов —
+# OpenAPI 3.1 по адресу <base_url>/openapi.json (и /docs).
+schema_version: "1.0"
+solution: GoSpeak
+team: GoSpeak
+base_url: https://pingo-ai-dpd9.onrender.com
+openapi: https://pingo-ai-dpd9.onrender.com/openapi.json
+
+auth:
+  student:
+    description: id аккаунта из ответа /auth/register или /auth/login
+    header: X-Device
+  admin:
+    description: ключ администратора (выдаётся отдельно, только при необходимости)
+    header: X-Admin-Key
+
+roles:
+  anonymous: без заголовков
+  student: X-Device = <id тестовой учётной записи>
+  admin: X-Admin-Key = <ключ>
+
+checks:
+  - id: health
+    title: Сервер жив, ключ Mistral задан
+    method: GET
+    path: /health
+    role: anonymous
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required: [ok, llm_key, llm_model, stt, tts, max_bot]
+
+  - id: register
+    title: Регистрация по коду доступа
+    method: POST
+    path: /auth/register
+    role: anonymous
+    request:
+      headers: {Content-Type: application/json}
+      body:
+        invite: "<код доступа>"
+        nickname: "<два английских слова без цифр, от 15 букв>"
+        password: "<от 8 символов>"
+        exam: ege
+    expected_status: [200, 409]   # 409 — ник уже занят
+    response:
+      content_type: application/json
+      required: [id, nickname, exam]
+
+  - id: login
+    title: Вход по нику и паролю
+    method: POST
+    path: /auth/login
+    role: anonymous
+    request:
+      headers: {Content-Type: application/json}
+      body: {nickname: "<ник>", password: "<пароль>"}
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required: [id, nickname, exam]
+
+  - id: login_wrong_password
+    title: Неверный пароль — понятный отказ
+    method: POST
+    path: /auth/login
+    role: anonymous
+    request:
+      body: {nickname: "<ник>", password: "wrong-password"}
+    expected_status: [401]
+    response: {content_type: application/json, required: [detail]}
+
+  - id: tasks
+    title: Банк заданий (опубликованные)
+    method: GET
+    path: /tasks
+    role: anonymous
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required: [tasks]
+      item_fields: [id, exam, task_no, payload]
+
+  - id: personas
+    title: Собеседники
+    method: GET
+    path: /personas
+    role: anonymous
+    expected_status: [200]
+    response: {content_type: application/json, required: [personas]}
+
+  - id: me_stats
+    title: Статистика ученика
+    method: GET
+    path: /me/stats
+    role: student
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required: [level, streak, week, today, active_days, totals]
+
+  - id: me_stats_unauthorized
+    title: Без аккаунта — 401, не 500
+    method: GET
+    path: /me/stats
+    role: anonymous
+    expected_status: [401]
+    response: {content_type: application/json, required: [detail]}
+
+  - id: me_settings_get
+    method: GET
+    path: /me/settings
+    role: student
+    expected_status: [200]
+    response: {content_type: application/json, required: [settings]}
+
+  - id: me_settings_post
+    title: Настройки аккаунта сохраняются
+    method: POST
+    path: /me/settings
+    role: student
+    request:
+      headers: {Content-Type: application/json}
+      body: {theme: light, volume: 0.8, show_text: true, corpus_consent: false, persona: tutor}
+    expected_status: [200]
+    response: {content_type: application/json, required: [settings]}
+
+  - id: me_favorites
+    title: Звёздочка у задания
+    method: POST
+    path: /me/favorites
+    role: student
+    request:
+      headers: {Content-Type: application/json}
+      body: {task_id: 39, variant_id: "39-1", on: true}
+    expected_status: [200]
+    response: {content_type: application/json, required: [items]}
+
+  - id: progress
+    title: Решённые варианты с любого устройства
+    method: GET
+    path: /progress
+    role: student
+    expected_status: [200]
+    response: {content_type: application/json, required: [solved]}
+
+  - id: task_feedback
+    title: Разбор ответа на задание по критериям ФИПИ (главная функция)
+    method: POST
+    path: /task_feedback
+    role: student
+    request:
+      content_type: multipart/form-data
+      fields:
+        audio: "файл записи (webm/opus, mp4/aac с iPhone, mp3), до 25 МБ"
+        kind: "reading | dialogue | interview | monologue"
+        payload: "JSON: reading {referenceText}; dialogue {ad, points[]}; interview {questions[]}; monologue {brief, photoFacts[]}"
+        variant: "id варианта, например 39-1"
+        duration: "секунды записи (целое)"
+        persona: "tutor | critic | mentor"
+        session_done: "1 на последнем варианте серии (необязательно)"
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required: [feedback, transcript]
+      feedback_fields: [score, max, summary, errors]
+      note: "На пустую запись сервер отвечает 200 с полем detail («Не расслышал…») — фронт показывает его как ошибку."
+
+  - id: talk_stream
+    title: Разговор с собеседником, потоковый ответ
+    method: POST
+    path: /talk_stream
+    role: student
+    request:
+      content_type: multipart/form-data
+      fields:
+        audio: "файл записи реплики"
+        history: "JSON-массив [{role: user|assistant, content}], хвост диалога"
+        persona: "tutor | critic | mentor"
+    expected_status: [200]
+    response:
+      content_type: application/x-ndjson
+      lines: "{text, audio_b64} … {done: true, user, reply, latency}; при ошибке {error}"
+
+  - id: talk_review
+    title: Разбор беседы
+    method: POST
+    path: /talk_review
+    role: student
+    request:
+      headers: {Content-Type: application/json}
+      body: {history: "[{role, content}, …] не короче трёх реплик ученика", persona: tutor}
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required: [summary, mistakes, good, phrases, stats, memory]
+
+  - id: speak
+    title: Озвучка вопроса интервью
+    method: POST
+    path: /speak
+    role: student
+    request:
+      headers: {Content-Type: application/json}
+      body: {text: "What is your favourite season and why?", persona: tutor}
+    expected_status: [200]
+    response: {content_type: audio/mpeg}
+
+  - id: feedback_catalog
+    title: Справочник причин для формы «не согласен»
+    method: GET
+    path: /feedback/catalog
+    role: anonymous
+    expected_status: [200]
+    response: {content_type: application/json, required: [reasons, targets, min_comment]}
+
+  - id: task_dispute
+    title: Жалоба на балл (калибровочный набор)
+    method: POST
+    path: /task_dispute
+    role: student
+    request:
+      headers: {Content-Type: application/json}
+      body:
+        kind: reading
+        target: score
+        reason: "<код из /feedback/catalog>"
+        comment: "<не короче min_comment>"
+        said: "<что сказал на самом деле — обязательно при причине «записали не то»>"
+        claim_score: 1
+        score: 0
+        max: 1
+        variant: "39-1"
+        transcript: "<расшифровка>"
+        feedback: "<объект разбора>"
+    expected_status: [200, 422]   # 422 — неполная жалоба, с понятным detail
+    response: {content_type: application/json, required: [ok, id]}
+
+  - id: auth_max
+    title: Вход из мини-приложения MAX по подписи запуска
+    method: POST
+    path: /auth/max
+    role: anonymous
+    request:
+      headers: {Content-Type: application/json}
+      body: {init_data: "<строка WebAppData из window.WebApp.initData>"}
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required: [id, nickname, exam, created]
+    negative:
+      description: без подписи или с чужой подписью
+      expected_status: [401]
+
+  - id: max_webhook_forbidden
+    title: Вебхук бота отвергает чужой секрет
+    method: POST
+    path: /max/webhook
+    role: anonymous
+    request:
+      headers: {X-Max-Bot-Api-Secret: wrong}
+      body: {update_type: message_created}
+    expected_status: [403]

@@ -1,78 +1,60 @@
-# backend — голосовая петля (FastAPI)
+# backend — FastAPI: API, фронт из `dist/`, бот MAX
 
-`микрофон → STT → LLM → TTS → звук обратно`. Плюс разбор монолога ЕГЭ.
+`микрофон → STT (Mistral Voxtral) → LLM (Mistral) → TTS (Mistral) → звук обратно`,
+плюс разбор заданий 39–42 по шкалам ФИПИ (шкалу считает код, модель отвечает
+на вопросы эксперта), споры о балле, статистика, бот и вход через MAX.
 
-**Стек — всё бесплатное и доступное из РФ без VPN:**
-- **STT** — [faster-whisper](https://github.com/SYSTRAN/faster-whisper) **локально**,
-  модель `base.en` (офлайн, без ключа, без гео-блока)
-- **LLM** — **Mistral** (`api.mistral.ai/v1`, `mistral-small-latest`). Свапается через `.env`
-  на любой OpenAI-совместимый эндпоинт, но рабочий вариант из РФ ровно один — см. `.env.example`.
-- **TTS** — [edge-tts](https://github.com/rany2/edge-tts) (нейро-голоса Microsoft, без ключа)
+Нужен **один** ключ — `LLM_API_KEY` (Mistral): распознавание, разбор и озвучка
+идут на нём. Запасные пути без ключа: `STT_PROVIDER=local` (faster-whisper),
+`TTS_PROVIDER=edge` (edge-tts). Все переменные — [`.env.example`](.env.example).
 
-> Нужен **один** ключ — Mistral (`LLM_API_KEY`). STT и TTS работают без ключей.
+## Запуск
 
-## Запуск на Windows
+Одной командой из корня: `docker compose up --build` (см. корневой README).
+Без Docker (Windows):
 
 ```powershell
 cd C:\Users\Lenovo\edtech-copilot-web
-git pull --rebase
+npm.cmd ci
 npm.cmd run build
 cd backend
 .\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-Или одной командой: `powershell -ExecutionPolicy Bypass -File run.ps1` — он делает
-то же самое, включая пересборку фронта.
+`npm run build` обязателен после каждого `git pull`: бэкенд раздаёт собранный
+`dist/`, которого нет в git. Наличие `dist/` проверяется один раз при старте —
+после сборки сервер перезапустить. Без `--reload`: он роняет запросы в полёте.
 
-**`npm run build` обязателен после каждого `git pull`** — бэкенд раздаёт собранный `dist/`,
-которого нет в git. Без сборки увидишь старый интерфейс или отладочную страницу.
+## Маршруты (58, полное описание — `/openapi.json`, `/docs`)
 
-**Первый старт долгий** — faster-whisper один раз качает модель (~150 МБ) без индикатора
-прогресса. Ждать строку `Uvicorn running on http://127.0.0.1:8000`.
-
-## Эндпоинты
-
-| Метод | Путь | Что делает |
+| Группа | Маршруты | Кому |
 |---|---|---|
-| GET | `/` | раздаёт собранный фронт (`../dist`); если его нет — `test.html` |
-| GET | `/health` | какой STT/LLM/TTS поднят, есть ли ключ (значение не печатается) |
-| GET | `/test` | отладочная страница, показывает задержку по стадиям |
-| POST | `/talk` | non-streaming разговор: аудио → STT → LLM → TTS → JSON |
-| POST | `/talk_stream` | стриминг ответа: пофразный TTS, NDJSON-чанки. Фронт ходит сюда |
-| POST | `/monologue` | разбор монолога ЕГЭ Задание 4 по критериям ФИПИ (4+3+3=10) |
+| Вход | `POST /auth/register`, `/auth/login`, `/auth/max` | всем (регистрация — по коду) |
+| Ученик | `GET/POST /me/settings`, `GET /me/stats`, `/me/analytics`, `GET/POST /me/favorites`, `POST /me/nickname`, `GET /progress` | `X-Device` |
+| Задания | `GET /tasks`, `POST /task_feedback`, `POST /task_dispute`, `GET /feedback/catalog`, `POST /speak`, `GET /pron/weakest` | `X-Device` (банк и справочник — всем) |
+| Разговор | `POST /talk_stream` (NDJSON), `POST /talk_review`, `GET /personas`; `POST /talk` и `/monologue` — прежние, фронт ими не пользуется | `X-Device` |
+| MAX | `POST /max/webhook`, `GET /max-check`, `POST /max/probe/*` | вебхук — по секрету из токена |
+| Служебные | `GET /health`, `GET /ping`, `GET /img/*` | всем |
+| Админка | `/admin/*` (обзор, задания, импорт ФИПИ, коды, споры, корпус, бэкап/восстановление, использование) | `X-Admin-Key` |
+
+Ошибки читаемые: сервер всегда шлёт `detail` (иногда в теле 200 — heartbeat
+длинных запросов), фронт показывает его человеку.
 
 ## Проверка
 
-- `http://localhost:8000/health` — ожидаем `"llm_key": true`,
-  `"llm_model": "mistral-small-latest"`.
-- `http://localhost:8000/` — приложение. Если открылась отладочная страница,
-  значит `dist/` не собран.
-- Ошибки читаемые и показывают причину: `STT (faster-whisper) ошибка: …`,
-  `LLM ошибка (модель): …`, `TTS (edge-tts) ошибка: …`.
-
-## Настройки (`.env`)
-
-Все с рабочими дефолтами прямо в коде (`main.py:103–109`), `.env` нужен только ради ключа.
-
-| Переменная | Дефолт |
-|---|---|
-| `LLM_API_KEY` | — (обязательна) |
-| `LLM_BASE_URL` | `https://api.mistral.ai/v1` |
-| `LLM_MODEL` | `mistral-small-latest` |
-| `WHISPER_MODEL` | `base.en` |
-| `TTS_VOICE` | `en-US-AvaMultilingualNeural` |
+- `/health`: `ok`, `llm_key`, `llm_model`, `llm_fallback` (ушёл ли на запасную
+  модель), `stt`, `stt_task`, `tts`, `budget_month`, `max_bot`
+  (`token_set`, `id_salt_set`, счётчики вебхука).
+- Офлайн-тесты: `test_*.py` без `_live` — запускать как скрипты через
+  `.venv\Scripts\python.exe`. Живые (`*_live.py`) ходят в Mistral и жгут квоту.
 
 ## Грабли
 
-- Запускать **без `--reload`** — он роняет запросы в полёте.
-- После `npm run build` бэкенд надо **перезапустить**: наличие `dist/` проверяется
-  один раз при импорте модуля.
-- `.ps1` — только ASCII (PowerShell 5.1 читает их в CP1251).
+- Секреты в заголовках сравнивать только `_safe_eq`, запись читать только
+  `_read_audio`, фон запускать только `_spawn` — см. `CLAUDE.md` здесь же.
 - `.env` не создавать Блокнотом: допишет `.txt` и может сохранить в ANSI.
-- Конкурентные транскрипции сериализуются — модель whisper одна и на CPU.
-  Для одного пользователя не заметно, под пилот надо перемерять.
+- `.ps1` — только ASCII (PowerShell 5.1 читает их в CP1251).
+- На хостинге с 512 МБ `STT_FALLBACK_LOCAL=0`: локальный whisper туда не влезает.
 
-## Что дальше
-
-Роадмап — в [`../HANDOFF.md`](../HANDOFF.md) §9. Ближайшее: память диалога,
-логирование сессий → SQLite, замер конкурентности.
+История решений и замеры — [`../docs/DECISIONS.md`](../docs/DECISIONS.md),
+правила для агентов — [`CLAUDE.md`](CLAUDE.md).

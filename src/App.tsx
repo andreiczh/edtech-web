@@ -18,12 +18,14 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import {
+  onUnauthorized,
+  resetSettings,
   syncSettingsFromServer,
   updateSettings,
   useCurrentPersona,
   useSettings,
 } from './account/me'
-import { currentUser, identityId, type AuthUser } from './auth/auth'
+import { currentUser, identityId, logout, type AuthUser } from './auth/auth'
 import { DisagreeModal } from './components/Disagree'
 import { Rail, type RailItem } from './components/Rail'
 import {
@@ -110,6 +112,18 @@ export default function App() {
       void syncSettingsFromServer()
       void syncFavorites()
     }
+  }, [])
+
+  // 401 от /me/*: аккаунта с этим id на сервере нет (база переехала или
+  // аккаунт удалён). Выходим сами — иначе человек сидит с прочерками и без
+  // выхода (аудит 26.09.2026, §6.47).
+  useEffect(() => {
+    onUnauthorized(() => {
+      logout()
+      resetSettings()
+      setRoute(isMaxLaunch() ? { name: 'maxlogin' } : { name: 'welcome' })
+    })
+    return () => onUnauthorized(null)
   }, [])
 
   const enterApp = useCallback((_u: AuthUser) => {

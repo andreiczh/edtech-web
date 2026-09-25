@@ -25,3 +25,10 @@ docs
 !README.md
 netlify.toml
 vercel.json
+
+# Локальная база (данные учеников) и веса моделей — не в образ (аудит 26.09.2026).
+backend/pingo.db
+backend/pingo.db-*
+backend/*.db
+backend/.models
+backend/.env.backup

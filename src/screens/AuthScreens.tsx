@@ -165,7 +165,7 @@ export function RegisterScreen({
             Разрешаю сохранять мои записи, чтобы система училась точнее проверять речь.
             Записи не публикуются и не продаются; речь распознаёт сервис Mistral AI.
             Отключить можно в кабинете.{' '}
-            <a className="auth2-link" href="/privacy.html" target="_blank" rel="noreferrer">
+            <a className="auth2-link" href="/privacy.html">
               Как хранятся данные
             </a>
           </span>

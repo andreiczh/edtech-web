@@ -57,6 +57,10 @@ export function logout() {
     // История диалога — часть личной сессии: следующий человек за этим же
     // компьютером не должен унаследовать чужой разговор.
     sessionStorage.removeItem('pingo.dialog.v1')
+    // Прогресс и последний разбор — тоже личные: иначе следующий аккаунт на
+    // этом же телефоне наследует чужие «решённые» варианты (§6.47).
+    localStorage.removeItem('pingo.solvedVariants.v2')
+    localStorage.removeItem('pingo.lastFeedback.v1')
   } catch {
     /* ignore */
   }

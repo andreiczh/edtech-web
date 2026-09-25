@@ -17,7 +17,7 @@ import { BackButton, MiniDisagree, ResultBar, StarButton } from './ResultBits'
 import { ErrorsCard, SummaryCard, disputeBase } from './ResultExtras'
 import { Player } from './ResultScreen'
 
-const SHORT = ['Содержание', 'Организация', 'Лексика']
+const SHORT = ['Содержание', 'Организация', 'Язык']
 const LONG = [
   'Решение коммуникативной задачи (содержание)',
   'Организация высказывания',

@@ -1,0 +1,22 @@
+# GoSpeak — запуск всего решения одной командой:
+#   docker compose up --build
+# После сборки открой http://localhost:8000 (телефонная версия: /?mini).
+#
+# Образ один: FastAPI отдаёт и API, и собранный React-фронт (см. Dockerfile).
+# Без DATABASE_URL база — SQLite внутри контейнера: `docker compose stop/start`
+# данные сохраняет, `down` — удаляет вместе с контейнером.
+services:
+  gospeak:
+    build: .
+    image: gospeak:local
+    env_file:
+      - path: backend/.env      # копия backend/.env.example с ключом Mistral
+        required: false
+    environment:
+      PORT: "8000"
+      # Локально самопинг не нужен; точный STT для заданий — как на проде.
+      KEEP_AWAKE_URL: ""
+      STT_TASK_MODEL: "voxtral-small-latest"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped

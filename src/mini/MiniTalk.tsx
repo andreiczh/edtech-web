@@ -36,7 +36,7 @@ const CAPTIONS: Record<ConversationState, string> = {
 const MIN_TURNS_FOR_REVIEW = 3
 
 export function MiniTalk() {
-  const { state, toggle, transcript, reply, error, turns, endSession, getHistory } = useConversation()
+  const { state, toggle, transcript, reply, silentReply, error, turns, endSession, getHistory } = useConversation()
   const { showText } = useSettings()
 
   const [review, setReview] = useState<TalkReview | null>(null)
@@ -57,7 +57,8 @@ export function MiniTalk() {
   }, [getHistory, reviewing])
 
   const canReview = turns >= MIN_TURNS_FOR_REVIEW
-  const shownReply = showText && reply && (state === 'speaking' || state === 'idle') ? reply : ''
+  // Без звука (сервер не расслышал) текст показываем всегда — иначе тишина без объяснения.
+  const shownReply = reply && (showText || silentReply) && (state === 'speaking' || state === 'idle') ? reply : ''
   const text = error ?? reviewError ?? shownReply ?? ''
   const body = text || CAPTIONS[state]
   const isCaption = !text

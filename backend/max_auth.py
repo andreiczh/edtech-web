@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import json
 import time
 from urllib.parse import parse_qsl, unquote
@@ -85,6 +86,10 @@ def verify(raw: str, bot_token: str, max_age_s: int = MAX_AGE_S,
         return out
     if not bot_token:
         out["reason"] = "токен бота не задан на сервере"
+        return out
+    # compare_digest над str падает на не-ASCII → 500; подпись обязана быть hex.
+    if not re.fullmatch(r"[0-9a-f]{64}", got):
+        out["reason"] = "подпись не в hex"
         return out
     for variant in _VARIANTS:
         if hmac.compare_digest(sign(params, bot_token, variant), got):

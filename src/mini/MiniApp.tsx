@@ -95,7 +95,9 @@ export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeed
   }, [homeShown])
   const mistakeItems = useMemo(() => mistakesSessionItems(analytics?.history), [analytics])
   const favorites = useFavorites()
-  const favoritesReady = favorites.length > 0
+  // Готовность — по собранной серии, а не по числу отметок: отмеченный
+  // вариант мог пропасть из банка, и серия окажется пустой (§6.47).
+  const favoritesReady = useMemo(() => favorites.length > 0 && favoriteSessionItems().length > 0, [favorites])
 
   const startItems = useCallback((items: PracticeItem[], from: 'picker' | 'home' = 'home') => {
     if (items.length) setView({ name: 'practice', items, nonce: Date.now(), from })

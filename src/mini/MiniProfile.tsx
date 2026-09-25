@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 
-import { changeNickname, fetchMeStats, updateSettings, useSettings, type MeStats } from '../account/me'
+import { changeNickname, fetchMeStats, resetSettings, updateSettings, useSettings, type MeStats } from '../account/me'
 import { applyNickname, currentUser, logout, randomNickname } from '../auth/auth'
 import { BackButton, useMaxBack } from './ResultBits'
 
@@ -53,6 +53,7 @@ export function MiniProfile({ onBack, onLogout }: { onBack: () => void; onLogout
 
   const doLogout = useCallback(() => {
     logout()
+    resetSettings() // настройки — тоже личные, как в настольном кабинете
     onLogout()
   }, [onLogout])
 
@@ -139,7 +140,7 @@ export function MiniProfile({ onBack, onLogout }: { onBack: () => void; onLogout
               <b>Хранить мои записи</b>
               <span className="pf-sub">
                 чтобы система училась точнее проверять речь; записи не публикуются и не продаются.{' '}
-                <a className="pf-link" href="/privacy.html" target="_blank" rel="noreferrer">
+                <a className="pf-link" href="/privacy.html">
                   Как хранятся данные
                 </a>
               </span>
