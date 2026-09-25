@@ -15,6 +15,7 @@ import { requestTalkReview, type TalkReview } from '../talk/review'
 import { useConversation, type ConversationState } from '../useConversation'
 import { Ambient, Icon } from './Ambient'
 import { ICONS } from './icons'
+import { MiniDisagree } from './ResultBits'
 
 const LABELS: Record<ConversationState, string> = {
   idle: 'Начать говорить',
@@ -75,6 +76,18 @@ export function MiniTalk() {
       <div className={`t-card${isCaption ? ' t-card--caption' : ''}${error || reviewError ? ' t-card--error' : ''}`} role="status" aria-live="polite">
         <p className="t-text">{body}</p>
         {shownReply && transcript && !error && <p className="t-heard">распознано: «{transcript}»</p>}
+        {shownReply && !error && (
+          <MiniDisagree
+            label="ответ невпопад?"
+            ctx={{
+              kind: 'talk',
+              target: 'talk_reply',
+              targetLabel: 'Реплика собеседника',
+              transcript: `Ученик: ${transcript || '—'}\nСобеседник: ${reply}`,
+              context: { turns: getHistory().slice(-6) },
+            }}
+          />
+        )}
         {canReview && !review && (
           <button type="button" className="m-btn t-review" onClick={() => void runReview()} disabled={reviewing}>
             {reviewing ? 'Разбираю…' : 'Разбор беседы'}

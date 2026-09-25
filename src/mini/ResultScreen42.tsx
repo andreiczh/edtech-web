@@ -13,7 +13,8 @@ import { useCallback, useState } from 'react'
 import type { TaskFeedback } from '../ege2/feedback'
 import type { TaskId, TaskVariant } from '../ege2/tasks'
 import { Ambient } from './Ambient'
-import { BackButton, ResultBar, StarButton } from './ResultBits'
+import { BackButton, MiniDisagree, ResultBar, StarButton } from './ResultBits'
+import { ErrorsCard, SummaryCard, disputeBase } from './ResultExtras'
 import { Player } from './ResultScreen'
 
 const SHORT = ['Содержание', 'Организация', 'Лексика']
@@ -53,6 +54,7 @@ export function ResultScreen42({
   const max = feedback?.max ?? 10
   const ringClass = feedback === null ? 'q-ring--none' : score ? '' : 'q-ring--zero'
   const [open, setOpen] = useState(0)
+  const dispute = feedback ? disputeBase(taskId, variant, feedback, transcript) : null
   const [, setProgress] = useState(0)
   const onProgress = useCallback((f: number) => setProgress(f), [])
 
@@ -110,7 +112,21 @@ export function ResultScreen42({
                   </span>
                 </div>
                 {open === i ? (
-                  <div className="mr-comment">{c.comment?.trim() || 'Без замечаний.'}</div>
+                  <div className="mr-comment">
+                    {c.comment?.trim() || 'Без замечаний.'}
+                    {dispute && (
+                      <MiniDisagree
+                        ctx={{
+                          ...dispute,
+                          target: 'criterion',
+                          targetKey: c.key,
+                          targetLabel: `${LONG[i] ?? c.name} — ${c.score} из ${c.max}`,
+                          score: c.score,
+                          max: c.max,
+                        }}
+                      />
+                    )}
+                  </div>
                 ) : (
                   <button
                     type="button"
@@ -124,6 +140,13 @@ export function ResultScreen42({
                 )}
               </div>
             ))}
+            {dispute && (
+              <>
+                <SummaryCard feedback={feedback} />
+                <ErrorsCard errors={feedback.errors ?? []} dispute={dispute} />
+                <MiniDisagree center label="не согласен с баллом" ctx={dispute} />
+              </>
+            )}
           </>
         )}
         <div className="m-pad" />

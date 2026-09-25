@@ -22,7 +22,8 @@ import { sayWord, speakable } from '../ege2/sayWord'
 import type { TaskId, TaskVariant } from '../ege2/tasks'
 import { audioPeaks, type Peaks } from './audioPeaks'
 import { Ambient, Icon } from './Ambient'
-import { BackButton } from './ResultBits'
+import { BackButton, MiniDisagree } from './ResultBits'
+import { DeliveryCard, SummaryCard, disputeBase, WeakWordsCard } from './ResultExtras'
 import { ICONS } from './icons'
 
 const BARS = 58
@@ -224,6 +225,7 @@ export function ResultScreen({
   onBack?: () => void
 }) {
   const reference = variant.readText ?? transcript ?? ''
+  const dispute = feedback ? disputeBase(taskId, variant, feedback, transcript) : null
   const errors = useMemo(() => feedback?.errors ?? [], [feedback])
   const marks = useMemo(() => findMarks(reference, errors), [reference, errors])
   const paras = useMemo(() => paragraphs(reference), [reference])
@@ -401,6 +403,22 @@ export function ResultScreen({
             </div>
           </div>
         )}
+        {sel && dispute && (
+          <MiniDisagree
+            center
+            label="это не ошибка"
+            ctx={{
+              ...dispute,
+              target: 'error',
+              targetKey: (sel.err.quote || sel.err.correction).slice(0, 40),
+              targetLabel: `«${sel.kind === 'skip' ? 'пропущено' : sel.err.quote}» → «${sel.err.correction}»`,
+            }}
+          />
+        )}
+        {feedback && <DeliveryCard d={feedback.delivery} />}
+        {feedback && <WeakWordsCard variantId={variant.id} />}
+        {feedback && <SummaryCard feedback={{ ...feedback, summary: '' }} />}
+        {dispute && <MiniDisagree center label="не согласен с баллом" ctx={dispute} />}
         <div className="m-pad" />
       </div>
 

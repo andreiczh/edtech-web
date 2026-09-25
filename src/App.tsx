@@ -35,6 +35,7 @@ import {
 } from './ege2/tasks'
 import { favoriteSessionItems, syncFavorites } from './ege2/favorites'
 import { isMaxLaunch } from './max/bridge'
+import { Ambient } from './mini/Ambient'
 import { MiniApp } from './mini/MiniApp'
 import { useMobileShell } from './mini/useMobileShell'
 import { AdminScreen } from './screens/AdminScreen'
@@ -183,19 +184,34 @@ export default function App() {
   const onFeedback = useCallback(() => setFeedbackOpen(true), [])
 
   // Экраны входа и админка — отдельные полноэкранные состояния вне каркаса.
+  // На телефоне и в MAX те же экраны одеваются в оболочку мини-приложения
+  // (фон, кадр, кегли) — форма и логика входа одни на оба входа.
+  const authShell = (node: React.ReactNode) =>
+    mobile ? (
+      <div className="mini mini--auth">
+        <div className="mini__frame">
+          <Ambient />
+          <div className="mini__scroll mini-auth">{node}</div>
+        </div>
+      </div>
+    ) : (
+      node
+    )
   if (route.name === 'welcome') {
-    return (
-      <RegisterScreen onDone={enterAfterRegister} onLogin={() => setRoute({ name: 'login' })} />
+    return authShell(
+      <RegisterScreen onDone={enterAfterRegister} onLogin={() => setRoute({ name: 'login' })} />,
     )
   }
   if (route.name === 'intro') {
-    return <IntroScreen onGo={() => setRoute({ name: 'home' })} />
+    return authShell(<IntroScreen onGo={() => setRoute({ name: 'home' })} />)
   }
   if (route.name === 'login') {
-    return <LoginScreen onDone={enterApp} onRegister={() => setRoute({ name: 'welcome' })} />
+    return authShell(<LoginScreen onDone={enterApp} onRegister={() => setRoute({ name: 'welcome' })} />)
   }
   if (route.name === 'maxlogin') {
-    return <MaxLoginScreen onDone={enterFromMax} onFallback={() => setRoute({ name: 'login' })} />
+    return authShell(
+      <MaxLoginScreen onDone={enterFromMax} onFallback={() => setRoute({ name: 'login' })} />,
+    )
   }
   if (route.name === 'admin') {
     return (

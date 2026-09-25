@@ -13,10 +13,22 @@ import { useEffect, useMemo, useState } from 'react'
 import { fetchMeAnalytics, fetchMeStats, type MeAnalytics, type MeStats } from '../account/me'
 import { TASKS, TASK_ORDER } from '../ege2/tasks'
 import { Icon } from './Ambient'
+import { MONTHS, WEEKDAYS, bridgeDays, monthCells } from './calendar'
 import { ICONS } from './icons'
 import { taskNo } from './Practice'
 
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+
+/** Категории ошибок сервера — те же подписи, что на настольной статистике. */
+const CAT_RU: Record<string, string> = {
+  gram: 'Грамматика',
+  lex: 'Лексика',
+  order: 'Структура вопроса',
+  missing: 'Нет ответа',
+  logic: 'Логика',
+  phon: 'Произношение',
+  other: 'Прочее',
+}
 const u = (v: number) => `calc(${v} * var(--u))`
 
 /* Геометрия графика из макета (пункты): центры семи колонок, верх и низ
@@ -87,10 +99,21 @@ export function MiniStats() {
   const active = new Set(stats?.active_days ?? [])
   const streak = stats?.streak.days ?? null
 
+  // Ниже трёх карточек макета — то, что сервер тоже меряет: уровень и XP,
+  // частые ошибки, календарь занятий с заморозкой (как на настольной).
+  const level = stats?.level
+  const cats = analytics?.mistakes.by_cat ?? []
+  const repeats = analytics?.mistakes.repeats ?? []
+  const [shift, setShift] = useState(0)
+  const todayIso = stats?.today ?? today
+  const todayD = new Date(todayIso + 'T12:00:00')
+  const shown = new Date(todayD.getFullYear(), todayD.getMonth() + shift, 1)
+  const bridges = useMemo(() => (stats ? bridgeDays(stats.active_days) : new Set<string>()), [stats])
+  const cells = useMemo(() => monthCells(shown, todayIso, active, bridges), [shown, todayIso, active, bridges])
+  const dayWord = (n: number) => (n % 10 === 1 && n % 100 !== 11 ? 'день' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'дня' : 'дней')
+
   return (
     <div className="s-page">
-      <div className="s-glow s-glow--top" aria-hidden="true" />
-      <div className="s-glow s-glow--bottom" aria-hidden="true" />
       <h1 className="s-h1">Статистика</h1>
       <div className="s-ava" role="img" aria-label="Аватар" />
 
@@ -148,6 +171,12 @@ export function MiniStats() {
         <span className="s-streak">
           {streak === null ? '—' : `${streak} ${plural(streak, 'день', 'дня', 'дней')}`}
         </span>
+        {stats && (
+          <span className="s-streak__sub">
+            лучшая {stats.streak.best} {dayWord(stats.streak.best)} · заморозка{' '}
+            {stats.streak.freeze_available ? 'доступна' : 'потрачена'}
+          </span>
+        )}
         <div className="s-days">
           {week.map((d, i) => {
             const done = active.has(d)
@@ -179,6 +208,92 @@ export function MiniStats() {
           </div>
         ))}
       </section>
+
+      <div className="s-more">
+        <section className="s-card s-card--flow" aria-label="Уровень">
+          <h2 className="s-title s-title--flow">Уровень</h2>
+          {level ? (
+            <>
+              <p className="s-lvl">
+                Уровень {level.level} · {level.name}
+              </p>
+              <div className="s-xpbar" aria-hidden="true">
+                <i style={{ width: `${Math.round(level.progress * 100)}%` }} />
+              </div>
+              <p className="s-sub s-sub--flow">
+                {level.xp - level.level_start} / {level.next_at - level.level_start} XP до уровня {level.level + 1}
+                {' · '}заданий {stats?.totals.tasks ?? 0} · реплик {stats?.totals.replies ?? 0}
+              </p>
+            </>
+          ) : (
+            <p className="s-sub s-sub--flow">{stats === null ? 'Появится после входа и первых занятий.' : '—'}</p>
+          )}
+        </section>
+
+        <section className="s-card s-card--flow" aria-label="Частые ошибки">
+          <h2 className="s-title s-title--flow">Частые ошибки</h2>
+          {cats.length === 0 && (
+            <p className="s-sub s-sub--flow">Пока пусто — ошибки появятся после разборов.</p>
+          )}
+          {cats.slice(0, 4).map((c) => (
+            <div className="s-mist" key={c.cat}>
+              <div className="s-mist__txt">
+                <b>{CAT_RU[c.cat] ?? c.cat}</b>
+                {c.example && (
+                  <span>
+                    «{c.example.quote}» → «{c.example.correction}»
+                  </span>
+                )}
+              </div>
+              <i className="s-mist__n">×{c.n}</i>
+            </div>
+          ))}
+          {repeats.length > 0 && (
+            <>
+              <p className="s-sub s-sub--flow s-sub--gap">Повторяются из работы в работу:</p>
+              {repeats.slice(0, 3).map((r) => (
+                <div className="s-mist" key={r.quote}>
+                  <div className="s-mist__txt">
+                    <span>
+                      «{r.quote}» → «{r.correction}»
+                    </span>
+                  </div>
+                  <i className="s-mist__n">×{r.n}</i>
+                </div>
+              ))}
+            </>
+          )}
+        </section>
+
+        <section className="s-card s-card--flow" aria-label="Календарь занятий">
+          <div className="s-cal__head">
+            <h2 className="s-title s-title--flow">
+              {MONTHS[shown.getMonth()]} {shown.getFullYear()}
+            </h2>
+            <div className="s-cal__nav">
+              <button type="button" className="m-btn s-cal__btn" onClick={() => setShift((v) => Math.max(-1, v - 1))} disabled={shift <= -1} aria-label="Предыдущий месяц">
+                ‹
+              </button>
+              <button type="button" className="m-btn s-cal__btn" onClick={() => setShift((v) => Math.min(0, v + 1))} disabled={shift >= 0} aria-label="Следующий месяц">
+                ›
+              </button>
+            </div>
+          </div>
+          <div className="s-cal">
+            {WEEKDAYS.map((w) => (
+              <span key={w} className="s-cal__wd">
+                {w}
+              </span>
+            ))}
+            {cells.map((c, i) => (
+              <span key={i} className={`s-cal__d${c.n ? '' : ' s-cal__d--mute'}${c.mark ? ` s-cal__d--${c.mark}` : ''}${c.today ? ' s-cal__d--today' : ''}`}>
+                {c.n > 0 && c.n}
+              </span>
+            ))}
+          </div>
+          <p className="s-sub s-sub--flow s-sub--gap">🔥 занятие · ❄ пропуск, спасённый заморозкой (один в неделю)</p>
+        </section>
+      </div>
     </div>
   )
 }

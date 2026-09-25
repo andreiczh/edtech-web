@@ -4,7 +4,10 @@
  * левом верхнем углу (просьба владельца 25.09.2026, макета нет — та же
  * строка и кегль, что у подписи «ЗАДАНИЕ N»).
  */
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
+
+import { DisagreeModal } from '../components/Disagree'
+import type { DisputeContext } from '../ege2/dispute'
 
 import { isFavorite, toggleFavorite, useFavorites } from '../ege2/favorites'
 import type { TaskId } from '../ege2/tasks'
@@ -76,4 +79,44 @@ export function useMaxBack(onBack: () => void) {
       }
     }
   }, [onBack])
+}
+
+/** Спор в мини-стиле: ссылка «⚑ …» открывает ту же форму жалобы, что на
+    настольной версии (DisagreeModal) — копилка калибровки одна на оба входа.
+    После отправки ссылка гаснет: дублей одного спора копилке не нужно. */
+export function MiniDisagree({
+  ctx,
+  label = 'не согласен',
+  center = false,
+}: {
+  ctx: DisputeContext
+  label?: string
+  /** Отдельной строкой по центру (под разбором целиком), а не в углу блока */
+  center?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [sent, setSent] = useState(false)
+  const sentOnce = useRef(false)
+  if (sent) {
+    return <span className={`m-flag m-flag--done${center ? ' m-flag--center' : ''}`}>Спасибо — разберём.</span>
+  }
+  return (
+    <>
+      <button type="button" className={`m-btn m-flag${center ? ' m-flag--center' : ''}`} onClick={() => setOpen(true)}>
+        ⚑ {label}
+      </button>
+      {open && (
+        <DisagreeModal
+          ctx={ctx}
+          onClose={() => {
+            setOpen(false)
+            if (sentOnce.current) setSent(true)
+          }}
+          onSent={() => {
+            sentOnce.current = true
+          }}
+        />
+      )}
+    </>
+  )
 }

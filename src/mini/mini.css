@@ -1212,3 +1212,184 @@
 .m-back__ic { width: calc(7.67 * var(--u)); height: calc(13.29 * var(--u)); transform: scaleX(-1); }
 .m-back svg [fill]:not([fill='none']) { fill: currentColor; }
 .m-back:active { opacity: 0.6; }
+
+/* ------------------------------------------------ спор «не согласен» (мини) */
+.m-flag {
+  display: inline-block; margin-top: calc(6 * var(--u)); padding: calc(2 * var(--u)) 0;
+  font: 700 calc(8.6 * var(--u)) / 1 var(--nunito);
+  color: #9b9595;
+  text-align: left;
+}
+.m-flag--center { display: block; width: calc(368.8 * var(--u)); margin: calc(12 * var(--u)) auto 0; text-align: center; }
+.m-flag--done { color: #9bcec1; }
+.mr-comment .m-flag { display: block; margin-top: calc(6 * var(--u)); }
+.t-card .m-flag { align-self: flex-start; margin-top: calc(8 * var(--u)); }
+/* Форма жалобы — настольная модалка; на телефоне ей нужен отступ от краёв. */
+.mini .modal-backdrop { padding: calc(12 * var(--u)); }
+
+/* --------------------------- блоки разбора вне макетов (итог, ошибки, подача) */
+.x-card {
+  width: calc(368.8 * var(--u));
+  box-sizing: border-box;
+  margin: calc(14 * var(--u)) auto 0;
+  padding: calc(10 * var(--u)) calc(12 * var(--u)) calc(11 * var(--u));
+  border-radius: calc(8.34 * var(--u));
+  background: linear-gradient(90deg, #f2ebff 0%, #ced9ff 100%);
+  box-shadow: calc(1.33 * var(--u)) calc(1.33 * var(--u)) 0 var(--ink);
+  color: var(--ink);
+}
+.x-title { margin: 0 0 calc(6 * var(--u)); font: 700 calc(9.07 * var(--u)) / 1 var(--nunito); letter-spacing: 0.02em; color: #9b9595; }
+.x-text { margin: 0; font: 700 calc(12.1 * var(--u)) / calc(14.5 * var(--u)) var(--nunito); overflow-wrap: anywhere; }
+.x-why { margin: calc(4 * var(--u)) 0 0; font: 700 calc(8.6 * var(--u)) / calc(10.8 * var(--u)) var(--nunito); color: #7d7893; overflow-wrap: anywhere; }
+.x-row { display: flex; justify-content: space-between; gap: calc(8 * var(--u)); padding: calc(3 * var(--u)) 0; font: 700 calc(10.5 * var(--u)) / calc(13 * var(--u)) var(--nunito); }
+.x-k { color: #9b9595; }
+.x-v--ok { color: #9bcec1; }
+.x-v--warn { color: #e8907c; }
+.x-err { padding: calc(7 * var(--u)) 0 calc(4 * var(--u)); border-top: calc(0.8 * var(--u)) solid rgba(83, 78, 137, 0.14); }
+.x-err:first-of-type { border-top: 0; padding-top: 0; }
+.x-err__quote { display: block; font: 700 calc(12.1 * var(--u)) / calc(14.5 * var(--u)) var(--nunito); color: #000; text-decoration: line-through; text-decoration-color: #ffb6a6; text-decoration-thickness: calc(1.2 * var(--u)); overflow-wrap: anywhere; }
+.x-err__fix { display: block; font: 700 calc(12.1 * var(--u)) / calc(14.5 * var(--u)) var(--nunito); color: #9bcec1; overflow-wrap: anywhere; }
+/* «Переслушай эти слова» (§6.46): слова-пилюли с кнопкой озвучки, как r-say. */
+.x-words { display: flex; flex-wrap: wrap; gap: calc(6 * var(--u)); }
+.x-word { display: inline-flex; align-items: center; gap: calc(5 * var(--u)); padding: calc(3 * var(--u)) calc(4 * var(--u)) calc(3 * var(--u)) calc(9 * var(--u)); border-radius: calc(12 * var(--u)); background: #fff; font: 700 calc(11 * var(--u)) / 1 var(--nunito); color: #000; }
+.x-word__say { width: calc(15 * var(--u)); height: calc(15 * var(--u)); border-radius: 50%; background: var(--ink); display: grid; place-items: center; }
+.x-word__say svg { width: calc(7.6 * var(--u)); height: calc(6.1 * var(--u)); display: block; }
+.x-word__say:disabled { opacity: 0.35; }
+.x-transcript { margin-top: calc(14 * var(--u)); }
+
+/* --------------------------------------- статистика: карточки ниже макета */
+.s-more {
+  position: absolute; left: calc(20 * var(--u)); width: calc(360.4 * var(--u));
+  top: calc(797 * var(--u));
+  display: flex; flex-direction: column; gap: calc(12 * var(--u));
+  padding-bottom: calc(110 * var(--u));
+}
+.s-card--flow { position: relative; left: auto; top: auto; width: 100%; height: auto; padding: calc(14 * var(--u)) calc(18 * var(--u)) calc(15 * var(--u)); }
+.s-title--flow { position: static; margin: 0; white-space: normal; }
+.s-sub--flow { position: static; margin: calc(6 * var(--u)) 0 0; white-space: normal; line-height: calc(14 * var(--u)); }
+.s-sub--gap { margin-top: calc(12 * var(--u)); }
+.s-streak__sub {
+  position: absolute; right: calc(24 * var(--u)); top: calc(36 * var(--u));
+  font: 400 calc(8.6 * var(--u)) / 1 var(--inter); color: #73788e; white-space: nowrap;
+}
+.s-lvl { margin: calc(8 * var(--u)) 0 0; font: 700 calc(14 * var(--u)) / 1 var(--inter); color: #111429; }
+.s-xpbar { margin-top: calc(8 * var(--u)); height: calc(7 * var(--u)); border-radius: calc(3.5 * var(--u)); background: #ecebf2; overflow: hidden; }
+.s-xpbar i { display: block; height: 100%; border-radius: inherit; background: #6d68e8; }
+.s-mist { display: flex; align-items: center; gap: calc(10 * var(--u)); padding: calc(8 * var(--u)) 0; border-top: calc(1.2 * var(--u)) solid #e7e8ec; }
+.s-mist:first-of-type { border-top: 0; }
+.s-title--flow + .s-mist { border-top: 0; margin-top: calc(6 * var(--u)); }
+.s-mist__txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: calc(2 * var(--u)); }
+.s-mist__txt b { font: 700 calc(12.5 * var(--u)) / 1.2 var(--inter); color: #111429; }
+.s-mist__txt span { font: 400 calc(10.5 * var(--u)) / 1.3 var(--inter); color: #4a4d62; overflow-wrap: anywhere; }
+.s-mist__n { flex: none; font: 700 calc(12 * var(--u)) / 1 var(--inter); color: #6d68e8; font-style: normal; }
+.s-cal__head { display: flex; align-items: center; justify-content: space-between; gap: calc(8 * var(--u)); }
+.s-cal__nav { display: flex; gap: calc(6 * var(--u)); }
+.s-cal__btn {
+  width: calc(26 * var(--u)); height: calc(26 * var(--u)); border-radius: 50%;
+  background: #f1f0f6; color: #111429; font: 700 calc(15 * var(--u)) / 1 var(--inter);
+}
+.s-cal__btn[disabled] { opacity: 0.35; cursor: default; }
+.s-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: calc(4 * var(--u)); margin-top: calc(10 * var(--u)); }
+.s-cal__wd { text-align: center; font: 400 calc(8.6 * var(--u)) / 1 var(--inter); color: #73788e; padding-bottom: calc(2 * var(--u)); }
+.s-cal__d {
+  position: relative; height: calc(30 * var(--u)); border-radius: calc(8 * var(--u));
+  display: grid; place-items: center;
+  font: 500 calc(10.5 * var(--u)) / 1 var(--inter); color: #4a4d62; background: #f7f6fb;
+}
+.s-cal__d--mute { background: transparent; }
+.s-cal__d--did { background: #dff3ea; color: #111429; }
+.s-cal__d--did::after { content: '🔥'; position: absolute; right: calc(2 * var(--u)); top: calc(1 * var(--u)); font-size: calc(7 * var(--u)); }
+.s-cal__d--frz { background: #e8e5ff; }
+.s-cal__d--frz::after { content: '❄'; position: absolute; right: calc(3 * var(--u)); top: calc(1 * var(--u)); font-size: calc(7 * var(--u)); color: #6d68e8; }
+.s-cal__d--today { box-shadow: inset 0 0 0 calc(1.5 * var(--u)) #6d68e8; }
+
+/* --------------------------------------------- настройки: громкость, кабинет */
+.st-slider {
+  position: absolute; right: calc(17.5 * var(--u)); top: 50%; transform: translateY(-50%);
+  width: calc(110 * var(--u)); height: calc(22 * var(--u)); margin: 0;
+  accent-color: #9675f7; background: transparent;
+}
+.pf-h1 { font-size: calc(30 * var(--u)); top: calc(116 * var(--u)); }
+.pf-list { padding: calc(166 * var(--u)) calc(21.8 * var(--u)) calc(110 * var(--u)); display: flex; flex-direction: column; gap: calc(12 * var(--u)); }
+.pf-card { position: relative; left: auto; top: auto; width: auto; padding: calc(14 * var(--u)) calc(16 * var(--u)); }
+.pf-who { display: flex; align-items: center; gap: calc(12 * var(--u)); }
+.pf-ava { position: static; flex: none; width: calc(48 * var(--u)); height: calc(48 * var(--u)); }
+.pf-who__txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: calc(3 * var(--u)); }
+.pf-nick { font: 700 calc(16 * var(--u)) / 1.15 var(--inter); color: #11142c; overflow-wrap: anywhere; }
+.pf-sub { font: 400 calc(10.5 * var(--u)) / calc(14 * var(--u)) var(--inter); color: #777b91; }
+.pf-regen { flex: none; padding: calc(7 * var(--u)) calc(10 * var(--u)); border-radius: calc(10 * var(--u)); background: #1a1a21; color: #fff; font: 600 calc(9.5 * var(--u)) / 1 var(--inter); white-space: nowrap; }
+.pf-regen[disabled] { opacity: 0.6; }
+.pf-note { margin: calc(10 * var(--u)) 0 0; font: 400 calc(11 * var(--u)) / calc(14.5 * var(--u)) var(--inter); color: #4a4d62; }
+.pf-note--err { color: #b5472b; }
+.pf-lvl { display: flex; flex-direction: column; }
+.pf-lvl b { font: 700 calc(14.5 * var(--u)) / 1.2 var(--inter); color: #11142c; }
+.pf-xpbar { margin-top: calc(8 * var(--u)); height: calc(7 * var(--u)); border-radius: calc(3.5 * var(--u)); background: #ecebf2; overflow: hidden; }
+.pf-xpbar i { display: block; height: 100%; border-radius: inherit; background: #9675f7; }
+.pf-lvl .pf-sub { margin-top: calc(5 * var(--u)); }
+.pf-rows { margin-top: calc(10 * var(--u)); display: flex; flex-direction: column; }
+.pf-row { display: flex; justify-content: space-between; gap: calc(8 * var(--u)); padding: calc(7 * var(--u)) 0; border-top: calc(0.9 * var(--u)) solid #e8e9ed; font: 500 calc(12.5 * var(--u)) / 1.2 var(--inter); color: #171a31; }
+.pf-row b { font-weight: 700; color: #11142c; }
+.pf-consent { display: flex; align-items: center; gap: calc(12 * var(--u)); }
+.pf-consent__txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: calc(3 * var(--u)); }
+.pf-consent__txt b { font: 700 calc(13 * var(--u)) / 1.2 var(--inter); color: #171a31; }
+.pf-link { color: #6d68e8; text-decoration: underline; }
+.pf-tog { position: static; flex: none; transform: none; }
+.pf-logout {
+  width: 100%; padding: calc(13 * var(--u)); border-radius: calc(13.8 * var(--u));
+  background: rgba(255, 255, 255, 0.91); color: #b5472b;
+  font: 700 calc(13 * var(--u)) / 1 var(--inter);
+}
+
+/* ------------------------------------------ вход в оболочке мини-приложения */
+/* Те же экраны регистрации, входа и MAX-входа; здесь только их одежда:
+   фон и кадр оболочки, карточки-инпуты, чёрная кнопка как «Начать практику». */
+.mini--auth { background: #f8f7f2; }
+.mini-auth { padding: calc(56 * var(--u)) calc(21.8 * var(--u)) calc(40 * var(--u)); box-sizing: border-box; }
+.mini-auth .authpage { min-height: 0; padding: 0; background: none; display: block; }
+.mini-auth .authcol, .mini-auth .authcol--card { width: 100%; max-width: none; margin: 0; padding: 0; background: none; box-shadow: none; border: 0; }
+.mini-auth .auth2-title { margin: 0 0 calc(6 * var(--u)); font: 800 calc(30 * var(--u)) / 1.1 var(--inter) !important; letter-spacing: -0.01em; color: #11142c; text-align: left; }
+.mini-auth .auth2-sub { margin: 0 0 calc(16 * var(--u)); font: 400 calc(12.5 * var(--u)) / calc(17 * var(--u)) var(--inter); color: #525a77; text-align: left; }
+.mini-auth .auth2-label { display: block; margin: calc(12 * var(--u)) 0 calc(5 * var(--u)); font: 700 calc(9.5 * var(--u)) / 1 var(--inter); letter-spacing: 0.06em; text-transform: uppercase; color: #525a77; }
+.mini-auth .auth2-field {
+  width: 100%; box-sizing: border-box; margin: 0;
+  padding: calc(11 * var(--u)) calc(14 * var(--u));
+  border: calc(1 * var(--u)) solid #e2e0f8; border-radius: calc(12 * var(--u));
+  background: rgba(255, 255, 255, 0.91); color: #171a31;
+  font: 500 calc(13.5 * var(--u)) / 1.2 var(--inter);
+}
+.mini-auth .auth2-field--row { display: flex; align-items: center; gap: calc(8 * var(--u)); }
+.mini-auth .auth2-nick { flex: 1; font: 700 calc(13.5 * var(--u)) / 1.2 var(--inter); color: #11142c; }
+.mini-auth .auth2-regen { flex: none; padding: calc(6 * var(--u)) calc(8 * var(--u)); border-radius: calc(8 * var(--u)); border: 0; background: #ecebf2; color: #11142c; font: 600 calc(9.5 * var(--u)) / 1 var(--inter); }
+.mini-auth .auth2-seg { display: flex; gap: calc(6 * var(--u)); background: #ecebf2; padding: calc(3 * var(--u)); border-radius: calc(12 * var(--u)); }
+.mini-auth .auth2-seg button { flex: 1; padding: calc(8 * var(--u)); border: 0; border-radius: calc(9 * var(--u)); background: transparent; color: #525a77; font: 700 calc(11 * var(--u)) / 1 var(--inter); }
+.mini-auth .auth2-seg .auth2-seg--on { background: #1a1a21; color: #fff; }
+.mini-auth .auth2-consent { display: flex; gap: calc(8 * var(--u)); margin: calc(14 * var(--u)) 0 0; font: 400 calc(10 * var(--u)) / calc(13.5 * var(--u)) var(--inter); color: #525a77; }
+.mini-auth .auth2-consent input { accent-color: #9675f7; }
+.mini-auth .auth2-btn {
+  display: block; width: 100%; margin: calc(18 * var(--u)) 0 0; padding: calc(13 * var(--u));
+  border: 0; border-radius: calc(13.8 * var(--u)); background: #1a1a21; color: #fff;
+  font: 700 calc(13 * var(--u)) / 1 var(--inter);
+}
+.mini-auth .auth2-btn:disabled { opacity: 0.45; }
+.mini-auth .auth2-err { margin: calc(10 * var(--u)) 0 0; font: 700 calc(11 * var(--u)) / calc(14 * var(--u)) var(--nunito); color: #b5472b; }
+.mini-auth .auth2-foot { margin: calc(14 * var(--u)) 0 0; font: 400 calc(11 * var(--u)) / 1.4 var(--inter); color: #525a77; text-align: center; }
+.mini-auth .auth2-link { border: 0; background: none; padding: 0; color: #6d68e8; font: inherit; font-weight: 700; text-decoration: underline; }
+.mini-auth .auth2-keep { margin: calc(12 * var(--u)) 0; padding: calc(12 * var(--u)) calc(14 * var(--u)); border-radius: calc(12 * var(--u)); background: rgba(255, 255, 255, 0.91); font: 400 calc(12 * var(--u)) / 1.4 var(--inter); color: #171a31; }
+.mini-auth .intro-list { display: flex; flex-direction: column; gap: calc(10 * var(--u)); margin: calc(12 * var(--u)) 0 0; }
+.mini-auth .intro-item { display: flex; gap: calc(10 * var(--u)); align-items: flex-start; padding: calc(10 * var(--u)) calc(12 * var(--u)); border-radius: calc(12 * var(--u)); background: rgba(255, 255, 255, 0.91); font: 400 calc(11.5 * var(--u)) / 1.4 var(--inter); color: #171a31; }
+.mini-auth .intro-item b { font: 700 calc(12.5 * var(--u)) / 1.3 var(--inter); }
+.mini-auth .intro-ic { flex: none; width: calc(30 * var(--u)); height: calc(30 * var(--u)); border-radius: calc(9 * var(--u)); display: grid; place-items: center; }
+
+/* ----------------------------------------- телефон короче кадра: без зазоров */
+/* Когда окно короче пропорции 402×874, кадр вписан по высоте и по бокам
+   остаются поля. Пятна фона и фон главной продолжаются в них — полей не видно. */
+.mini__frame { z-index: 1; }
+@media (min-aspect-ratio: 402/874) and (max-width: 460px) {
+  .mini__frame { overflow: visible; }
+  .mini--home { background: #fff url('/mini/home-bg2.jpg') center top / cover no-repeat; }
+  .mini--home::after {
+    content: ''; position: absolute; left: 0; right: 0; top: calc(147.2 * var(--u)); bottom: 0;
+    background: #fff; z-index: 0;
+  }
+  .h-sheet { border-radius: 0; }
+}

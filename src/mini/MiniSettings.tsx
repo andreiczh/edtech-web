@@ -109,8 +109,6 @@ export function MiniSettings({
 
   return (
     <div className="st-page">
-      <div className="s-glow st-glow--top" aria-hidden="true" />
-      <div className="s-glow st-glow--bottom" aria-hidden="true" />
       <h1 className="st-h1">Настройки</h1>
 
       <button
@@ -192,6 +190,20 @@ export function MiniSettings({
             onChange={() => updateSettings({ showText: !settings.showText })}
           />
         </div>
+        <div className="st-row">
+          <RowIcon icon={ICONS.speaker} />
+          <span className="st-row__l">Громкость голоса</span>
+          <input
+            type="range"
+            className="st-slider"
+            min={0}
+            max={1}
+            step={0.05}
+            value={settings.volume}
+            aria-label={`Громкость голоса: ${Math.round(settings.volume * 100)}%`}
+            onChange={(e) => updateSettings({ volume: Number(e.target.value) })}
+          />
+        </div>
         <button
           type="button"
           className="m-btn st-row"
@@ -206,10 +218,10 @@ export function MiniSettings({
         </button>
       </div>
 
-      <h2 className="st-sec" style={{ top: u(651.6) }}>
+      <h2 className="st-sec" style={{ top: u(696.1) }}>
         Другое
       </h2>
-      <div className="st-card st-card--rows" style={{ top: u(674.8) }}>
+      <div className="st-card st-card--rows" style={{ top: u(719.3) }}>
         <button type="button" className="m-btn st-row" onClick={onSupport}>
           <RowIcon icon={ICONS.headset} />
           <span className="st-row__l" style={{ left: u(64.9) }}>

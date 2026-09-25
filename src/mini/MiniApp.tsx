@@ -2,7 +2,7 @@
  * Оболочка мини-приложения (телефон и MAX). Четыре вкладки по макетам от
  * 24.09.2026: главная (69), разговор (66·Redesign 39), статистика и
  * настройки; выбор задания и поток всех четырёх заданий по макетам
- * 66·Redesign. Кабинет (ник, согласие, выход) — прежний экран из настроек.
+ * 66·Redesign. Кабинет (ник, уровень, согласие, выход) — MiniProfile из настроек.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
@@ -10,8 +10,8 @@ import { fetchMeAnalytics, type MeAnalytics } from '../account/me'
 import { favoriteSessionItems, useFavorites } from '../ege2/favorites'
 import type { TaskFeedback } from '../ege2/feedback'
 import { TASK_ORDER, pickDemoItems, pickSession, variantById, type TaskId } from '../ege2/tasks'
-import { ProfileScreen } from '../screens/ProfileScreen'
 import { MiniHome, MiniTabs, type MiniTab } from './MiniHome'
+import { MiniProfile } from './MiniProfile'
 import { MiniSettings } from './MiniSettings'
 import { MiniStats } from './MiniStats'
 import { MiniTalk } from './MiniTalk'
@@ -141,15 +141,15 @@ export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeed
   return (
     <div className={`mini mini--${shell}`}>
       <div className="mini__frame">
+        {(tab === 'stats' || tab === 'settings') && (
+          <>
+            <div className={`s-glow ${tab === 'stats' ? 's-glow--top' : 'st-glow--top'}`} aria-hidden="true" />
+            <div className={`s-glow ${tab === 'stats' ? 's-glow--bottom' : 'st-glow--bottom'}`} aria-hidden="true" />
+          </>
+        )}
         {view.name === 'profile' ? (
-          <div className="mini-legacy">
-            <div className="screen">
-              <ProfileScreen
-                onOpenStats={() => setView({ name: 'tab', tab: 'stats' })}
-                onLogout={onLogout}
-                onClose={() => setView({ name: 'tab', tab: 'settings' })}
-              />
-            </div>
+          <div className="mini__scroll">
+            <MiniProfile onBack={() => setView({ name: 'tab', tab: 'settings' })} onLogout={onLogout} />
           </div>
         ) : tab === 'home' ? (
           <div className="mini__scroll">
@@ -206,7 +206,7 @@ function ResultDemo({ taskId, demo, onExit }: { taskId: TaskId; demo: Demo; onEx
       {taskId === 42 ? (
         <ResultScreen42 transcript={demo.transcript} {...common} />
       ) : taskId === 40 || taskId === 41 ? (
-        <ResultScreen40 no={taskId - 38} {...common} />
+        <ResultScreen40 no={taskId - 38} transcript={demo.transcript} {...common} />
       ) : (
         <ResultScreen no={1} transcript={demo.transcript} {...common} />
       )}

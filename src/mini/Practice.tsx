@@ -687,6 +687,7 @@ export function Practice({
           taskId={item.taskId}
           variant={variant}
           feedback={feedback}
+          transcript={transcript}
           failure={failure}
           blob={blob}
           seconds={seconds}
