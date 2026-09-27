@@ -1099,24 +1099,12 @@ def _max_salt() -> str:
     return os.environ.get("MAX_ID_SALT", "").strip() or "gospeak-max-v1"
 
 
-@app.post("/auth/max")
-async def auth_max(request: Request, body: dict = Body(...)):
-    if not _rate_ok(f"a:{_client_ip(request)}", 12, 60.0):
-        raise HTTPException(status_code=429, detail="Слишком много попыток — подожди минутку.")
-    token = _max_token()
-    if not token:
-        raise HTTPException(status_code=503, detail="Вход через MAX ещё не включён на сервере.")
-    raw = str(body.get("init_data") or "")
-    if not raw or len(raw) > 8192:
-        raise HTTPException(status_code=422,
-                            detail="Нет данных запуска MAX — открой приложение из чата бота.")
-    res = max_auth.verify(raw, token)
-    if not res["valid"]:
-        print(f"[max] вход отклонён: {res['reason']}")
-        raise HTTPException(status_code=401, detail=f"MAX не подтвердил вход: {res['reason']}.")
+async def _max_account(max_uid, offered_nicks) -> dict:
+    """Найти или создать аккаунт MAX-пользователя: общая часть входа по
+    подписи мини-приложения (/auth/max) и по личной ссылке от бота
+    (/auth/max_link) — один номер пользователя MAX, один аккаунт."""
     if not _storage_ok:
         raise HTTPException(status_code=503, detail="База недоступна — попробуй чуть позже.")
-    max_uid = res["user"]["id"]
     acc_id = max_auth.account_id(max_uid, _max_salt())
     row = await asyncio.to_thread(storage.get_account_by_id, acc_id)
     if row is not None:
@@ -1125,7 +1113,7 @@ async def auth_max(request: Request, body: dict = Body(...)):
         raise HTTPException(status_code=403, detail="Новые аккаунты через MAX сейчас не создаются.")
     # Ник — первый свободный из предложенных фронтом (он генерирует их из тех же
     # слов, что при регистрации); последний шанс — стабильный ник из хеша.
-    offered = body.get("nicknames") if isinstance(body.get("nicknames"), list) else []
+    offered = offered_nicks if isinstance(offered_nicks, list) else []
     candidates = [n for n in offered[:6]
                   if isinstance(n, str) and _nick_ok(n)]
     candidates.append(max_auth.nickname(max_uid, _max_salt()))
@@ -1146,6 +1134,45 @@ async def auth_max(request: Request, body: dict = Body(...)):
             if row is not None:
                 return {"id": row[0], "nickname": row[1], "exam": row[3], "created": False}
     raise HTTPException(status_code=503, detail="Не получилось подобрать ник — попробуй ещё раз.")
+
+
+@app.post("/auth/max")
+async def auth_max(request: Request, body: dict = Body(...)):
+    if not _rate_ok(f"a:{_client_ip(request)}", 12, 60.0):
+        raise HTTPException(status_code=429, detail="Слишком много попыток — подожди минутку.")
+    token = _max_token()
+    if not token:
+        raise HTTPException(status_code=503, detail="Вход через MAX ещё не включён на сервере.")
+    raw = str(body.get("init_data") or "")
+    if not raw or len(raw) > 8192:
+        raise HTTPException(status_code=422,
+                            detail="Нет данных запуска MAX — открой приложение из чата бота.")
+    res = max_auth.verify(raw, token)
+    if not res["valid"]:
+        print(f"[max] вход отклонён: {res['reason']}")
+        raise HTTPException(status_code=401, detail=f"MAX не подтвердил вход: {res['reason']}.")
+    return await _max_account(res["user"]["id"], body.get("nicknames"))
+
+
+@app.post("/auth/max_link")
+async def auth_max_link(request: Request, body: dict = Body(...)):
+    """Вход по личной ссылке от бота (#mlogin=... во фрагменте адреса, §6.50).
+
+    Нужен, пока адрес мини-приложения не привязан к боту: без привязки у
+    приложения нет данных запуска MAX, а бот всё равно знает номер того, кто
+    ему пишет, и подписывает ссылку ключом из своего токена."""
+    if not _rate_ok(f"a:{_client_ip(request)}", 12, 60.0):
+        raise HTTPException(status_code=429, detail="Слишком много попыток — подожди минутку.")
+    token = _max_token()
+    if not token:
+        raise HTTPException(status_code=503, detail="Вход через MAX ещё не включён на сервере.")
+    res = max_auth.verify_link(str(body.get("token") or ""), token)
+    if not res["valid"]:
+        print(f"[max] вход по ссылке отклонён: {res['reason']}")
+        raise HTTPException(status_code=401, detail=f"Ссылка не подошла: {res['reason']}.")
+    out = await _max_account(res["user_id"], body.get("nicknames"))
+    _MAX_STATS["link_logins"] += 1
+    return out
 
 
 @app.get("/progress")
@@ -3341,7 +3368,8 @@ def health():
         # Бот MAX: есть ли токен на ЭТОМ сервере (без него вебхук отвечает 503
         # и бот молчит — 23.09.2026 так и было, пока переменной не было на Render).
         "max_bot": {"token_set": bool(_max_token()), "id_salt_set": bool(os.environ.get("MAX_ID_SALT", "").strip()), "app_url": _MAX_APP_URL,
-                    "bot_name": _MAX_BOT_NAME, "bot_id": _MAX_BOT_ID, **_MAX_STATS},
+                    "bot_name": _MAX_BOT_NAME, "bot_id": _MAX_BOT_ID,
+                    "miniapp_ready": _max_miniapp_ready(), **_MAX_STATS},
         "llm_fallback": {
             "model": LLM_FALLBACK_MODEL,
             "active": time.time() < _llm_fallback_until,
@@ -5063,7 +5091,29 @@ _MAX_APP_URL = os.environ.get("MAX_APP_URL", "").strip() or "https://pingo-ai-dp
 # что токена не было на Render). Только счётчики и код последней ошибки —
 # ни текстов сообщений, ни id людей.
 _MAX_STATS: dict = {"received": 0, "ignored": 0, "sent": 0, "failed": 0,
-                    "last_error": "", "last_at": ""}
+                    "last_error": "", "last_at": "", "links": 0, "link_logins": 0}
+
+
+def _max_miniapp_ready() -> bool:
+    """Привязан ли адрес мини-приложения к боту в партнёрской платформе MAX.
+    Узнать это через API нельзя, поэтому флаг ставит человек: MAX_MINIAPP_READY=1
+    на Render, когда https://max.ru/<бот>?startapp открывает приложение, а не
+    «Запустить бота». До тех пор кнопка open_app в приветствии не шлётся — без
+    привязки она ничего не открывает (жалоба владельца 28.09.2026)."""
+    return os.environ.get("MAX_MINIAPP_READY", "0").strip().lower() in ("1", "true", "yes")
+
+
+def _max_login_url(user_id) -> str | None:
+    """Личная ссылка со входом для этого пользователя MAX (§6.50)."""
+    token = _max_token()
+    if not (token and user_id):
+        return None
+    try:
+        t = max_auth.link_token(user_id, token)
+    except (TypeError, ValueError):
+        return None
+    _MAX_STATS["links"] += 1
+    return f"{_MAX_APP_URL.rstrip('/')}/#mlogin={t}"
 
 # Username бота — для кнопки open_app (web_app = чьё мини-приложение открыть).
 # Задаётся MAX_BOT_USERNAME, иначе один раз спрашивается у /me.
@@ -5095,17 +5145,20 @@ async def _max_bot_name() -> str:
 async def _max_welcome(user_id, chat_id) -> bool:
     """Приветствие с кнопкой мини-приложения (имя бота — из /me, один раз)."""
     name = await _max_bot_name()
-    return await _max_send(user_id, chat_id,
-                           max_bot.welcome_message(_MAX_APP_URL, name, bot_id=_MAX_BOT_ID or None))
+    login_url = _max_login_url(user_id)
+    body = max_bot.welcome_message(_MAX_APP_URL, name, with_open_app=_max_miniapp_ready(),
+                                   bot_id=_MAX_BOT_ID or None, login_url=login_url)
+    fallback = max_bot.welcome_message(_MAX_APP_URL, with_open_app=False, login_url=login_url)
+    return await _max_send(user_id, chat_id, body, fallback)
 
 
-async def _max_send(user_id, chat_id, body: dict) -> bool:
+async def _max_send(user_id, chat_id, body: dict, fallback: dict | None = None) -> bool:
     """POST /messages в MAX. Если клавиатуру с open_app API отверг (формат
     кнопки может отличаться от клиента 0.3.1) — шлём то же с одной ссылкой:
     приветствие без кнопки хуже, чем с запасной."""
     token = _max_token()
     params = {"user_id": user_id} if user_id else {"chat_id": chat_id}
-    fallback = max_bot.welcome_message(_MAX_APP_URL, with_open_app=False)
+    fallback = fallback or max_bot.welcome_message(_MAX_APP_URL, with_open_app=False)
     async with httpx.AsyncClient(timeout=15, trust_env=False) as c:
         for attempt, payload in ((1, body), (2, fallback)):
             try:

@@ -40,6 +40,53 @@ declare global {
 
 const BRIDGE_SRC = 'https://st.max.ru/js/max-web-app.js'
 const FLAG = 'gospeak.max.v1'
+const LINK_KEY = 'gospeak.max.link'
+/** Запас на случай, если sessionStorage недоступен (приватный режим). */
+let memLink: string | null = null
+
+/** Личная ссылка от бота (#mlogin=..., §6.50): забрать токен из адреса ДО первой
+    отрисовки, убрать его из адреса (история, скриншоты) и пометить запуск как
+    MAX — оболочка телефона и вход без регистрации. */
+export function captureLinkLogin(): void {
+  const m = /(?:^#|&)mlogin=([^&]+)/.exec(window.location.hash || '')
+  if (!m) return
+  let tok = m[1]
+  try {
+    tok = decodeURIComponent(tok)
+  } catch {
+    /* как есть */
+  }
+  memLink = tok
+  try {
+    sessionStorage.setItem(LINK_KEY, tok)
+    sessionStorage.setItem(FLAG, '1')
+  } catch {
+    /* приватный режим — хватит памяти до перезагрузки */
+  }
+  try {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search)
+  } catch {
+    /* адрес не поменять — не страшно */
+  }
+}
+
+/** Токен личной ссылки, если приложение открыли по ней и вход ещё не выполнен. */
+export function pendingLinkToken(): string | null {
+  try {
+    return sessionStorage.getItem(LINK_KEY) || memLink
+  } catch {
+    return memLink
+  }
+}
+
+export function clearLinkToken(): void {
+  memLink = null
+  try {
+    sessionStorage.removeItem(LINK_KEY)
+  } catch {
+    /* ignore */
+  }
+}
 
 /** Данные запуска из фрагмента адреса — есть сразу, без библиотеки. */
 export function launchParamsFromHash(): string | null {
@@ -58,6 +105,7 @@ export function launchParamsFromHash(): string | null {
 
 /** Запущены ли мы из MAX. Синхронно — нужно для выбора первого экрана. */
 export function isMaxLaunch(): boolean {
+  if (memLink) return true
   if (launchParamsFromHash() || window.WebApp?.initData) {
     try {
       sessionStorage.setItem(FLAG, '1')

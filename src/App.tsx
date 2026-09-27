@@ -36,7 +36,7 @@ import {
   type TaskId,
 } from './ege2/tasks'
 import { favoriteSessionItems, syncFavorites } from './ege2/favorites'
-import { isMaxLaunch } from './max/bridge'
+import { isMaxLaunch, pendingLinkToken } from './max/bridge'
 import { Ambient } from './mini/Ambient'
 import { MiniApp } from './mini/MiniApp'
 import { useMobileShell } from './mini/useMobileShell'
@@ -72,6 +72,9 @@ type Route =
 function initialRoute(): Route {
   // /?admin — скрытый вход в админку; сервер всё равно требует ADMIN_KEY.
   if (new URLSearchParams(window.location.search).has('admin')) return { name: 'admin' }
+  // Личная ссылка от бота важнее сохранённого входа: по ней человек должен
+  // попасть в СВОЙ аккаунт MAX, даже если в этом браузере был чужой (§6.50).
+  if (pendingLinkToken()) return { name: 'maxlogin' }
   if (currentUser()) return { name: 'home' }
   // Открыли из MAX — входим подписью мессенджера, без ника, пароля и кода.
   return isMaxLaunch() ? { name: 'maxlogin' } : { name: 'welcome' }

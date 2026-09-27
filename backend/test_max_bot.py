@@ -72,6 +72,12 @@ w2 = max_bot.welcome_message("https://example.test/", "gospeak_bot", with_open_a
 check([b["type"] for r in w2["attachments"][0]["payload"]["buttons"] for b in r] == ["link"],
       "без open_app остаётся только ссылка")
 check(all(c["name"] for c in max_bot.commands()), "команды непустые")
+w3 = max_bot.welcome_message("https://example.test/", "gospeak_bot", with_open_app=False,
+                             login_url="https://example.test/#mlogin=v1.5.1.x")
+b3 = [b for r in w3["attachments"][0]["payload"]["buttons"] for b in r]
+check(len(b3) == 1 and b3[0]["type"] == "link" and b3[0]["text"] == "Открыть тренажёр"
+      and b3[0]["url"].endswith("#mlogin=v1.5.1.x") and "личная" in w3["text"],
+      "без мини-приложения главная кнопка — личная ссылка со входом", str(b3))
 
 # ------------------------------------------------------------ эндпоинт
 
@@ -83,7 +89,7 @@ from starlette.requests import Request  # noqa: E402
 sent: list[tuple] = []
 
 
-async def fake_send(user_id, chat_id, body):  # noqa: ANN001
+async def fake_send(user_id, chat_id, body, fallback=None):  # noqa: ANN001
     sent.append((user_id, chat_id, body))
     return True
 
@@ -124,12 +130,26 @@ async def scenario():
     check(r == {"ok": True} and len(sent) == 1 and sent[0][0] == 5,
           "bot_started → приветствие пользователю", str(sent))
     body = sent[0][2]
-    check("GoSpeak" in body["text"] and body["attachments"][0]["payload"]["buttons"][0][0]["type"] == "open_app",
-          "в приветствии — кнопка мини-приложения", str(body)[:200])
+    first = body["attachments"][0]["payload"]["buttons"][0][0]
+    check("GoSpeak" in body["text"] and first["type"] == "link" and "#mlogin=" in first["url"],
+          "в приветствии — личная кнопка входа (мини-приложение к боту ещё не привязано)", str(body)[:200])
 
     sent.clear()
     await run(SECRET, msg)
     check(len(sent) == 1, "/start текстом → приветствие", str(sent))
+    import max_auth as _ma
+    btns = [b for r in sent[0][2]["attachments"][0]["payload"]["buttons"] for b in r]
+    url = btns[0].get("url", "")
+    tok = url.split("#mlogin=", 1)[1] if "#mlogin=" in url else ""
+    check(btns[0]["type"] == "link" and _ma.verify_link(tok, TOKEN)["user_id"] == 5,
+          "в приветствии личная ссылка на того, кто написал", str(btns))
+    os.environ["MAX_MINIAPP_READY"] = "1"
+    sent.clear()
+    await run(SECRET, msg)
+    kinds = [b["type"] for r in sent[0][2]["attachments"][0]["payload"]["buttons"] for b in r]
+    check(kinds == ["open_app", "link"], "MAX_MINIAPP_READY=1: кнопка мини-приложения и ссылка", str(kinds))
+    os.environ.pop("MAX_MINIAPP_READY")
+    sent.clear()
 
     sent.clear()
     await run(SECRET, own)

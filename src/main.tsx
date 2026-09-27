@@ -1,7 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
-import { bootMax } from './max/bridge'
+import { bootMax, captureLinkLogin } from './max/bridge'
 // index.css первым: там базовая палитра и анимация кругов, ui.css её дополняет
 // и местами переопределяет — порядок важен. theme-new.css идёт ПОСЛЕДНИМ:
 // это слой нового визуального языка, он переопределяет только токены.
@@ -15,6 +15,8 @@ import './design/home-v2.css'
 
 // Внутри MAX сначала ждём библиотеку мессенджера (веб-версия не кладёт данные
 // запуска в адрес), иначе первый экран решил бы, что мы обычный сайт.
+// Личная ссылка от бота (#mlogin=...) забирается из адреса до первого экрана.
+captureLinkLogin()
 void bootMax().finally(() => {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

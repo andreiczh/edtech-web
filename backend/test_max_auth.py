@@ -306,6 +306,31 @@ for head, want in (
     got = main._stt_upload_name(head)
     check(got == want, f"распознаванию уходит {want[0]}", str(got))
 
+# ------------------------------------------------------------ вход по ссылке от бота (§6.50)
+
+t0 = 1_800_000_000
+tok = max_auth.link_token(987654321, TOKEN, now=t0)
+r = max_auth.verify_link(tok, TOKEN, now=t0 + 60)
+check(r["valid"] and r["user_id"] == 987654321, "ссылка от бота проходит", str(r))
+check(not max_auth.verify_link(tok, "чужой-токен", now=t0 + 60)["valid"], "ссылка чужого бота — нет")
+forged = tok.replace("987654321", "987654322")
+check(not max_auth.verify_link(forged, TOKEN, now=t0 + 60)["valid"], "подменённый номер — нет")
+r = max_auth.verify_link(tok, TOKEN, now=t0 + max_auth.LINK_TTL_S + 1)
+check(not r["valid"] and "устарела" in r["reason"], "просроченная ссылка — нет, с понятной причиной", str(r))
+for junk in ("", "v1.1.2.3", "мусор", tok + "0", "v1.9.1800000000." + "Ж" * 32):
+    check(not max_auth.verify_link(junk, TOKEN, now=t0)["valid"], f"мусор {junk[:14]!r} — нет")
+
+live = max_auth.link_token(987654321, TOKEN)
+res, err = call(main.auth_max_link(req(), {"token": live, "nicknames": ["CalmHummingbird"]}))
+check(err is None and res["id"] == acc and res["created"] is False,
+      "вход по ссылке — тот же аккаунт, что через подпись мини-приложения", why(res, err))
+res, err = call(main.auth_max_link(req(), {"token": max_auth.link_token(606060606, TOKEN),
+                                           "nicknames": ["QuietNightingale"]}))
+check(err is None and res["created"] is True and res["id"] == max_auth.account_id(606060606, main._max_salt()),
+      "новый человек по ссылке получает аккаунт без регистрации", why(res, err))
+res, err = call(main.auth_max_link(req(), {"token": forged}))
+check(err is not None and err.status_code == 401, "поддельная ссылка — 401", why(res, err))
+
 # ------------------------------------------------------------ правило ника
 
 check(main._nick_ok("CheerfulHummingbird") and not main._nick_ok("BraveFalcon")

@@ -76,8 +76,14 @@ def parse_update(update: dict) -> dict | None:
     return None
 
 
+LINK_NOTE = (
+    "\n\nКнопка ниже личная: по ней тренажёр откроется сразу в твоём аккаунте, "
+    "без регистрации. Не пересылай это сообщение другим."
+)
+
+
 def welcome_message(app_url: str, bot_name: str = "", with_open_app: bool = True,
-                    bot_id: int | None = None) -> dict:
+                    bot_id: int | None = None, login_url: str | None = None) -> dict:
     """Тело POST /messages: приветствие и клавиатура с кнопкой мини-приложения.
 
     `web_app` у кнопки open_app — по схеме MAX это username (или ссылка) БОТА,
@@ -93,15 +99,21 @@ def welcome_message(app_url: str, bot_name: str = "", with_open_app: bool = True
     https://max.ru/<бот>?startapp у бота без мини-приложения предлагает лишь
     «Запустить бота» (25.09.2026 — именно так у нашего). contact_id — id бота:
     в схеме MAX у open_app есть оба поля, клиенты могут смотреть на любое."""
+    # login_url — личная ссылка со входом (#mlogin=..., §6.50). Пока мини-
+    # приложение не привязано к боту, она и есть главная кнопка «Открыть
+    # тренажёр»: open_app без привязки не открывает ничего (28.09.2026).
+    link_url = login_url or app_url
     rows: list[list[dict]] = []
     if with_open_app and bot_name:
         btn: dict = {"type": "open_app", "text": "Открыть тренажёр", "web_app": bot_name}
         if bot_id:
             btn["contact_id"] = int(bot_id)
         rows.append([btn])
-    rows.append([{"type": "link", "text": "Открыть в браузере", "url": app_url}])
+        rows.append([{"type": "link", "text": "Открыть в браузере", "url": link_url}])
+    else:
+        rows.append([{"type": "link", "text": "Открыть тренажёр", "url": link_url}])
     return {
-        "text": WELCOME,
+        "text": WELCOME + (LINK_NOTE if login_url else ""),
         "attachments": [{"type": "inline_keyboard", "payload": {"buttons": rows}}],
     }
 

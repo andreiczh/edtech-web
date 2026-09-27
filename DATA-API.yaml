@@ -262,6 +262,22 @@ checks:
       description: без подписи или с чужой подписью
       expected_status: [401]
 
+  - id: auth_max_link
+    title: Вход по личной ссылке из сообщения бота MAX (без регистрации)
+    method: POST
+    path: /auth/max_link
+    role: anonymous
+    request:
+      headers: {Content-Type: application/json}
+      body: {token: "<значение после #mlogin= в ссылке из сообщения бота>"}
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required: [id, nickname, exam, created]
+    negative:
+      description: повреждённая, чужая или просроченная ссылка
+      expected_status: [401]
+
   - id: max_webhook_forbidden
     title: Вебхук бота отвергает чужой секрет
     method: POST

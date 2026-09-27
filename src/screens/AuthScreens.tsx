@@ -16,8 +16,8 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { updateSettings } from '../account/me'
-import { login, loginMax, randomNickname, register, type AuthUser, fetchInviteRequired } from '../auth/auth'
-import { maxInitData } from '../max/bridge'
+import { login, loginMax, loginMaxLink, randomNickname, register, type AuthUser, fetchInviteRequired } from '../auth/auth'
+import { clearLinkToken, maxInitData, pendingLinkToken } from '../max/bridge'
 
 /* ------------------------------------------------------------ Регистрация */
 
@@ -376,14 +376,23 @@ export function MaxLoginScreen({
     setError(null)
     void (async () => {
       try {
-        const initData = await maxInitData()
-        if (!initData) {
-          throw new Error(
-            'MAX не передал данные для входа. Закрой мини-приложение и открой его снова из чата бота.',
-          )
+        // Личная ссылка от бота (§6.50) — пока мини-приложение не привязано к
+        // боту, это основной путь; данные запуска мини-приложения — второй.
+        const link = pendingLinkToken()
+        let res: { user: AuthUser; created: boolean }
+        if (link) {
+          res = await loginMaxLink(link)
+          clearLinkToken()
+        } else {
+          const initData = await maxInitData()
+          if (!initData) {
+            throw new Error(
+              'MAX не передал данные для входа. Напиши боту в MAX любое сообщение — он пришлёт личную кнопку для входа.',
+            )
+          }
+          res = await loginMax(initData)
         }
-        const { user, created } = await loginMax(initData)
-        if (alive) onDone(user, created)
+        if (alive) onDone(res.user, res.created)
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : String(e))
       }

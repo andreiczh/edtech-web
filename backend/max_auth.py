@@ -172,3 +172,55 @@ def nickname(max_user_id: str | int, salt: str) -> str:
     стабильный для одного человека — повторный вход не ловит коллизий."""
     digest = hashlib.sha256(f"nick:{salt}:{max_user_id}".encode()).digest()
     return "Max" + "".join(chr(ord("a") + b % 26) for b in digest[:13])
+
+
+# ------------------------------------------------------------ вход по ссылке от бота
+#
+# Пока адрес мини-приложения не привязан к боту в партнёрской платформе MAX,
+# кнопка open_app не работает, и данных запуска (WebAppData) у приложения нет.
+# Но бот и так знает, кто ему пишет: номер пользователя приходит в вебхуке, а
+# вебхук подписан секретом из токена. Поэтому бот выдаёт ЛИЧНУЮ ссылку: номер
+# пользователя, срок годности и подпись ключом, выведенным из токена бота. По
+# ней приложение входит в тот же аккаунт, что и через /auth/max (account_id от
+# того же номера и той же соли), — без регистрации (§6.50).
+#
+# Ссылка многоразовая в пределах срока: человек жмёт кнопку в чате не раз, а
+# хранилище браузера внутри мессенджера может не переживать закрытие окна.
+# Токен кладётся во фрагмент адреса (#mlogin=...): фрагмент не уходит на сервер
+# и не попадает в журналы запросов.
+
+LINK_TTL_S = 7 * 24 * 3600
+_LINK_RE = re.compile(r"v1\.(\d{1,20})\.(\d{9,11})\.([0-9a-f]{32})")
+
+
+def _link_sig(uid: str, exp: str, bot_token: str) -> str:
+    key = hashlib.sha256(f"gospeak-login-link:{bot_token}".encode()).digest()
+    return hmac.new(key, f"v1.{uid}.{exp}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def link_token(max_user_id: str | int, bot_token: str, ttl_s: int = LINK_TTL_S,
+               now: float | None = None) -> str:
+    uid = str(int(max_user_id))
+    exp = str(int((now if now is not None else time.time()) + ttl_s))
+    return f"v1.{uid}.{exp}.{_link_sig(uid, exp, bot_token)}"
+
+
+def verify_link(token: str, bot_token: str, now: float | None = None) -> dict:
+    """{valid, user_id, reason}. Причины — по-русски, их видит человек."""
+    out: dict = {"valid": False, "user_id": None, "reason": ""}
+    m = _LINK_RE.fullmatch((token or "").strip())
+    if not m:
+        out["reason"] = "ссылка повреждена — открой её из чата с ботом"
+        return out
+    if not bot_token:
+        out["reason"] = "токен бота не задан на сервере"
+        return out
+    uid, exp, sig = m.groups()
+    if not hmac.compare_digest(sig.encode(), _link_sig(uid, exp, bot_token).encode()):
+        out["reason"] = "ссылка выдана не нашим ботом"
+        return out
+    if int(exp) < (now if now is not None else time.time()):
+        out["reason"] = "ссылка устарела — напиши боту любое сообщение, он пришлёт новую"
+        return out
+    out.update(valid=True, user_id=int(uid))
+    return out
