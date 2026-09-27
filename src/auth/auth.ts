@@ -116,11 +116,26 @@ async function post(path: string, body: unknown): Promise<AuthUser> {
   return data as AuthUser
 }
 
+/** Нужен ли код доступа на регистрации. Решает сервер (INVITE_REQUIRED);
+    без ответа считаем, что не нужен: при ошибке «неверный код» экран
+    регистрации сам покажет поле (§6.48). */
+export async function fetchInviteRequired(): Promise<boolean> {
+  try {
+    const res = await fetch(`${BACKEND}/auth/config`)
+    if (!res.ok) return false
+    const data = (await res.json()) as { invite_required?: unknown }
+    return data.invite_required === true
+  } catch {
+    return false
+  }
+}
+
 export async function register(
   nickname: string,
   password: string,
   exam: string,
-  /** Код доступа: регистрация только по приглашению (см. INVITE_CODES на сервере) */
+  /** Код доступа — нужен, только если сервер его требует (INVITE_REQUIRED=1);
+      иначе пустая строка, сервер её не смотрит (§6.48). */
   invite: string,
 ): Promise<AuthUser> {
   // Занятый ник (409) решаем сами: генерируем другой и пробуем снова — человек

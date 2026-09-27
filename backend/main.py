@@ -488,6 +488,14 @@ INVITE_CODES = frozenset(
     c.strip() for c in os.environ.get("INVITE_CODES", "").split(",") if c.strip()
 )
 
+# С 27.09.2026 регистрация ОТКРЫТА — решение владельца (хакатон: жюри и
+# ученики входят без кода, §6.48). Всё, что написано выше про fail-closed,
+# работает только при INVITE_REQUIRED=1: тогда снова нужны коды из админки
+# или INVITE_CODES. От перерасхода ключа Mistral без кода защищают лимиты:
+# 12 регистраций в минуту с адреса, поминутные лимиты голоса на аккаунт и на
+# весь сервер, месячный бюджет MONTHLY_LLM_BUDGET.
+INVITE_REQUIRED = os.environ.get("INVITE_REQUIRED", "0").strip().lower() in ("1", "true", "yes")
+
 
 def _invite_env_ok(code: str) -> bool:
     """Код из переменной окружения — «первый ключ» для холодного старта.
@@ -511,7 +519,12 @@ async def _check_invite(code: str) -> None:
 
     Fail-closed сохраняется: нет ни кодов в базе, ни переменной — регистрация
     закрыта. Забытая настройка закрывает дверь, а не распахивает.
+
+    Всё это — только при INVITE_REQUIRED=1. По умолчанию (с 27.09.2026)
+    код не проверяется вовсе: регистрация открыта (§6.48).
     """
+    if not INVITE_REQUIRED:
+        return
     db_ok = False
     if _storage_ok and code:
         try:
@@ -1000,6 +1013,13 @@ def _check_pw(password: str, stored: str) -> bool:
         return hmac.compare_digest(digest.hex(), expected)
     except ValueError:
         return False
+
+
+@app.get("/auth/config")
+async def auth_config():
+    """Что показывать на экране регистрации: нужен ли код доступа.
+    Фронт прячет поле кода, пока сервер не скажет, что он нужен (§6.48)."""
+    return {"invite_required": INVITE_REQUIRED}
 
 
 @app.post("/auth/register")
@@ -2104,6 +2124,8 @@ async def admin_task_toggle(tid: str, x_admin_key: str | None = Header(None)):
 
 def _registration_state() -> str:
     """Открыта ли регистрация — видно без админ-ключа, но БЕЗ самих кодов."""
+    if not INVITE_REQUIRED:
+        return "открыта (без кода доступа)"
     db = 0
     if _storage_ok:
         _health_db_refresh()
@@ -3328,8 +3350,8 @@ def health():
         },
         "llm_key": bool(os.environ.get("LLM_API_KEY")),
         "memory": _storage_health(),
-        # Показываем ТОЛЬКО число кодов, не сами коды. «закрыта» здесь — не
-        # ошибка, а сигнал владельцу: задай INVITE_CODES в панели Render.
+        # Показываем ТОЛЬКО число кодов, не сами коды. При INVITE_REQUIRED=1
+        # «закрыта» — не ошибка, а сигнал владельцу: заведи код в админке.
         "registration": _registration_state(),
         # Сводка расхода за сегодня — секретов не содержит, а увидеть «сколько
         # уже сожгли» можно без ключа админки. Полная разбивка — /admin/usage.

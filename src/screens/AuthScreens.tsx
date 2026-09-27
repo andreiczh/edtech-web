@@ -4,8 +4,8 @@
  *
  * Сохранённые требования прежних версий:
  *  - никнейм только генерируется, кнопка ⟳ перекидывает на другой случайный;
- *  - регистрация только по коду доступа (квоту ключа Mistral жжёт каждый
- *    запрос, ссылка без кода не раздаётся) — поле не спрятать и не обойти;
+ *  - код доступа — только если его требует сервер (INVITE_REQUIRED=1,
+ *    GET /auth/config); с 27.09.2026 регистрация открыта и поля нет (§6.48);
  *  - после регистрации — карточка «запиши данные»: восстановления нет
  *    по построению; затем интро «что тебя ждёт внутри» (фото 8);
  *  - ОГЭ показывает «скоро…» и выбор не меняет.
@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { updateSettings } from '../account/me'
-import { login, loginMax, randomNickname, register, type AuthUser } from '../auth/auth'
+import { login, loginMax, randomNickname, register, type AuthUser, fetchInviteRequired } from '../auth/auth'
 import { maxInitData } from '../max/bridge'
 
 /* ------------------------------------------------------------ Регистрация */
@@ -31,6 +31,15 @@ export function RegisterScreen({
   const [nickname, setNickname] = useState(randomNickname)
   const [password, setPassword] = useState('')
   const [invite, setInvite] = useState('')
+  /* Поле кода — только если сервер его требует (INVITE_REQUIRED=1). */
+  const [inviteRequired, setInviteRequired] = useState(false)
+  useEffect(() => {
+    let alive = true
+    void fetchInviteRequired().then((need) => alive && setInviteRequired(need))
+    return () => {
+      alive = false
+    }
+  }, [])
   const [exam, setExam] = useState<'ege' | 'oge'>('ege')
   /* Согласие на хранение записей. Спрашивается ЗДЕСЬ, а не прячется в условиях:
      голос — персональные данные, и человек должен видеть вопрос, а не узнавать
@@ -59,7 +68,10 @@ export function RegisterScreen({
       updateSettings({ corpusConsent: consent })
       setCreated(user)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      // Сервер всё-таки требует код (включили, пока экран был открыт) — покажем поле.
+      if (/код доступа|регистрация пока закрыта/i.test(msg)) setInviteRequired(true)
+      setError(msg)
     } finally {
       setBusy(false)
     }
@@ -129,17 +141,21 @@ export function RegisterScreen({
           maxLength={64}
         />
 
-        <label className="auth2-label">Код доступа</label>
-        <input
-          className="auth2-field"
-          value={invite}
-          onChange={(e) => setInvite(e.target.value)}
-          placeholder="выдаёт владелец"
-          aria-label="Код доступа"
-          maxLength={64}
-          autoCapitalize="off"
-          autoCorrect="off"
-        />
+        {inviteRequired && (
+          <>
+            <label className="auth2-label">Код доступа</label>
+            <input
+              className="auth2-field"
+              value={invite}
+              onChange={(e) => setInvite(e.target.value)}
+              placeholder="выдаёт владелец"
+              aria-label="Код доступа"
+              maxLength={64}
+              autoCapitalize="off"
+              autoCorrect="off"
+            />
+          </>
+        )}
 
         <label className="auth2-label">Готовлюсь к</label>
         <div className="auth2-seg" role="group" aria-label="Экзамен">
@@ -176,12 +192,12 @@ export function RegisterScreen({
         <button
           type="button"
           className="auth2-btn"
-          disabled={busy || password.length < 8 || !invite.trim()}
+          disabled={busy || password.length < 8 || (inviteRequired && !invite.trim())}
           onClick={() => void submit()}
           title={
             password.length < 8
               ? 'Пароль — минимум 8 символов'
-              : !invite.trim()
+              : inviteRequired && !invite.trim()
                 ? 'Нужен код доступа'
                 : undefined
           }

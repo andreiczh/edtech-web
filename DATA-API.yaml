@@ -32,15 +32,23 @@ checks:
       content_type: application/json
       required: [ok, llm_key, llm_model, stt, tts, max_bot]
 
+  - id: auth_config
+    title: Нужен ли код доступа на регистрации
+    method: GET
+    path: /auth/config
+    role: anonymous
+    expected_status: [200]
+    response: {content_type: application/json, required: [invite_required]}
+
   - id: register
-    title: Регистрация по коду доступа
+    title: Регистрация (открытая; код нужен только при invite_required=true)
     method: POST
     path: /auth/register
     role: anonymous
     request:
       headers: {Content-Type: application/json}
       body:
-        invite: "<код доступа>"
+        invite: ""   # код доступа — только если /auth/config вернул invite_required=true
         nickname: "<два английских слова без цифр, от 15 букв>"
         password: "<от 8 символов>"
         exam: ege
