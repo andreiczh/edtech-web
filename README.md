@@ -151,6 +151,8 @@ python -m venv .venv
 - Речь без микрофона: синтезировать edge-tts и отправить в `/task_feedback` —
   так работает `backend/test_reading_live.py`.
 - Приёмочный чек-лист с телефона: `/manual-test.html`.
+- Проверка на настоящем мини-приложении в MAX (сценарии, ожидания, бланк отчёта) —
+  [`docs/MAX-TEST-PLAN.pdf`](docs/MAX-TEST-PLAN.pdf).
 
 ## 11. Пошаговый сценарий проверки
 
