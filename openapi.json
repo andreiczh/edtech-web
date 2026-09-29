@@ -1,0 +1,3517 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "GoSpeak API",
+  "description": "Голосовой тренажёр устной части ЕГЭ по английскому: разговор с ИИ и разбор ответов по критериям ФИПИ.",
+  "version": "0.1.0"
+ },
+ "paths": {
+  "/auth/config": {
+   "get": {
+    "summary": "Auth Config",
+    "description": "Что показывать на экране регистрации: нужен ли код доступа.\nФронт прячет поле кода, пока сервер не скажет, что он нужен (§6.48).",
+    "operationId": "auth_config_auth_config_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/auth/register": {
+   "post": {
+    "summary": "Auth Register",
+    "operationId": "auth_register_auth_register_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "additionalProperties": true,
+        "type": "object",
+        "title": "Body"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/auth/login": {
+   "post": {
+    "summary": "Auth Login",
+    "operationId": "auth_login_auth_login_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "additionalProperties": true,
+        "type": "object",
+        "title": "Body"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/auth/max": {
+   "post": {
+    "summary": "Auth Max",
+    "operationId": "auth_max_auth_max_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "additionalProperties": true,
+        "type": "object",
+        "title": "Body"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/auth/max_link": {
+   "post": {
+    "summary": "Auth Max Link",
+    "description": "Вход по личной ссылке от бота (#mlogin=... во фрагменте адреса, §6.50).\n\nНужен, пока адрес мини-приложения не привязан к боту: без привязки у\nприложения нет данных запуска MAX, а бот всё равно знает номер того, кто\nему пишет, и подписывает ссылку ключом из своего токена.",
+    "operationId": "auth_max_link_auth_max_link_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "additionalProperties": true,
+        "type": "object",
+        "title": "Body"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/progress": {
+   "get": {
+    "summary": "Progress",
+    "description": "Какие варианты этот ученик уже сдавал — чтобы выдача сессий вычёркивала\nпройденное на любом устройстве, а не только в этом браузере.",
+    "operationId": "progress_progress_get",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/me/stats": {
+   "get": {
+    "summary": "Me Stats",
+    "description": "Стрик, уровень, XP и неделя столбиками — всё для личного кабинета одним\nзапросом. Числа считает сервер из activity_days; фронт только рисует.",
+    "operationId": "me_stats_me_stats_get",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/personas": {
+   "get": {
+    "summary": "Personas List",
+    "description": "Каталог собеседников для экрана настроек.\n\nОткрыт без аккаунта намеренно: это витрина, а не действие — ни расхода\nквоты, ни персональных данных здесь нет. Промпты характеров наружу НЕ\nотдаём, клиенту нужны только id, имя и описание.",
+    "operationId": "personas_list_personas_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/me/settings": {
+   "get": {
+    "summary": "Me Settings Get",
+    "operationId": "me_settings_get_me_settings_get",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "summary": "Me Settings Post",
+    "operationId": "me_settings_post_me_settings_post",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/me/favorites": {
+   "get": {
+    "summary": "Me Favorites Get",
+    "operationId": "me_favorites_get_me_favorites_get",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "summary": "Me Favorites Post",
+    "description": "Поставить ({\"on\": true}) или снять звёздочку. Отвечает всем списком —\nфронт сверяет с ним свою копию.",
+    "operationId": "me_favorites_post_me_favorites_post",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/me/analytics": {
+   "get": {
+    "summary": "Me Analytics",
+    "description": "Аналитика ученика: динамика балла по типам заданий и профиль ошибок.\n\nСчитается из уже записываемых results/mistakes — ученик видит, куда\nдвижется его балл и какие ошибки он таскает за собой из работы в работу.\nЭто же сырьё для решения «что решать дальше».",
+    "operationId": "me_analytics_me_analytics_get",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/me/nickname": {
+   "post": {
+    "summary": "Me Nickname",
+    "description": "Смена ника: имя по-прежнему только генерируется (фронт), сервер проверяет\nте же правила, что при регистрации. Ник — это логин, поэтому под тем же\nрейт-лимитом, что /auth/*.",
+    "operationId": "me_nickname_me_nickname_post",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/feedback/catalog": {
+   "get": {
+    "summary": "Feedback Catalog",
+    "description": "Список причин для формы жалобы — ОДИН на фронт и на сервер.\n\nОткрыт без аккаунта: это словарь, а не данные. Разъехавшиеся списки дали бы\nжалобы с кодом, который сервер молча выбросит, и потеря нашлась бы через\nмесяц по дыре в статистике.",
+    "operationId": "feedback_catalog_feedback_catalog_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/task_dispute": {
+   "post": {
+    "summary": "Task Dispute",
+    "description": "«Не согласен» — с экрана разбора, из разбора беседы и из разговора.\n\nЕдинственный путь, которым речь ученика попадает в базу, — по явному\nнажатию: человек сам отдаёт свой ответ на пересмотр (см. DDL disputes).\nВместе с ним сохраняется обстановка: текст задания, соседние реплики,\nснимок разбора. Спорные разборы + вердикты владельца = растущий\nкалибровочный набор.\n\nПроверка полноты живёт в disputes.normalize, а не здесь: её же гоняют\nтесты, и обойти её через сырой запрос мимо формы нельзя.",
+    "operationId": "task_dispute_task_dispute_post",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/disputes": {
+   "get": {
+    "summary": "Admin Disputes",
+    "description": "Копилка для владельца: жалобы целиком и разрезы по типам и причинам.",
+    "operationId": "admin_disputes_admin_disputes_get",
+    "parameters": [
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Status"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/shot/{shot_id}": {
+   "get": {
+    "summary": "Admin Shot",
+    "description": "Снимок экрана из жалобы — ТОЛЬКО владельцу.\n\nКлюч принимаем и заголовком, и параметром: тег <img> заголовки слать не\nумеет, а показывать картинку в админке надо. Параметр не страшнее\nзаголовка — админка и так открывается по ключу, и он уже лежит в\nsessionStorage браузера владельца.\n\nContent-Disposition: inline с фиксированным именем и nosniff — снимок\nприслал посторонний, и браузер не должен угадывать, что это такое.",
+    "operationId": "admin_shot_admin_shot__shot_id__get",
+    "parameters": [
+     {
+      "name": "shot_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Shot Id"
+      }
+     },
+     {
+      "name": "key",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Key"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/pron/weakest": {
+   "get": {
+    "summary": "Pron Weakest",
+    "description": "«Переслушай эти слова» — единственное, что фонемный замер показывает ученику.\n\nОтдельной ручкой, а не в ответе разбора, и это осознанно: замер идёт фоном\nи стоит ~19 секунд на бесплатном Render, а ученик ждёт балл 2-6 секунд.\nПрибавить замер к ожиданию значило бы испортить главное ради добавочного.\nЭкран забирает слова, когда они появятся, и дорисовывает блок.\n\nНА БАЛЛ ЭТО НЕ ВЛИЯЕТ и влиять не будет, пока не появятся записи, размеченные\nчеловеком: распределение говорит, где звук слабее, но не говорит, ошибка это\nили акцент. Совет «переслушай» безвреден при любом ответе, снятый балл — нет.",
+    "operationId": "pron_weakest_pron_weakest_get",
+    "parameters": [
+     {
+      "name": "variant",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "default": "",
+       "title": "Variant"
+      }
+     },
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/disputes/{did}/pron": {
+   "get": {
+    "summary": "Admin Dispute Pron",
+    "description": "Арбитр спора о чтении: что слышал ЗВУК в том самом прогоне.\n\nЖалоба «записали не то, что я сказал» — спор чтеца с распознавалкой, и\nтекстом он не решается: текст и есть предмет спора. Замер произношения\nтого же прогона отвечает фактом: насколько звук подтверждает каждое\nслово эталона. Первый такой арбитраж (goldfish, 16.08.2026: p_norm\n1.008 при нулях настоящих провалов — ученик был прав) делался руками\nчерез сырую выгрузку; теперь владельцу это одна кнопка в карточке.",
+    "operationId": "admin_dispute_pron_admin_disputes__did__pron_get",
+    "parameters": [
+     {
+      "name": "did",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Did"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/corpus": {
+   "get": {
+    "summary": "Admin Corpus",
+    "description": "Корпус голоса: что собрано и как система это разметила.\n\nЗвук сюда НЕ едет — он тяжёлый, а листать надо быстро. За самой записью\nходят отдельно, /admin/corpus/{id}/audio.",
+    "operationId": "admin_corpus_admin_corpus_get",
+    "parameters": [
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 50,
+       "title": "Limit"
+      }
+     },
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 0,
+       "title": "Offset"
+      }
+     },
+     {
+      "name": "kind",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "default": "",
+       "title": "Kind"
+      }
+     },
+     {
+      "name": "unverified",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 0,
+       "title": "Unverified"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/corpus/{cid}/audio": {
+   "get": {
+    "summary": "Admin Corpus Audio",
+    "description": "Сама запись — послушать в админке или выгрузить на ноут.\n\nКлюч принимается и заголовком, и параметром: тег <audio> заголовки слать\nне умеет, а слушать записи владельцу нужно прямо в браузере.",
+    "operationId": "admin_corpus_audio_admin_corpus__cid__audio_get",
+    "parameters": [
+     {
+      "name": "cid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Cid"
+      }
+     },
+     {
+      "name": "key",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "default": "",
+       "title": "Key"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/corpus/{cid}/verify": {
+   "post": {
+    "summary": "Admin Corpus Verify",
+    "description": "Вердикт владельца поверх автоматической разметки.\n\nИменно он превращает запись в строку сетки точности: до него у нас есть\nтолько мнение системы о себе самой.",
+    "operationId": "admin_corpus_verify_admin_corpus__cid__verify_post",
+    "parameters": [
+     {
+      "name": "cid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Cid"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/corpus/{cid}": {
+   "delete": {
+    "summary": "Admin Corpus Delete",
+    "description": "Удалить запись. Нужна не для порядка, а для отзыва согласия: ученик\nвправе передумать, и тогда его голос обязан исчезнуть.",
+    "operationId": "admin_corpus_delete_admin_corpus__cid__delete",
+    "parameters": [
+     {
+      "name": "cid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Cid"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/notify": {
+   "post": {
+    "summary": "Admin Notify",
+    "description": "Скрипты с ноута владельца кричат в его Telegram через прод.\n\nРодился из приёмки бэкапа: провал проверки на ноуте был виден только в\nbackup.log, который никто не открывает, — то есть невидим ровно так же,\nкак молчаливо испорченные дампы, копившиеся три дня. У ноута нет\nтелеграм-токена, у прода есть; ключ админки — та же граница доверия, что\nу /admin/backup, которым эти скрипты уже пользуются.",
+    "operationId": "admin_notify_admin_notify_post",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/funnel": {
+   "get": {
+    "summary": "Admin Funnel",
+    "description": "Воронка запуска: регистрация -> первый разбор -> возврат назавтра.\n\nСчитается из уже собираемых данных (accounts/results/activity_days) — без\nсобытий с фронта, поэтому видит и тех, кто пришёл до появления воронки.\nОшибки за неделю — из usage_daily (пишет middleware _count_http).",
+    "operationId": "admin_funnel_admin_funnel_get",
+    "parameters": [
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 14,
+       "title": "Days"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/pronunciation": {
+   "get": {
+    "summary": "Admin Pronunciation",
+    "description": "Копилка замеров произношения: распределение показателя на живой речи.\n\nРади этого экрана всё и собирается. Порог «это ошибка произношения» нельзя\nвзять из головы: на синтезированной речи он один, на школьнике с акцентом\nдругой. Здесь видно, какой он НА САМОМ ДЕЛЕ и сколько слов попадёт под\nкаждый вариант порога.",
+    "operationId": "admin_pronunciation_admin_pronunciation_get",
+    "parameters": [
+     {
+      "name": "raw",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 0,
+       "title": "Raw"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/disputes/{did}": {
+   "post": {
+    "summary": "Admin Dispute Resolve",
+    "description": "Вердикт владельца по жалобе — разметка золотого набора одной кнопкой.\n\nИменно этой ручки не хватало, чтобы копилка стала калибровочным набором:\nбез вердикта человека спорный разбор остаётся просто жалобой.",
+    "operationId": "admin_dispute_resolve_admin_disputes__did__post",
+    "parameters": [
+     {
+      "name": "did",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Did"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/tasks": {
+   "get": {
+    "summary": "Tasks Public",
+    "description": "Активные задания из банка. Фронт мешает их со встроенными вариантами;\nесли базы нет — отвечаем пустым списком, встроенный банк никуда не девается.",
+    "operationId": "tasks_public_tasks_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/fipi/import": {
+   "post": {
+    "summary": "Admin Fipi Import",
+    "description": "Запустить импорт. Возвращается сразу — следить за ходом через /admin/fipi/status.",
+    "operationId": "admin_fipi_import_admin_fipi_import_post",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "default": {},
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/fipi/status": {
+   "get": {
+    "summary": "Admin Fipi Status",
+    "operationId": "admin_fipi_status_admin_fipi_status_get",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/fipi/purge": {
+   "post": {
+    "summary": "Admin Fipi Purge",
+    "description": "Убрать всё импортированное. Существует ровно на случай, если\nправообладатель попросит удалить материалы: одна кнопка, а не чистка базы руками.",
+    "operationId": "admin_fipi_purge_admin_fipi_purge_post",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/img/task/{img_id}": {
+   "get": {
+    "summary": "Stored Task Image",
+    "description": "Картинка задания из нашей базы. Ученик не должен зависеть от доступности\nчужого сервера, а чужой сервер — получать наш трафик.",
+    "operationId": "stored_task_image_img_task__img_id__get",
+    "parameters": [
+     {
+      "name": "img_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Img Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/img/{photo_id}": {
+   "get": {
+    "summary": "Task Image",
+    "description": "Прокси одной картинки задания. Пускаем только id формата Unsplash —\nоткрытым проксёром для всего интернета сервис становиться не должен.",
+    "operationId": "task_image_img__photo_id__get",
+    "parameters": [
+     {
+      "name": "photo_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Photo Id"
+      }
+     },
+     {
+      "name": "w",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 900,
+       "title": "W"
+      }
+     },
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 70,
+       "title": "Q"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/tasks": {
+   "post": {
+    "summary": "Admin Task Add",
+    "operationId": "admin_task_add_admin_tasks_post",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "summary": "Admin Task List",
+    "operationId": "admin_task_list_admin_tasks_get",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/tasks/{tid}/toggle": {
+   "post": {
+    "summary": "Admin Task Toggle",
+    "operationId": "admin_task_toggle_admin_tasks__tid__toggle_post",
+    "parameters": [
+     {
+      "name": "tid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Tid"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/test_alert": {
+   "post": {
+    "summary": "Admin Test Alert",
+    "description": "Проверка канала алертов одной кнопкой.\n\nБез неё владелец узнавал бы, что Telegram настроен неверно, ровно в тот\nмомент, когда что-то упало, — то есть когда алерт уже не придёт.\nКулдаун обходим намеренно: это ручная проверка, а не событие.",
+    "operationId": "admin_test_alert_admin_test_alert_post",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/overview": {
+   "get": {
+    "summary": "Admin Overview",
+    "description": "Сводка о работе системы: люди, расход, скорости, результаты.\n\nПравила точности (это витрина владельца, ей верят на слово):\n  - все числа из БАЗЫ одним снимком (storage.overview) — не из памяти\n    процесса, которую обнуляет каждый деплой;\n  - расход месяца считается из тех же строк usage_daily, из которых\n    бюджет делает свою сверку, — расхождений «сводка говорит одно,\n    бюджет другое» не бывает по построению;\n  - производные (на юзера, в день, прогноз) считаются ЗДЕСЬ и только\n    делением проверенных чисел; при пустом делителе поле = None, и\n    фронт пишет «нет данных», а не ноль.\n\nПрогноз остатка — экстраполяция среднего дневного расхода по дням,\nВ КОТОРЫЕ был трафик (тихие дни не размывают среднее). Это оценка\n«если пользоваться как сейчас», а не обещание.",
+    "operationId": "admin_overview_admin_overview_get",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/telegram": {
+   "get": {
+    "summary": "Admin Telegram",
+    "description": "Состояние настройки алертов + подсказка chat_id.\n\nПоказывает, ЧТО уже задано (не значения), и ищет chat_id по сообщениям\nботу. Токен наружу не отдаём никогда — только факт «задан».",
+    "operationId": "admin_telegram_admin_telegram_get",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/invites": {
+   "get": {
+    "summary": "Admin Invites",
+    "operationId": "admin_invites_admin_invites_get",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "summary": "Admin Invite Add",
+    "description": "Новый код. Пустой code — сервер придумает сам: так короче и безопаснее,\nчем «qwerty», который владелец сочинит второпях.",
+    "operationId": "admin_invite_add_admin_invites_post",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/invites/{code}/toggle": {
+   "post": {
+    "summary": "Admin Invite Toggle",
+    "operationId": "admin_invite_toggle_admin_invites__code__toggle_post",
+    "parameters": [
+     {
+      "name": "code",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Code"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "default": {},
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/backup": {
+   "get": {
+    "summary": "Admin Backup",
+    "description": "Полный дамп базы одним JSON — стратегия бэкапа для Neon free (там\nсвоих бэкапов нет). Качается по расписанию на ноут владельца:\nbackend/backup.ps1 + Планировщик задач Windows (docs/MONITORING.md).\nimages=1 добавляет картинки заданий (+несколько МБ, меняются редко).",
+    "operationId": "admin_backup_admin_backup_get",
+    "parameters": [
+     {
+      "name": "images",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 0,
+       "title": "Images"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/restore": {
+   "post": {
+    "summary": "Admin Restore",
+    "description": "Заливка JSON-бэкапа в ПУСТУЮ базу (см. storage.restore_all).\n\nПоявился 27.08.2026, когда Neon поставил проект на паузу за квоту и\nединственной копией данных остался ночной дамп на ноуте владельца.\nЗапуск с ноута: .\\.venv\\Scripts\\python.exe restore.py",
+    "operationId": "admin_restore_admin_restore_post",
+    "parameters": [
+     {
+      "name": "force",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 0,
+       "title": "Force"
+      }
+     },
+     {
+      "name": "replace",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 0,
+       "title": "Replace"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/reset_password": {
+   "post": {
+    "summary": "Admin Reset Password",
+    "description": "«Забыл пароль» при аккаунтах без почты и телефона: сброс делает\nвладелец руками — он один знает своих учеников в лицо и может проверить,\nчто просит настоящий хозяин ника. Новый пароль генерирует СЕРВЕР\n(не админ): случайный, читаемый, показывается один раз в ответе.",
+    "operationId": "admin_reset_password_admin_reset_password_post",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/tasks/publish_clean": {
+   "post": {
+    "summary": "Admin Publish Clean",
+    "description": "Опубликовать разом все черновики БЕЗ замечаний.\n\nПроверять глазами 90 черновиков нереально, а публиковать вслепую нельзя.\nКомпромисс: массово уходят только те, у кого детерминированные проверки\nне нашли дефектов; всё с замечаниями остаётся человеку. dry_run=1 сначала\nпоказывает, что будет опубликовано, — публикация задним числом заметна\nученикам, поэтому «посмотреть» отделено от «сделать».",
+    "operationId": "admin_publish_clean_admin_tasks_publish_clean_post",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "default": {},
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/tasks/{tid}": {
+   "delete": {
+    "summary": "Admin Task Delete",
+    "description": "Удаление задания насовсем — для бракованных черновиков импорта\n(кривой OCR, картинка не о том). Выключение (toggle) — для «отложить».",
+    "operationId": "admin_task_delete_admin_tasks__tid__delete",
+    "parameters": [
+     {
+      "name": "tid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Tid"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/usage": {
+   "get": {
+    "summary": "Admin Usage",
+    "description": "Расход Mistral по дням: свой счётчик вместо консоли, которую видно\nтолько владельцу. Лимиты ключа для ориентира — из заголовков API\n(замер 23.07.2026).",
+    "operationId": "admin_usage_admin_usage_get",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/test": {
+   "get": {
+    "summary": "Test Page",
+    "description": "Старая проверочная страница (vanilla JS). Основной UI — собранный фронт на /.",
+    "operationId": "test_page_test_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/ping": {
+   "get": {
+    "summary": "Ping",
+    "description": "Пульс для keep-awake и внешних мониторов: ноль обращений к базе.\n\nДержит бодрым только САМ сервис (Render). База должна засыпать, когда\nучеников нет, — иначе Neon сжигает месячную квоту compute-часов фоном.",
+    "operationId": "ping_ping_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/health": {
+   "get": {
+    "summary": "Health",
+    "operationId": "health_health_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/talk": {
+   "post": {
+    "summary": "Talk",
+    "operationId": "talk_talk_post",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_talk_talk_post"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/label42/catalog": {
+   "get": {
+    "summary": "Label42 Catalog",
+    "description": "Варианты задания 42 из банка — чтобы разметчик не перепечатывал бриф.",
+    "operationId": "label42_catalog_label42_catalog_get",
+    "parameters": [
+     {
+      "name": "x-labeler-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Labeler-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/label42/save": {
+   "post": {
+    "summary": "Label42 Save",
+    "description": "Сохранить разметку и СРАЗУ свериться с системой.\n\nПорядок принципиален: сначала фиксируется оценка человека, потом\nсчитается системная — разметчик не может подсмотреть и подстроиться,\nсравнение честное. Провал LLM разметку не теряет: system остаётся null.",
+    "operationId": "label42_save_label42_save_post",
+    "parameters": [
+     {
+      "name": "x-labeler-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Labeler-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/label42/list": {
+   "get": {
+    "summary": "Label42 List",
+    "operationId": "label42_list_label42_list_get",
+    "parameters": [
+     {
+      "name": "x-labeler-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Labeler-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/label42/export": {
+   "get": {
+    "summary": "Admin Label42 Export",
+    "description": "Полный экспорт корпуса владельцу: сырые записи + golden-кейсы, готовые\nк вставке в fipi_cases.MONOLOGUE_EXTRA — ту самую сетку точности.",
+    "operationId": "admin_label42_export_admin_label42_export_get",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/monologue": {
+   "post": {
+    "summary": "Monologue",
+    "description": "Разбор монолога (ЕГЭ Задание 4): полное аудио → batch STT → ОДИН\nструктурный проход LLM → JSON-фидбэк (3 критерия + ошибки). Без TTS —\nразбор текстовый, для экрана результата.\n\nОтдаётся потоком с «сердцебиением» — см. `_json_with_heartbeat`. Тело ответа\nи его разбор на фронте от этого не меняются.",
+    "operationId": "monologue_monologue_post",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_monologue_monologue_post"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/task_feedback": {
+   "post": {
+    "summary": "Task Feedback",
+    "description": "Разбор ответа на задание устной части (39-42). Отдаётся потоком с\n«сердцебиением» — см. `_json_with_heartbeat`; путь обязан быть в\n`_STREAM_PATHS`, иначе gzip молча похоронит стриминг.\n\n`X-Device` — id аккаунта (или устройства): по нему и копится профиль\nошибок, и работает входной шлюз.",
+    "operationId": "task_feedback_task_feedback_post",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_task_feedback_task_feedback_post"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/talk_stream": {
+   "post": {
+    "summary": "Talk Stream",
+    "operationId": "talk_stream_talk_stream_post",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_talk_stream_talk_stream_post"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/speak": {
+   "post": {
+    "summary": "Speak",
+    "description": "Озвучить готовый текст. Два режима, и у них разные правила.\n\n**Вопросы интервью (№41), режим по умолчанию.** По формату ЕГЭ вопросы\nинтервьюера ЗВУЧАТ, а не показываются: экзаменуемый воспринимает их на\nслух. Мы показывали их текстом — это меняло само задание, потому что\nубирало аудирование (замечание тестировщика 05.08.2026).\n\n**Слово из эталона (№39), `mode=\"word\"`.** В разборе чтения ученику\nпоказывают слово, которое он прочитал не так, — и до 21.08.2026 экран не\nотвечал на главный вопрос: «а как надо?». Теперь отвечает голосом.\n\nЧто здесь проверяется, а что нет, — `speak_check`. Коротко: форму запроса\nпроверяем ВСЕГДА, сверку с текстом задания — только когда вариант лежит в\nбазе. Встроенные варианты фронта серверу неизвестны, и это не оговорка, а\nпризнание границы (прежний докстринг обещал проверку, которой в коде не\nбыло вовсе).\n\nСвоего вызова LLM здесь нет ни в одном режиме — только синтез.",
+    "operationId": "speak_speak_post",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/talk_review": {
+   "post": {
+    "summary": "Talk Review Endpoint",
+    "description": "Разбор всей беседы — ОДИН вызов LLM по явному нажатию ученика.\n\nПочему не автоматически при уходе с экрана: разбор стоит запроса, а уход с\nэкрана случается и случайно. Пусть человек сам решает, закончил он или нет.\n\nПочему история приезжает с клиента: она и так там живёт (сервер диалоги не\nхранит — приватность). В базу из разбора попадают только ОШИБКИ, как и у\nзаданий, — они и есть память, которая делает следующие разборы точнее.",
+    "operationId": "talk_review_endpoint_talk_review_post",
+    "parameters": [
+     {
+      "name": "x-device",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Device"
+      }
+     },
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/max/probe/initdata": {
+   "post": {
+    "summary": "Max Probe Initdata",
+    "description": "Сходится ли подпись данных запуска. Наружу — только вердикт и имена\nполей: ни имени, ни id человека в ответе нет, отчёт пересылают руками.",
+    "operationId": "max_probe_initdata_max_probe_initdata_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "additionalProperties": true,
+        "type": "object",
+        "title": "Body"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/max/probe/audio": {
+   "post": {
+    "summary": "Max Probe Audio",
+    "description": "Что пришло с микрофона: формат по байтам, читается ли, длительность,\nтишина; по желанию — распознавание тем же быстрым путём, что в разговоре.\nРучка открыта без аккаунта (проба идёт до входа), поэтому у распознавания\nсвои тесные лимиты: 4 в минуту с адреса, 12 в минуту всего, 300 в сутки.",
+    "operationId": "max_probe_audio_max_probe_audio_post",
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_max_probe_audio_max_probe_audio_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "components": {
+  "schemas": {
+   "Body_max_probe_audio_max_probe_audio_post": {
+    "properties": {
+     "audio": {
+      "type": "string",
+      "contentMediaType": "application/octet-stream",
+      "title": "Audio"
+     },
+     "stt": {
+      "type": "string",
+      "title": "Stt",
+      "default": "0"
+     }
+    },
+    "type": "object",
+    "required": [
+     "audio"
+    ],
+    "title": "Body_max_probe_audio_max_probe_audio_post"
+   },
+   "Body_monologue_monologue_post": {
+    "properties": {
+     "audio": {
+      "type": "string",
+      "contentMediaType": "application/octet-stream",
+      "title": "Audio"
+     }
+    },
+    "type": "object",
+    "required": [
+     "audio"
+    ],
+    "title": "Body_monologue_monologue_post"
+   },
+   "Body_talk_stream_talk_stream_post": {
+    "properties": {
+     "audio": {
+      "type": "string",
+      "contentMediaType": "application/octet-stream",
+      "title": "Audio"
+     },
+     "history": {
+      "type": "string",
+      "title": "History",
+      "default": "[]"
+     },
+     "persona": {
+      "type": "string",
+      "title": "Persona",
+      "default": ""
+     }
+    },
+    "type": "object",
+    "required": [
+     "audio"
+    ],
+    "title": "Body_talk_stream_talk_stream_post"
+   },
+   "Body_talk_talk_post": {
+    "properties": {
+     "audio": {
+      "type": "string",
+      "contentMediaType": "application/octet-stream",
+      "title": "Audio"
+     }
+    },
+    "type": "object",
+    "required": [
+     "audio"
+    ],
+    "title": "Body_talk_talk_post"
+   },
+   "Body_task_feedback_task_feedback_post": {
+    "properties": {
+     "audio": {
+      "type": "string",
+      "contentMediaType": "application/octet-stream",
+      "title": "Audio"
+     },
+     "kind": {
+      "type": "string",
+      "title": "Kind"
+     },
+     "payload": {
+      "type": "string",
+      "title": "Payload",
+      "default": "{}"
+     },
+     "variant": {
+      "type": "string",
+      "title": "Variant",
+      "default": ""
+     },
+     "duration": {
+      "type": "integer",
+      "title": "Duration",
+      "default": 0
+     },
+     "persona": {
+      "type": "string",
+      "title": "Persona",
+      "default": ""
+     },
+     "session_done": {
+      "type": "integer",
+      "title": "Session Done",
+      "default": 0
+     }
+    },
+    "type": "object",
+    "required": [
+     "audio",
+     "kind"
+    ],
+    "title": "Body_task_feedback_task_feedback_post"
+   },
+   "HTTPValidationError": {
+    "properties": {
+     "detail": {
+      "items": {
+       "$ref": "#/components/schemas/ValidationError"
+      },
+      "type": "array",
+      "title": "Detail"
+     }
+    },
+    "type": "object",
+    "title": "HTTPValidationError"
+   },
+   "ValidationError": {
+    "properties": {
+     "loc": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "integer"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Location"
+     },
+     "msg": {
+      "type": "string",
+      "title": "Message"
+     },
+     "type": {
+      "type": "string",
+      "title": "Error Type"
+     },
+     "input": {
+      "title": "Input"
+     },
+     "ctx": {
+      "type": "object",
+      "title": "Context"
+     }
+    },
+    "type": "object",
+    "required": [
+     "loc",
+     "msg",
+     "type"
+    ],
+    "title": "ValidationError"
+   }
+  }
+ }
+}

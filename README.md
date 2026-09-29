@@ -6,11 +6,13 @@
 в мессенджере MAX (бот `@t811_hakaton_max_bot`) и как сайт:
 https://pingo-ai-dpd9.onrender.com (телефонная версия с компьютера — `/?mini`).
 
-> Репозиторий называется `edtech-copilot-web` — старое имя того же проекта
-> (Pingo AI → GoSpeak). История решений — [`docs/DECISIONS.md`](docs/DECISIONS.md),
+> Репозиторий: https://github.com/andreiczh/edtech-web (папка проекта и
+> `package.json` пока называются `edtech-copilot-web` — старое имя того же
+> проекта, Pingo AI → GoSpeak). История решений — [`docs/DECISIONS.md`](docs/DECISIONS.md),
 > правила для агентов — [`CLAUDE.md`](CLAUDE.md), запуск с нуля для второго
-> разработчика — [`docs/ONBOARDING.md`](docs/ONBOARDING.md). API описано
-> сервером: `/openapi.json` (OpenAPI 3.1), `/docs`; обязательные проверки —
+> разработчика — [`docs/ONBOARDING.md`](docs/ONBOARDING.md). Описание API —
+> [`openapi.json`](openapi.json) (OpenAPI 3.1, снимок того, что отдаёт сервер по
+> `/openapi.json`; интерактивно — `/docs`); обязательные проверки —
 > [`DATA-API.yaml`](DATA-API.yaml).
 
 ## 1. Назначение

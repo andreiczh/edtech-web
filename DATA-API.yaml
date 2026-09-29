@@ -7,6 +7,7 @@ solution: GoSpeak
 team: GoSpeak
 base_url: https://pingo-ai-dpd9.onrender.com
 openapi: https://pingo-ai-dpd9.onrender.com/openapi.json
+openapi_file: openapi.json   # тот же документ, снимок в корне репозитория
 
 auth:
   student:

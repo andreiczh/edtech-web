@@ -13,7 +13,7 @@
 
 | Что | Адрес |
 |---|---|
-| Репозиторий (приватный) | https://github.com/andreiczh/edtech-copilot-web |
+| Репозиторий (приватный; на GitHub переименован в `edtech-web`, старый адрес перенаправляет) | https://github.com/andreiczh/edtech-web |
 | Прод | https://pingo-ai-dpd9.onrender.com |
 | Админка | https://pingo-ai-dpd9.onrender.com/?admin (нужен ADMIN_KEY) |
 | Хостинг | Render, деплой автоматом на `git push origin main` |
@@ -77,7 +77,7 @@ Windows, PowerShell. На Mac/Linux всё то же, кроме `.ps1`-скри
 
 ```powershell
 cd C:\Users\<ты>
-git clone https://github.com/andreiczh/edtech-copilot-web.git
+git clone https://github.com/andreiczh/edtech-web.git edtech-copilot-web
 cd edtech-copilot-web
 copy backend\.env.example backend\.env
 notepad backend\.env
