@@ -13,3 +13,8 @@
    `src/screens/homeV2Layout.ts`. Ключи элементов заданы порядком в сборке.
 
 Картинки макета лежат в `public/home`, шрифты — в `public/fonts` (Unbounded, Golos Text).
+
+## Статус
+
+Конвейер разовый: в сборку фронта и в Docker-образ не входит. Его результат,
+`src/screens/homeV2Layout.ts`, лежит в репозитории.
