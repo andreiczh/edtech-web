@@ -179,6 +179,12 @@ ICP: 17–25 лет, РФ. Solo-dev, bootstrap, бюджет $0.
   20 монологов с картинками «РЕШУ ЕГЭ» сняты с публикации (id в §6.52,
   вернуть — админка). Осталось за владельцем: форма организаторов,
   презентация, тестовые учётки. `docs/DECISIONS.md` §6.52.
+- **Ключ Mistral удалён и восстановлен** (29.09.2026): новый ключ создаётся
+  в **`admin.mistral.ai` → API → API Keys** — в `console.mistral.ai` кнопка
+  «New key» выключена и зовёт на платный Upgrade, это ловушка. Записывать
+  ключ — `backend/set-llm-key.ps1` (меняет только `LLM_API_KEY`, не
+  `set-key.ps1`!), потом тот же ключ в `LLM_API_KEY` на Render. План Б —
+  cloud.ru. `docs/DECISIONS.md` §6.53.
 - Публичная ссылка живёт на **Render**: https://pingo-ai-dpd9.onrender.com
   (деплой — `git push origin main`, инструкция `docs/DEPLOY-RENDER.md`).
   Туннели похоронены, HF закрыл бесплатные Docker-Spaces — `docs/DECISIONS.md` §2.
