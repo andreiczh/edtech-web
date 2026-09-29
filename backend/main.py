@@ -19,6 +19,7 @@ import asyncio
 import base64
 import calendar
 import hashlib
+import ipaddress
 import hmac
 import io
 import json
@@ -642,11 +643,26 @@ def _rate_ok(key: str, limit: int, window_sec: float) -> bool:
     return True
 
 
+def _is_private_ip(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_private
+    except ValueError:
+        return True
+
+
 def _client_ip(request: Request) -> str:
-    # Render стоит за прокси: настоящий адрес — первый в X-Forwarded-For.
+    """Адрес клиента за прокси Render. Берём ПОСЛЕДНИЙ публичный адрес из
+    X-Forwarded-For: первый подставляет сам клиент (тогда лимиты по IP
+    обходятся одним заголовком), а последний дописал доверенный прокси.
+    Частные адреса внутренних хопов пропускаем (ревью 29.09.2026)."""
     fwd = request.headers.get("x-forwarded-for")
     if fwd:
-        return fwd.split(",")[0].strip()
+        parts = [p.strip() for p in fwd.split(",") if p.strip()]
+        for ip in reversed(parts):
+            if not _is_private_ip(ip):
+                return ip
+        if parts:
+            return parts[-1]
     return request.client.host if request.client else "unknown"
 
 
@@ -3198,6 +3214,7 @@ async def _warmup():
     # и в /health видно сразу, и приветствие не ждёт лишний запрос к /me.
     if _max_token():
         _spawn(_max_bot_name())
+        _spawn(_max_refresh_ready())
         if not os.environ.get("MAX_ID_SALT", "").strip():
             print("[max] MAX_ID_SALT не задан: id MAX-аккаунтов выводятся из соли по умолчанию. "
                   "Задай соль ДО первых настоящих входов — потом менять нельзя (§6.37).")
@@ -5112,17 +5129,24 @@ def _max_miniapp_ready() -> bool:
         return True
     if env in ("0", "false", "no"):
         return False
-    if _MAX_APP_READY["val"]:
-        return True
+    return bool(_MAX_APP_READY["val"])
+
+
+async def _max_refresh_ready() -> None:
+    """Подтянуть отметку из meta (раз в час, пока она ложная) — в потоке, чтобы
+    вебхук не держал event loop на холодной Neon (ревью 29.09.2026)."""
+    if _MAX_APP_READY["val"] or not _storage_ok:
+        return
     now = time.monotonic()
-    if _storage_ok and now - _MAX_APP_READY["checked_at"] > 3600:
-        _MAX_APP_READY["checked_at"] = now
-        try:
-            row = storage.meta_get("max_miniapp_ready")
-            _MAX_APP_READY["val"] = bool(row and row[0] == "1")
-        except Exception:  # noqa: BLE001
-            pass
-    return _MAX_APP_READY["val"]
+    at = _MAX_APP_READY["checked_at"]
+    if at and now - at < 3600:  # `at` 0.0 — ещё не читали: monotonic может быть < 3600
+        return
+    _MAX_APP_READY["checked_at"] = now
+    try:
+        row = await asyncio.to_thread(storage.meta_get, "max_miniapp_ready")
+        _MAX_APP_READY["val"] = bool(row and row[0] == "1")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _note_miniapp_ready() -> None:
@@ -5178,6 +5202,7 @@ async def _max_bot_name() -> str:
 async def _max_welcome(user_id, chat_id) -> bool:
     """Приветствие с кнопкой мини-приложения (имя бота — из /me, один раз)."""
     name = await _max_bot_name()
+    await _max_refresh_ready()
     login_url = _max_login_url(user_id)
     body = max_bot.welcome_message(_MAX_APP_URL, name, with_open_app=_max_miniapp_ready(),
                                    bot_id=_MAX_BOT_ID or None, login_url=login_url)

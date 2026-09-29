@@ -11,6 +11,7 @@
  */
 import { backendUnreachableMessage, httpErrorMessage } from '../backendError'
 import { deviceId } from '../ege2/device'
+import { clearLinkToken } from '../max/bridge'
 import { randomNickname } from './nickname'
 
 const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
@@ -171,8 +172,14 @@ export async function login(nickname: string, password: string): Promise<AuthUse
 export async function loginMaxLink(token: string): Promise<{ user: AuthUser; created: boolean }> {
   const nicknames = Array.from({ length: 5 }, () => randomNickname())
   const prev = currentUser()
-  const data = (await post('/auth/max_link', { token, nicknames })) as AuthUser & {
-    created?: boolean
+  let data: AuthUser & { created?: boolean }
+  try {
+    data = (await post('/auth/max_link', { token, nicknames })) as AuthUser & { created?: boolean }
+  } catch (e) {
+    // Сервер отверг ссылку (просрочена, порчена, сменился токен бота) — забыть
+    // её, иначе каждая перезагрузка снова упирается в ту же ошибку (ревью 29.09).
+    if (e instanceof ApiError && e.status >= 400 && e.status < 500) clearLinkToken()
+    throw e
   }
   const user: AuthUser = { id: data.id, nickname: data.nickname, exam: data.exam }
   if (prev && prev.id !== user.id) logout()

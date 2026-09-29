@@ -10,6 +10,7 @@ import { fetchMeAnalytics, type MeAnalytics } from '../account/me'
 import { favoriteSessionItems, useFavorites } from '../ege2/favorites'
 import type { TaskFeedback } from '../ege2/feedback'
 import { TASK_ORDER, pickDemoItems, pickSession, variantById, type TaskId } from '../ege2/tasks'
+import { takeStartTarget } from '../max/bridge'
 import { MiniHome, MiniTabs, type MiniTab } from './MiniHome'
 import { MiniProfile } from './MiniProfile'
 import { MiniSettings } from './MiniSettings'
@@ -46,9 +47,11 @@ type View =
 const isTaskId = (n: number): n is TaskId => TASK_ORDER.includes(n as TaskId)
 
 function initialView(): View {
+  // Диплинк из MAX (?startapp=task40 → «#mini-practice=40») важнее хэша адреса.
+  const hash = takeStartTarget() ?? window.location.hash
   // #mini-practice=40 — поток заданий только с указанными номерами: приёмка
   // и дизайнер смотрят экраны №40, не проходя перед этим №39 с микрофоном.
-  const m = /^#mini-practice=([\d,]+)$/.exec(window.location.hash)
+  const m = /^#mini-practice=([\d,]+)$/.exec(hash)
   if (m) {
     const items = m[1]
       .split(',')
@@ -59,9 +62,9 @@ function initialView(): View {
     if (items.length) return { name: 'practice', items, nonce: Date.now(), from: 'home' }
   }
   // #mini-tab=stats — открыть сразу вкладку (приёмка экранов без кликов)
-  const t = /^#mini-tab=(home|talk|stats|settings)$/.exec(window.location.hash)
+  const t = /^#mini-tab=(home|talk|stats|settings)$/.exec(hash)
   if (t) return { name: 'tab', tab: t[1] as MiniTab }
-  if (window.location.hash === '#mini-result') {
+  if (hash === '#mini-result') {
     try {
       const raw = sessionStorage.getItem('gospeak.mini.demo')
       const d = raw ? (JSON.parse(raw) as Demo) : null

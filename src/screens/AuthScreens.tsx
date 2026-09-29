@@ -15,8 +15,8 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 
-import { updateSettings } from '../account/me'
-import { login, loginMax, loginMaxLink, randomNickname, register, type AuthUser, fetchInviteRequired } from '../auth/auth'
+import { resetSettings, updateSettings } from '../account/me'
+import { currentUser, login, loginMax, loginMaxLink, randomNickname, register, type AuthUser, fetchInviteRequired } from '../auth/auth'
 import { clearLinkToken, maxInitData, pendingLinkToken } from '../max/bridge'
 
 /* ------------------------------------------------------------ Регистрация */
@@ -379,10 +379,13 @@ export function MaxLoginScreen({
         // Личная ссылка от бота (§6.50) — пока мини-приложение не привязано к
         // боту, это основной путь; данные запуска мини-приложения — второй.
         const link = pendingLinkToken()
+        const prev = currentUser()
         let res: { user: AuthUser; created: boolean }
         if (link) {
           res = await loginMaxLink(link)
           clearLinkToken()
+          // По ссылке вошёл другой человек — настройки прежнего не наследуются.
+          if (prev && prev.id !== res.user.id) resetSettings()
         } else {
           const initData = await maxInitData()
           if (!initData) {

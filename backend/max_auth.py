@@ -240,7 +240,7 @@ def verify_link(token: str, bot_token: str, now: float | None = None) -> dict:
         return out
     uid, exp, sig = m.groups()
     if not hmac.compare_digest(sig.encode(), _link_sig(uid, exp, bot_token).encode()):
-        out["reason"] = "ссылка выдана не нашим ботом"
+        out["reason"] = "ссылка недействительна — напиши боту любое сообщение, он пришлёт новую"
         return out
     if int(exp) < (now if now is not None else time.time()):
         out["reason"] = "ссылка устарела — напиши боту любое сообщение, он пришлёт новую"

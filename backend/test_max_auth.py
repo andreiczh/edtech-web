@@ -345,7 +345,10 @@ plus_user = {"id": 987654321, "first_name": "A+B"}
 p = {"auth_date": str(int(time.time())), "query_id": "q-2",
      "user": json.dumps(plus_user, separators=(",", ":"))}
 p["hash"] = max_auth.sign(p, TOKEN, "A")
-raw_plus = "&".join(f"{k}={quote(v, safe='')}" for k, v in p.items())
+# «+» в сыром виде: unquote оставит плюс (подпись сойдётся), parse_qsl дал бы пробел
+raw_plus = "&".join(f"{k}={quote(v, safe='+')}" for k, v in p.items())
+check("A+B" in raw_plus and not max_auth.verify(raw_plus.replace("A+B", "A%20B"), TOKEN)["valid"],
+      "контроль: с пробелом вместо плюса подпись не сходится")
 check(max_auth.verify(raw_plus, TOKEN)["valid"], "плюс в значении не превращается в пробел", raw_plus[:80])
 # форменная кодировка: пробел как «+» — сходится через запасной разбор
 sp_user = {"id": 987654321, "first_name": "Anna Maria"}

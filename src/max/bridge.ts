@@ -164,12 +164,31 @@ export async function bootMax(): Promise<void> {
   // MiniApp читает при первом экране; данные запуска уже у библиотеки.
   const target = startTarget()
   if (target) {
+    // Адрес не трогаем: библиотека MAX может читать #WebAppData= лениво, а
+    // вход по подписи от него зависит. Цель ждёт MiniApp в sessionStorage.
     try {
-      window.history.replaceState(null, '', window.location.pathname + window.location.search + target)
+      sessionStorage.setItem(START_KEY, target)
     } catch {
-      /* адрес не поменять — откроется главная */
+      memStart = target
     }
   }
+}
+
+const START_KEY = 'gospeak.max.start'
+let memStart: string | null = null
+
+/** Цель диплинка (`#mini-practice=40`, `#mini-tab=talk`), один раз: MiniApp
+    забирает её при первом экране и стирает. */
+export function takeStartTarget(): string | null {
+  let t: string | null = memStart
+  try {
+    t = sessionStorage.getItem(START_KEY) || t
+    sessionStorage.removeItem(START_KEY)
+  } catch {
+    /* приватный режим */
+  }
+  memStart = null
+  return t
 }
 
 /** Подождать, пока библиотека MAX положит данные запуска в window.WebApp
