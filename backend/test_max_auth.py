@@ -155,7 +155,7 @@ from starlette.requests import Request  # noqa: E402
 
 main._storage_ok = True
 os.environ["MAX_BOT_TOKEN"] = TOKEN
-for k in ("MAX_SIGNUP", "MAX_PROBE", "MAX_ID_SALT"):
+for k in ("MAX_SIGNUP", "MAX_PROBE", "MAX_ID_SALT", "MAX_MINIAPP_READY"):
     os.environ.pop(k, None)
 
 _ip = [0]
@@ -187,6 +187,13 @@ res, err = call(main.auth_max(req(), {"init_data": launch(),
 check(err is None and res["created"] is True and res["nickname"] == "BraveNightingale"
       and res["id"].startswith("max_"),
       "первый вход создаёт аккаунт с предложенным ником", why(res, err))
+check(main._max_miniapp_ready() is True and main._MAX_STATS["app_logins"] >= 1,
+      "первый вход по подписи включает кнопку мини-приложения (§6.51)")
+# чтобы локальная база не запомнила «готово» от теста
+storage.meta_set("max_miniapp_ready", "0")
+main._MAX_APP_READY["val"] = False
+main._MAX_APP_READY["checked_at"] = 0.0
+check(main._max_miniapp_ready() is False, "без входа по подписи кнопки мини-приложения нет")
 acc = res["id"] if res else ""
 check(storage.account_exists(acc), "аккаунт виден шлюзу API (account_exists)")
 
@@ -330,6 +337,22 @@ check(err is None and res["created"] is True and res["id"] == max_auth.account_i
       "новый человек по ссылке получает аккаунт без регистрации", why(res, err))
 res, err = call(main.auth_max_link(req(), {"token": forged}))
 check(err is not None and err.status_code == 401, "поддельная ссылка — 401", why(res, err))
+
+# ------------------------------------------------------------ кодировка значений (§6.51)
+
+# «+» внутри значения (decodeURIComponent оставляет плюс) — подпись сходится
+plus_user = {"id": 987654321, "first_name": "A+B"}
+p = {"auth_date": str(int(time.time())), "query_id": "q-2",
+     "user": json.dumps(plus_user, separators=(",", ":"))}
+p["hash"] = max_auth.sign(p, TOKEN, "A")
+raw_plus = "&".join(f"{k}={quote(v, safe='')}" for k, v in p.items())
+check(max_auth.verify(raw_plus, TOKEN)["valid"], "плюс в значении не превращается в пробел", raw_plus[:80])
+# форменная кодировка: пробел как «+» — сходится через запасной разбор
+sp_user = {"id": 987654321, "first_name": "Anna Maria"}
+p2 = {"auth_date": str(int(time.time())), "query_id": "q-3",
+      "user": json.dumps(sp_user, separators=(",", ":"))}
+p2["hash"] = max_auth.sign(p2, TOKEN, "A")
+check(max_auth.verify(urlencode(p2), TOKEN)["valid"], "пробел, закодированный плюсом, — сходится запасным разбором")
 
 # ------------------------------------------------------------ правило ника
 

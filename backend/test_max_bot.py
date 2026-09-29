@@ -82,6 +82,7 @@ check(len(b3) == 1 and b3[0]["type"] == "link" and b3[0]["text"] == "Откры�
 # ------------------------------------------------------------ эндпоинт
 
 os.environ["MAX_BOT_TOKEN"] = TOKEN
+os.environ["MAX_MINIAPP_READY"] = "0"  # без привязки — личная ссылка (§6.51)
 import main  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from starlette.requests import Request  # noqa: E402
@@ -148,7 +149,14 @@ async def scenario():
     await run(SECRET, msg)
     kinds = [b["type"] for r in sent[0][2]["attachments"][0]["payload"]["buttons"] for b in r]
     check(kinds == ["open_app", "link"], "MAX_MINIAPP_READY=1: кнопка мини-приложения и ссылка", str(kinds))
-    os.environ.pop("MAX_MINIAPP_READY")
+    os.environ["MAX_MINIAPP_READY"] = ""  # авто: после входа по подписи
+    main._MAX_APP_READY["val"] = True
+    sent.clear()
+    await run(SECRET, msg)
+    kinds = [b["type"] for r in sent[0][2]["attachments"][0]["payload"]["buttons"] for b in r]
+    check(kinds == ["open_app", "link"], "после входа по подписи кнопка включается сама", str(kinds))
+    main._MAX_APP_READY["val"] = False
+    os.environ["MAX_MINIAPP_READY"] = "0"
     sent.clear()
 
     sent.clear()

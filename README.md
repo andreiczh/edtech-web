@@ -116,7 +116,7 @@ python -m venv .venv
 | Сервис | Зачем | Что нужно |
 |---|---|---|
 | Mistral API | распознавание (voxtral-mini / voxtral-small для заданий), разбор и разговор (mistral-small, запасная ministral-8b), озвучка (voxtral-mini-tts) | `LLM_API_KEY`; из РФ работает без VPN |
-| MAX Bot API | бот, вебхук `/max/webhook`, кнопка мини-приложения, вход по подписи `WebAppData` | `MAX_BOT_TOKEN`; адрес мини-приложения задаётся в платформе MAX для партнёров: Чат-боты → бот → ⋮ → Настройки → URL |
+| MAX Bot API | бот, вебхук `/max/webhook`, кнопка мини-приложения, вход по подписи `WebAppData` | `MAX_BOT_TOKEN`; адрес мини-приложения привязывает владелец бота в платформе MAX для партнёров (на хакатоне — организаторы по форме) |
 | edge-tts | запасная озвучка без ключа (`TTS_PROVIDER=edge`) | — |
 | Neon Postgres | база прода | `DATABASE_URL`; без него — SQLite |
 | Render | публичный адрес, деплой по `git push origin main` (`render.yaml`) | — |

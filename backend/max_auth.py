@@ -42,8 +42,21 @@ def extract_launch_params(raw: str) -> str:
     return s
 
 
-def parse_init_data(raw: str) -> dict[str, str]:
-    return dict(parse_qsl(extract_launch_params(raw), keep_blank_values=True))
+def parse_init_data(raw: str, plus_as_space: bool = False) -> dict[str, str]:
+    """Пары key=value. По документации MAX значения снимаются decodeURIComponent:
+    там «+» остаётся плюсом, а parse_qsl превратил бы его в пробел и сломал
+    подпись. Поэтому по умолчанию — unquote; plus_as_space=True — прежний
+    разбор, verify пробует оба (§6.51)."""
+    s = extract_launch_params(raw)
+    if plus_as_space:
+        return dict(parse_qsl(s, keep_blank_values=True))
+    out: dict[str, str] = {}
+    for part in s.split("&"):
+        if not part:
+            continue
+        k, _, v = part.partition("=")
+        out[unquote(k)] = unquote(v)
+    return out
 
 
 def _check_string(params: dict[str, str]) -> str:
@@ -95,6 +108,16 @@ def verify(raw: str, bot_token: str, max_age_s: int = MAX_AGE_S,
         if hmac.compare_digest(sign(params, bot_token, variant), got):
             out["variant"] = variant
             break
+    if out["variant"] is None:
+        # Второй разбор: «+» как пробел (форменная кодировка). Если MAX когда-то
+        # закодирует пробел плюсом, подпись сойдётся здесь.
+        alt = parse_init_data(raw, plus_as_space=True)
+        if alt != params:
+            for variant in _VARIANTS:
+                if hmac.compare_digest(sign(alt, bot_token, variant), got):
+                    out["variant"] = variant
+                    params = alt
+                    break
     if out["variant"] is None:
         out["reason"] = "подпись не совпала"
         return out

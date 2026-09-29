@@ -33,6 +33,7 @@ import { askAloud } from '../ege2/askAloud'
 import { useCountdown } from '../ege2/useCountdown'
 import { TaskScreen, type VariantResult } from '../screens/TaskScreen'
 import { useRecorder } from '../ege2/useRecorder'
+import { haptic } from '../max/bridge'
 import { Ambient } from './Ambient'
 import { BackButton, useMaxBack } from './ResultBits'
 import { ResultScreen } from './ResultScreen'
@@ -92,6 +93,7 @@ function Countdown({
   doneRef.current = onDone
   useEffect(() => {
     if (n <= 0) {
+      haptic('tick')
       doneRef.current()
       return
     }
@@ -571,6 +573,7 @@ export function Practice({
       setFeedback(res.feedback)
       setTranscript(res.transcript)
       setFailure(null)
+      haptic('success')
       // Как в SessionScreen: пройденным вариант считается только с разбором.
       markVariantSolved(variant.id)
       saveTaskFeedback(item.taskId, {

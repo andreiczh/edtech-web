@@ -47,6 +47,11 @@ export function useRecorder() {
       }
       rec.onstop = () => {
         stopStream()
+        try {
+          window.WebApp?.disableClosingConfirmation?.()
+        } catch {
+          /* нет моста */
+        }
         const blob = new Blob(chunksRef.current, { type: recordedType(rec) })
         resolveRef.current?.(blob)
         resolveRef.current = null
@@ -55,6 +60,12 @@ export function useRecorder() {
       recorderRef.current = rec
       rec.start()
       setState('recording')
+      // Внутри MAX: закрыть окно посреди записи — только с подтверждением (§6.51).
+      try {
+        window.WebApp?.enableClosingConfirmation?.()
+      } catch {
+        /* нет моста */
+      }
       return true
     } catch {
       setError('Нет доступа к микрофону — разреши его в браузере.')
@@ -115,6 +126,11 @@ export function useRecorder() {
         /* уже остановлен */
       }
       stopStream()
+      try {
+        window.WebApp?.disableClosingConfirmation?.()
+      } catch {
+        /* нет моста */
+      }
     },
     [stopStream],
   )

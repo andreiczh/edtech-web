@@ -1151,6 +1151,8 @@ async def auth_max(request: Request, body: dict = Body(...)):
     if not res["valid"]:
         print(f"[max] вход отклонён: {res['reason']}")
         raise HTTPException(status_code=401, detail=f"MAX не подтвердил вход: {res['reason']}.")
+    _MAX_STATS["app_logins"] += 1
+    _note_miniapp_ready()
     return await _max_account(res["user"]["id"], body.get("nicknames"))
 
 
@@ -5091,16 +5093,47 @@ _MAX_APP_URL = os.environ.get("MAX_APP_URL", "").strip() or "https://pingo-ai-dp
 # что токена не было на Render). Только счётчики и код последней ошибки —
 # ни текстов сообщений, ни id людей.
 _MAX_STATS: dict = {"received": 0, "ignored": 0, "sent": 0, "failed": 0,
-                    "last_error": "", "last_at": "", "links": 0, "link_logins": 0}
+                    "last_error": "", "last_at": "", "links": 0, "link_logins": 0,
+                    "app_logins": 0}
+
+# Привязан ли адрес мини-приложения к боту (§6.51). Узнать это через API нельзя,
+# а страница max.ru/<бот>?startapp выглядит одинаково у бота с приложением и
+# без (проверено на business_bot 29.09.2026). Единственное доказательство —
+# сам факт входа по подписи мини-приложения: раз /auth/max принял подпись,
+# приложение открылось из MAX, значит адрес привязан. Отметка держится в
+# памяти и в таблице meta (переживает перезапуск). MAX_MINIAPP_READY=1/0 —
+# ручной переключатель поверх, если понадобится.
+_MAX_APP_READY = {"val": False, "checked_at": 0.0}
 
 
 def _max_miniapp_ready() -> bool:
-    """Привязан ли адрес мини-приложения к боту в партнёрской платформе MAX.
-    Узнать это через API нельзя, поэтому флаг ставит человек: MAX_MINIAPP_READY=1
-    на Render, когда https://max.ru/<бот>?startapp открывает приложение, а не
-    «Запустить бота». До тех пор кнопка open_app в приветствии не шлётся — без
-    привязки она ничего не открывает (жалоба владельца 28.09.2026)."""
-    return os.environ.get("MAX_MINIAPP_READY", "0").strip().lower() in ("1", "true", "yes")
+    env = os.environ.get("MAX_MINIAPP_READY", "").strip().lower()
+    if env in ("1", "true", "yes"):
+        return True
+    if env in ("0", "false", "no"):
+        return False
+    if _MAX_APP_READY["val"]:
+        return True
+    now = time.monotonic()
+    if _storage_ok and now - _MAX_APP_READY["checked_at"] > 3600:
+        _MAX_APP_READY["checked_at"] = now
+        try:
+            row = storage.meta_get("max_miniapp_ready")
+            _MAX_APP_READY["val"] = bool(row and row[0] == "1")
+        except Exception:  # noqa: BLE001
+            pass
+    return _MAX_APP_READY["val"]
+
+
+def _note_miniapp_ready() -> None:
+    """Подпись мини-приложения прошла — с этого момента бот шлёт кнопку open_app."""
+    if _MAX_APP_READY["val"]:
+        return
+    _MAX_APP_READY["val"] = True
+    _MAX_APP_READY["checked_at"] = time.monotonic()
+    print("[max] вход по подписи мини-приложения: адрес привязан, кнопка open_app включена")
+    if _storage_ok:
+        _spawn(asyncio.to_thread(storage.meta_set, "max_miniapp_ready", "1"))
 
 
 def _max_login_url(user_id) -> str | None:

@@ -26,7 +26,10 @@ export interface MaxWebApp {
     onClick: (cb: () => void) => void
     offClick: (cb: () => void) => void
   }
-  HapticFeedback?: { impactOccurred: (style: string) => void }
+  HapticFeedback?: {
+    impactOccurred: (style: string) => void
+    notificationOccurred?: (type: string) => void
+  }
   enableClosingConfirmation?: () => void
   disableClosingConfirmation?: () => void
   shareMaxContent?: (p: { text?: string; link?: string }) => void
@@ -152,6 +155,39 @@ export async function bootMax(): Promise<void> {
   if (!probablyInsideMax()) return
   await loadMaxBridge()
   isMaxLaunch()
+  // Диплинк max.ru/<бот>?startapp=task39 (§6.51): цель уходит в хэш, который
+  // MiniApp читает при первом экране; данные запуска уже у библиотеки.
+  const target = startTarget()
+  if (target) {
+    try {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search + target)
+    } catch {
+      /* адрес не поменять — откроется главная */
+    }
+  }
+}
+
+/** Куда открыть приложение по диплинку `?startapp=<payload>`: task39…task42 —
+    сразу это задание, talk / stats / settings — вкладка. Иначе null. */
+export function startTarget(): string | null {
+  const sp = window.WebApp?.initDataUnsafe?.start_param
+  if (!sp) return null
+  const m = /^task(39|40|41|42)$/i.exec(sp)
+  if (m) return `#mini-practice=${m[1]}`
+  const t = /^(talk|stats|settings|home)$/i.exec(sp)
+  return t ? `#mini-tab=${t[1].toLowerCase()}` : null
+}
+
+/** Отклик MAX на телефоне: тихо пропускается вне MAX и в веб-версии. */
+export function haptic(kind: 'tick' | 'success' | 'error'): void {
+  try {
+    const h = window.WebApp?.HapticFeedback
+    if (!h) return
+    if (kind === 'tick') h.impactOccurred('medium')
+    else h.notificationOccurred?.(kind)
+  } catch {
+    /* нет моста */
+  }
 }
 
 let loading: Promise<MaxWebApp | null> | null = null
