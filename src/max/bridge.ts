@@ -154,6 +154,11 @@ export function probablyInsideMax(): boolean {
 export async function bootMax(): Promise<void> {
   if (!probablyInsideMax()) return
   await loadMaxBridge()
+  // Библиотека MAX заполняет initData не в момент загрузки, а чуть позже
+  // (проверено 29.09.2026 в браузере: start_param появлялся уже после того,
+  // как первый экран был выбран). Ждём до 2 с, но не дольше: в обычном
+  // браузере с #WebAppData= в адресе данных не будет никогда.
+  await waitForInitData(2000)
   isMaxLaunch()
   // Диплинк max.ru/<бот>?startapp=task39 (§6.51): цель уходит в хэш, который
   // MiniApp читает при первом экране; данные запуска уже у библиотеки.
@@ -167,10 +172,47 @@ export async function bootMax(): Promise<void> {
   }
 }
 
+/** Подождать, пока библиотека MAX положит данные запуска в window.WebApp
+    (не дольше ms). Возвращает true, если данные появились. */
+export function waitForInitData(ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const t0 = Date.now()
+    const tick = () => {
+      const w = window.WebApp
+      if (w?.initData || w?.initDataUnsafe?.start_param) {
+        resolve(true)
+        return
+      }
+      if (Date.now() - t0 >= ms) {
+        resolve(false)
+        return
+      }
+      window.setTimeout(tick, 100)
+    }
+    tick()
+  })
+}
+
+/** start_param диплинка: из библиотеки MAX, а без неё — из фрагмента адреса
+    (мобильный клиент кладёт его в #WebAppData=…&start_param=…). */
+export function startParam(): string | null {
+  const fromBridge = window.WebApp?.initDataUnsafe?.start_param
+  if (fromBridge) return String(fromBridge)
+  const raw = launchParamsFromHash()
+  if (!raw) return null
+  const m = /(?:^|&)start_param=([^&]*)/.exec(raw)
+  if (!m) return null
+  try {
+    return decodeURIComponent(m[1]) || null
+  } catch {
+    return m[1] || null
+  }
+}
+
 /** Куда открыть приложение по диплинку `?startapp=<payload>`: task39…task42 —
     сразу это задание, talk / stats / settings — вкладка. Иначе null. */
 export function startTarget(): string | null {
-  const sp = window.WebApp?.initDataUnsafe?.start_param
+  const sp = startParam()
   if (!sp) return null
   const m = /^task(39|40|41|42)$/i.exec(sp)
   if (m) return `#mini-practice=${m[1]}`
@@ -221,7 +263,10 @@ export async function maxInitData(): Promise<string | null> {
   } catch {
     /* необязательный вызов */
   }
-  return w?.initData || launchParamsFromHash()
+  // Веб-версия MAX не кладёт данные в адрес — ждём их от библиотеки (до 2 с),
+  // иначе первый вход упирался бы в «MAX не передал данные для входа».
+  if (w && !w.initData && !launchParamsFromHash()) await waitForInitData(2000)
+  return window.WebApp?.initData || launchParamsFromHash()
 }
 
 /** Имя из MAX — только для приветствия на экране; на сервере не хранится. */
