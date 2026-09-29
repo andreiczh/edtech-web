@@ -1,0 +1,29 @@
+{
+  "history": [
+    {
+      "role": "user",
+      "content": "Hi! I want to talk about my hobby. I like reading books, especially fantasy."
+    },
+    {
+      "role": "assistant",
+      "content": "Oh, fantasy books are a great choice! Which author do you like most?"
+    },
+    {
+      "role": "user",
+      "content": "My favourite is Tolkien. I have read The Hobbit three times."
+    },
+    {
+      "role": "assistant",
+      "content": "Three times! What makes you come back to it?"
+    },
+    {
+      "role": "user",
+      "content": "Yes, I also like films based on books, but the books is usually better."
+    },
+    {
+      "role": "assistant",
+      "content": "I agree, books usually go deeper. Do you prefer reading in English or in Russian?"
+    }
+  ],
+  "persona": "tutor"
+}

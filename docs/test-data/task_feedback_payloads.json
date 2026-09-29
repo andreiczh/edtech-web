@@ -1,0 +1,46 @@
+{
+  "reading": {
+    "kind": "reading",
+    "variant": "e7f843a6-d857-4bf2-ae26-d03193dcf6b5",
+    "payload": {
+      "referenceText": "We live in the digital world where many things are done much more quickly and easily online. The banking industry is not an exception. The most significant development in the world of banking is definitely the introduction of online banking. Digital banking is basically an online platform that enables customers to carry out financial transactions. This can include making deposits, transferring funds, paying bills, and more.\nOnline banking in its earliest forms dates back to the 1980s. However, it really began to take off with the rise of the Internet. The growing adoption of smartphones and mobile banking apps further accelerated the trend. Some people dislike digital banking, but about half of today’s bank customers have gone digital only, and this figure will continue to grow."
+    }
+  },
+  "dialogue": {
+    "kind": "dialogue",
+    "variant": "1214dd81-9c2d-4694-a29d-d64ad827c869",
+    "payload": {
+      "ad": "Family weekend on the lake!",
+      "points": [
+        "Question 1: location",
+        "Question 2: accommodation",
+        "Question 3: price for the weekend for a family of three",
+        "Question 4: fishing equipment rental"
+      ]
+    }
+  },
+  "interview": {
+    "kind": "interview",
+    "variant": "977f9bec-2ff7-465d-abcc-aeb831f1037d",
+    "payload": {
+      "questions": [
+        "Hello everybody! It’s Teenagers Round the World Channel. Our guest today is a teenager from Russia and we are going to discuss extreme sports. We’d like to know our guest’s point of view on this issue. Please answer five questions. So, let’s get started. What are the dangers of extreme sports?",
+        "Which kinds of extreme sports are popular in Russia? Which aren’t?",
+        "If you had to choose, what kind of extreme sports would you try and why?",
+        "What benefits do extreme sports provide?",
+        "Are you interested in extreme sports? Why?"
+      ]
+    }
+  },
+  "monologue": {
+    "kind": "monologue",
+    "variant": "54ea1d82-d517-4196-8d66-f9020bc3d73c",
+    "payload": {
+      "brief": "Task 4. Imagine that you and your friend are doing a school project “Using the Internet”. You have found some photos to illustrate it but for technical reasons you cannot send them now. Leave a voice message to your friend explaining your choice of the photos and sharing some ideas about the project. In 2.5 minutes be ready to: · explain the choice of the illustrations for the project by briefly describing them and noting the differences; · mention the advantages (1–2) of the two gadgets used to connect to the Internet; · mention the disadvantages (1–2) of the two gadgets used to connect to the Internet; · express your opinion on the subject of the project – which of these gadgets to use the Internet you prefer and why. You will speak for not more than 3 minutes (12–15 sentences) . You have to talk continuously. i",
+      "photoFacts": [
+        "A woman is sitting at a kitchen counter, using a laptop. There is a white coffee cup and a notebook on the counter, with kitchen appliances visible in the background.",
+        "A young woman is lying on a bed, wearing headphones, and holding a smartphone in front of her. She appears to be taking a selfie or looking at the phone's screen."
+      ]
+    }
+  }
+}
