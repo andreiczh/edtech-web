@@ -25,3 +25,6 @@ backend/pingo.db*
 # PHONEME_MODEL_URL в этот кэш. В git им нельзя ни по весу, ни по лицензии
 # (у модели её нет вовсе, см. DECISIONS §6.28).
 backend/.models/
+
+# Локальные заметки с учётками и ключами — не в git
+*.local.md
