@@ -225,8 +225,11 @@ def aspect_verdicts(checks: list[dict]) -> list[dict]:
         if n == 1:
             # Описание обоих фото, различие, обобщение различия, связь с темой;
             # фактическая ошибка в описании — тоже изъян.
+            # An absent comparison cannot ALSO lack generalisation as a second,
+            # independent flaw. That double count turned a partial description
+            # into a missing aspect and could zero all three criteria.
             defects = sum((no("described_first"), no("described_second"),
-                           no("difference_stated"), no("difference_generalised"),
+                           no("difference_stated") or no("difference_generalised"),
                            no("linked_to_topic"), bool(c.get("factual_error"))))
         elif n in (2, 3):
             # Достоинство (недостаток) названо для каждого из двух типов и не
@@ -261,11 +264,14 @@ def aspect_comment(check: dict) -> str:
     missing = []
     if n == 1:
         for key, label in (("described_first", "описание первого фото"),
-                           ("described_second", "описание второго фото"),
-                           ("difference_stated", "различие"),
-                           ("difference_generalised", "обобщение различия по типам"),
-                           ("linked_to_topic", "связь с темой проекта")):
+                           ("described_second", "описание второго фото")):
             if not check.get(key): missing.append(label)
+        if not check.get("difference_stated"):
+            missing.append("сравнение фотографий по типам")
+        elif not check.get("difference_generalised"):
+            missing.append("обобщение различия по типам")
+        if not check.get("linked_to_topic"):
+            missing.append("связь с темой проекта")
         if check.get("factual_error"):
             missing.append("точность описания фотографий")
     elif n in (2, 3):

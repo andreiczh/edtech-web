@@ -183,6 +183,14 @@ class CalibrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             main._validate_monologue_recheck({"aspects":[aspect,aspect],"error_checks":[]},[2],0)
 
+    def test_absent_difference_is_not_two_independent_content_flaws(self):
+        check={"n":1,"described_first":True,"described_second":True,
+               "difference_stated":False,"difference_generalised":False,
+               "linked_to_topic":False,"factual_error":False}
+        self.assertEqual(sc.aspect_verdicts([check])[0]["verdict"],sc.PARTIAL)
+        # A separate factual mismatch is still a separate content flaw.
+        self.assertEqual(sc.aspect_verdicts([{**check,"factual_error":True}])[0]["verdict"],sc.MISSING)
+
     def test_duration_is_bounded_even_for_small_compressed_files(self):
         data=wav(np.zeros(32000, dtype=np.float32))
         with patch.object(audio_check, "MAX_AUDIO_SECONDS", 1):
