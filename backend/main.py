@@ -4043,6 +4043,34 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
 MONOLOGUE_RECHECK = os.environ.get("MONOLOGUE_RECHECK", "1").strip() not in ("0", "false", "no")
 
 
+def _validate_monologue_recheck(data, numbers: list, candidate_count: int) -> None:
+    """A missing decision or a truthy string must never silently change a mark."""
+    if not isinstance(data, dict):
+        raise ValueError("recheck must be an object")
+    aspects = data.get("aspects")
+    if (not isinstance(aspects, list) or len(aspects) != len(numbers)
+            or any(not isinstance(a, dict) or type(a.get("n")) not in (int, str)
+                   for a in aspects)
+            or {str(a["n"]) for a in aspects} != {str(n) for n in numbers}):
+        raise ValueError("incomplete aspect recheck")
+    required = {
+        1: ("described_first", "described_second", "difference_stated",
+            "difference_generalised", "linked_to_topic", "factual_error"),
+        2: ("named_first", "named_second", "specific_first", "specific_second"),
+        3: ("named_first", "named_second", "specific_first", "specific_second"),
+        4: ("opinion_explicit", "choice_stated", "justified"),
+    }
+    for aspect in aspects:
+        if any(type(aspect.get(flag)) is not bool for flag in required[int(aspect["n"])]):
+            raise ValueError("incomplete aspect flags")
+    checks = data.get("error_checks")
+    if (not isinstance(checks, list) or len(checks) != candidate_count
+            or any(not isinstance(c, dict) or type(c.get("id")) is not int
+                   or type(c.get("valid")) is not bool for c in checks)
+            or {c["id"] for c in checks} != set(range(candidate_count))):
+        raise ValueError("incomplete error checks")
+
+
 async def _recheck_aspects(kind: str, observations: dict, ctx: dict,
                            transcript: str, persona: str, client) -> dict:
     """Спорные аспекты монолога — на повторную, точечную проверку.
@@ -4074,32 +4102,39 @@ async def _recheck_aspects(kind: str, observations: dict, ctx: dict,
                 continue
     prompt = ege_prompts.aspect_recheck_prompt(
         numbers, str(ctx.get("brief") or ""), ctx.get("facts") or [], first, persona, candidates)
+    messages = [{"role": "system", "content": prompt},
+                {"role": "user", "content": transcript}]
     try:
-        completion = await asyncio.to_thread(
-            lambda: client.chat.completions.create(
-                model=GRADE_MODEL,
-                messages=[{"role": "system", "content": prompt},
-                          {"role": "user", "content": transcript}],
-                response_format={"type": "json_object"},
-                temperature=0.0,
-                max_tokens=2200,
+        for attempt in range(2):
+            completion = await asyncio.to_thread(
+                lambda: client.chat.completions.create(
+                    model=GRADE_MODEL, messages=messages,
+                    response_format={"type": "json_object"}, temperature=0.0,
+                    max_tokens=2400,
+                )
             )
-        )
-        _track_llm(completion)
-        data = json.loads((completion.choices[0].message.content or "").strip())
-        aspects = data.get("aspects")
-        if (not isinstance(aspects, list)
-                or {str(a.get("n")) for a in aspects if isinstance(a, dict)} != {str(n) for n in numbers}):
-            raise ValueError("incomplete aspect recheck")
+            _track_llm(completion)
+            try:
+                data = json.loads((completion.choices[0].message.content or "").strip())
+                _validate_monologue_recheck(data, numbers, len(candidates))
+                break
+            except ValueError:
+                _GRADING_DIAGNOSTICS["incomplete_rechecks"] += 1
+                if attempt:
+                    raise
+                messages = [*messages, {"role": "user", "content":
+                    f"The response was incomplete. Return the FULL JSON again: aspects "
+                    f"with exactly numbers {numbers} and ALL their boolean flags; "
+                    f"error_checks with exactly ids {list(range(len(candidates)))}. "
+                    "Include BOTH valid=true and valid=false decisions. Do not skip "
+                    "rejected errors. Use empty arrays only when no ids are requested. "
+                    "Keep explanations short so every item fits."}]
     except Exception as e:  # noqa: BLE001
+        _GRADING_DIAGNOSTICS["last_recheck_error"] = type(e).__name__
+        note_failure("grading_recheck", f"monologue:{type(e).__name__}")
         raise HTTPException(502, "Повторная проверка монолога не завершена — балл не выставлен.") from e
-    checks = data.get("error_checks") or []
+    checks = data["error_checks"]
     if candidates:
-        if (len(checks) != len(candidates)
-                or any(not isinstance(c, dict) or type(c.get("id")) is not int
-                       or type(c.get("valid")) is not bool for c in checks)
-                or {c["id"] for c in checks} != set(range(len(candidates)))):
-            raise HTTPException(502, "Проверка замечаний не завершена — балл не выставлен.")
         kept = {c["id"] for c in checks if c["valid"]}
         for field in ("lang_errors", "logic_errors"):
             observations[field] = [{k: v for k, v in c.items() if k not in ("id", "field")}
