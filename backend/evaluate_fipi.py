@@ -93,6 +93,9 @@ def main():
                                       "variant": "fipi-2026-" + row["work"], "persona": "tutor"},
                                        files={"audio": (audio.name, f, "audio/ogg" if audio.suffix == ".ogg" else "audio/mpeg")})
                         item["status"] = r.status_code
+                        if not r.is_success:
+                            # Keep server diagnostics, not just HTTPStatusError.
+                            item["server_error"] = r.text[:1500]
                         r.raise_for_status()
                         result = r.json(); item["response"] = result
                         fb = result.get("feedback") or {}
@@ -112,7 +115,8 @@ def main():
                     args.output.parent.mkdir(parents=True, exist_ok=True)
                     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2))
                     print(json.dumps({k: v for k, v in item.items() if k != "response"}, ensure_ascii=False), flush=True)
-                    time.sleep(1)
+                    # Do not turn an outage into a burst of rate-limit failures.
+                    time.sleep(12 if item.get("status", 200) >= 400 else 1)
         finally:
             c.post("/auth/logout")
     print(json.dumps(report["summary"], ensure_ascii=False, indent=2))
