@@ -523,6 +523,7 @@ export function ResultView({
       <div className="card2 resthead">
         <ScoreRing score={feedback.score} max={feedback.max} />
         <div className="resthead__mid">
+          {feedback.score_status === 'provisional' && <strong>Ориентировочно · по тексту</strong>}
           {perItem &&
             criteria.map((c, i) => (
               <div className="verdict" key={c.key || i}>

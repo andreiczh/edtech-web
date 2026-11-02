@@ -1555,6 +1555,8 @@ body {
   color: var(--text-dim);
   text-decoration: underline;
   cursor: pointer;
+  min-height: 44px;
+  font-size: 13px;
 }
 .dispute__btn:hover {
   color: var(--text);
@@ -1573,7 +1575,8 @@ body {
   padding: 2px 0 0;
   margin: 2px 0 0;
   font: inherit;
-  font-size: clamp(10px, 1.1vw, 12px);
+  font-size: 13px;
+  min-height: 44px;
   color: var(--card-ink-dim, #7a7590);
   opacity: 0.75;
   cursor: pointer;
@@ -1596,7 +1599,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: min(560px, 94vw);
+  width: min(560px, 100%);
+  min-width: 0;
   max-height: min(88vh, 720px);
   padding: 16px 18px;
   background: var(--card-solid);
@@ -1662,9 +1666,10 @@ body {
   color: var(--card-ink);
   cursor: pointer;
   text-align: left;
+  min-height: 44px;
 }
 .dsg__score {
-  min-width: 38px;
+  min-width: 44px;
   text-align: center;
   font-weight: 800;
 }
@@ -1744,6 +1749,12 @@ body {
   display: flex;
   gap: 8px;
   margin-left: auto;
+}
+.dsg__buttons button { min-height: 44px; }
+.dsg__area { font-size: 16px; }
+@media (max-width: 500px), (max-height: 500px) {
+  .modal-backdrop { padding: 12px; }
+  .dsg { max-height: calc(100dvh - 24px); }
 }
 .dsg__ghost {
   background: rgba(0, 0, 0, 0.06);

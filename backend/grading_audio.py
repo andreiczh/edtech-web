@@ -21,14 +21,14 @@ VAD_WINDOW_SAMPLES = 20 * 16000
 def speech_spans(pcm):
     """Bound ONNX encoder batches; its default batches a whole five-minute file.
 
-    Low confidence speech is kept. Two-second overlaps and one-second padding
+    Three-second margins keep hesitant onsets. Six-second overlaps and padding
     protect words at window boundaries, and merged spans are copied only once.
     """
     from faster_whisper.vad import VadOptions, get_speech_timestamps
-    options = VadOptions(threshold=0.05, min_silence_duration_ms=2000,
-                         speech_pad_ms=1000)
+    options = VadOptions(threshold=0.25, min_silence_duration_ms=2000,
+                         speech_pad_ms=3000)
     spans = []
-    step = VAD_WINDOW_SAMPLES - 2 * 16000
+    step = VAD_WINDOW_SAMPLES - 6 * 16000
     for offset in range(0, len(pcm), step):
         part = pcm[offset:offset + VAD_WINDOW_SAMPLES]
         # The upstream VAD mutates its last context frame; protect source audio.
@@ -62,7 +62,7 @@ def _prepare(data: bytes, filename: str) -> bytes:
     samples = sum(s["end"] - s["start"] for s in spans) + max(0, len(spans) - 1) * 8000
     if len(pcm) - samples < max(5 * 16000, len(pcm) * 0.1):
         return data
-    # Keep a half-second separator and the VAD's one-second margins. Grammar,
+    # Keep a half-second separator and the VAD's three-second margins. Grammar,
     # repetitions and self-corrections INSIDE speech are never rewritten.
     parts = []
     for s in spans:
@@ -77,3 +77,37 @@ def _prepare(data: bytes, filename: str) -> bytes:
         w.setframerate(16000)
         w.writeframes((np.clip(compact, -1, 1) * 32767).astype("<i2").tobytes())
     return out.getvalue()
+
+
+def analyze_isolated(data: bytes, filename: str) -> tuple[dict, bytes]:
+    """Release decoder/ONNX arenas after every upload, including native caches.
+
+    A lock keeps simultaneous requests from creating simultaneous model workers.
+    The child sees only public/audio bytes, never provider credentials or DB data.
+    A timeout/crash fails the analysis instead of taking down the API process.
+    """
+    import json
+    import os
+    from pathlib import Path
+    import subprocess
+    import sys
+
+    env = {key: value for key, value in os.environ.items()
+           if key in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME",
+                      "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH")}
+    env.update(OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
+    with _VAD_LOCK:
+        completed = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), Path(filename).suffix or ".webm"],
+            input=data, capture_output=True, timeout=75, check=True, env=env)
+    header, prepared = completed.stdout.split(b"\n", 1)
+    return json.loads(header), prepared
+
+
+if __name__ == "__main__":
+    import json
+    import sys
+    data = sys.stdin.buffer.read()
+    sound = audio_check.inspect(data, sys.argv[1])
+    prepared = data if audio_check.silence_reason(sound) else _prepare(data, "speech" + sys.argv[1])
+    sys.stdout.buffer.write(json.dumps(sound).encode() + b"\n" + prepared)

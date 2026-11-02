@@ -211,6 +211,7 @@ export function ResultScreen({
   onQuit,
   onNext,
   onBack,
+  onRetry,
 }: {
   no: number
   taskId: TaskId
@@ -222,6 +223,7 @@ export function ResultScreen({
   seconds: number
   onQuit: () => void
   onNext: () => void
+  onRetry?: () => void
   onBack?: () => void
 }) {
   const reference = variant.readText ?? transcript ?? ''
@@ -347,11 +349,8 @@ export function ResultScreen({
           </span>
           {feedback ? (
             <>
-              {feedback.summary}{' '}
-              <b>
-                {misread} {plural(misread)}
-              </b>{' '}
-              из 2, искажающих смысл
+              <strong>Ориентировочно · по тексту</strong><br />
+              {misread} {plural(misread)} в распознанном тексте. Фонетика отдельно не оценена.
             </>
           ) : (
             (failure ?? 'Разбор не выполнен.')
@@ -359,14 +358,19 @@ export function ResultScreen({
           {blob && <Player blob={blob} seconds={seconds} onProgress={onProgress} />}
         </div>
 
+        {failure && onRetry && <section className="x-card" aria-label="Повторная проверка">
+          <p className="x-text">Можно отправить эту же запись ещё раз.</p>
+          <button type="button" className="m-btn m-retry" onClick={onRetry}>Разобрать заново</button>
+        </section>}
+
         {feedback && reference && (
           <>
             <div className="r-legend" aria-hidden="true">
               <span className="r-legend__item">
-                <i className="r-chip r-chip--sense" />— ошибки, искажающие смысл
+                <i className="r-chip r-chip--sense" />— несовпадения в тексте
               </span>
               <span className="r-legend__item">
-                <i className="r-chip r-chip--phon" />— фонетические ошибки
+                <i className="r-chip r-chip--phon" />— другие замечания
               </span>
             </div>
 

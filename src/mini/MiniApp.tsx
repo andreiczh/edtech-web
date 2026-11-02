@@ -79,8 +79,10 @@ function initialView(): View {
   return { name: 'tab', tab: 'home' }
 }
 
-export function MiniApp({ onLogout, onFeedback }: { onLogout: () => void; onFeedback: () => void }) {
+export function MiniApp({ onLogout, onFeedback, onBusyChange }: { onLogout: () => void; onFeedback: () => void; onBusyChange: (busy: boolean) => void }) {
   const [view, setView] = useState<View>(initialView)
+  const busy = view.name === 'practice' || (view.name === 'tab' && view.tab === 'talk')
+  useEffect(() => { onBusyChange(busy); return () => onBusyChange(false) }, [busy, onBusyChange])
   const home = useCallback(() => setView({ name: 'tab', tab: 'home' }), [])
 
   // Главная: карточкам «по ошибкам» и «избранное» нужно знать, есть ли данные.

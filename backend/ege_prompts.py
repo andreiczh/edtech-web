@@ -86,6 +86,8 @@ def recheck_prompt(kind: str, items: list[dict], task_text: str,
     listed = "\n".join(
         f'- n={it["n"]}: {it["point"]}\n  first verdict: '
         f'{"accepted" if it["accepted"] else "rejected"} ({it["reason"] or "no reason given"})'
+        f'\n  Verbatim answer: {it.get("heard", "")}\n  Mechanical clause hint '
+        f'(verify, not a verdict): {it.get("phrase_hint", "unknown")}'
         for it in items
     )
     return (
@@ -94,7 +96,7 @@ def recheck_prompt(kind: str, items: list[dict], task_text: str,
         f"disputed items below are re-examined — each is a {unit}.\n\n"
         f"Task:\n{task_text}\n\n"
         f"Full transcript of the student's recording:\n{transcript}\n\n"
-        f"THE OFFICIAL RULES:\n{rules}\n\n"
+        f"{_NO_PHONETICS}\n\nTHE OFFICIAL RULES:\n{rules}\n\n"
         f"Disputed items:\n{listed}\n\n"
         "Re-judge ONLY these items, carefully and by the rules above. You are the "
         "final word: do not split the difference, decide.\n"
@@ -132,7 +134,7 @@ _ASPECT_NAMES = {
 def aspect_recheck_prompt(numbers: list[int], brief: str,
                           photo_facts: list[str] | None,
                           first_pass: dict[int, dict],
-                          persona: str | None = None) -> str:
+                          persona: str | None = None, errors: list[dict] | None = None) -> str:
     """Второй взгляд на СПОРНЫЕ аспекты монолога.
 
     Почему это отдельный запрос, а не «подумай ещё раз» в первом. Первый проход
@@ -165,8 +167,14 @@ def aspect_recheck_prompt(numbers: list[int], brief: str,
         "EGE oral exam, Task 4 (a voice message about two photos). A first examiner "
         "has already judged the work; only the aspects below are re-examined.\n\n"
         f"The student's task was:\n{brief}\n{facts}\n"
-        f"{_MONOLOGUE_RULES}\n\n"
+        f"{_NO_PHONETICS}\n\n{_MONOLOGUE_RULES}\n\n"
         f"{_RU}\n\n"
+        "Check each candidate error independently. Keep only a real grammar/vocabulary "
+        "or discourse error supported by the transcript. Stylistic alternatives, ASR "
+        "punctuation and valid spoken contractions are NOT errors. A corrected false "
+        "start is not a second error. Do not forgive genuine missing verbs, agreement "
+        "or wrong prepositions. Return one error_check per supplied id.\n"
+        f"Candidate errors: {json.dumps(errors or [], ensure_ascii=False)}\n\n"
         f"Aspects to re-examine:\n" + "\n".join(listed) + "\n\n"
         "Work from the transcript, not from the first examiner's opinion: FIND the "
         "student's own words for each aspect yourself and copy them out. If there "
@@ -177,7 +185,7 @@ def aspect_recheck_prompt(numbers: list[int], brief: str,
         "fit any activity («it's fun», «it's interesting», «the best way to rest»).\n"
         + strictness_block(persona) +
         "\nReturn ONLY this JSON:\n"
-        '{"aspects": [\n  ' + fields + "\n]}"
+        '{"aspects": [\n  ' + fields + '\n], "error_checks": [{"id": 0, "valid": true, "reason": "short rule-based explanation"}]}'
     )
 
 
@@ -231,6 +239,11 @@ _NO_PHONETICS = (
     "You receive an AUTOMATIC TRANSCRIPT of speech, not the audio. You therefore "
     "CANNOT hear pronunciation, word stress or intonation: never invent phonetic "
     "errors and never mention them. Judge only what the text actually shows. "
+    "Do not turn an ambiguous near-homophone spelling from ASR into a lexical "
+    "penalty when the intended object is unambiguous in the task context. This "
+    "does not excuse missing auxiliaries, agreement errors, unrelated vocabulary "
+    "or unanswered content. Preserve the original quote in feedback; do not "
+    "claim to have heard a corrected word. "
     "The official rule for doubtful cases applies: decide in the student's favour."
 )
 
@@ -530,6 +543,13 @@ _MONOLOGUE_RULES = (
     "«I prefer» is the wrong form). PARTIAL when the justification is missing, or the "
     "opinion is not explicitly the author's, or the verb form is wrong. MISSING when two "
     "of the three are absent. «I like it» is not a justification.\n\n"
+    "Interpret the checks literally. named_first/named_second means an advantage or "
+    "disadvantage is mentioned at all, even a generic one; specificity is judged "
+    "SEPARATELY. Do not mark a mentioned but generic benefit as absent. "
+    "A personal preference such as I prefer or I would choose explicitly marks the "
+    "opinion as the speaker's own. No fixed introductory formula is required. "
+    "Evaluate the entire reason, not just its final filler phrase. A reason can be "
+    "subjective; it must explain the choice rather than just repeat liking it.\n\n"
     "VOLUME. Count phrases as simple sentences, including those inside compound and "
     "complex ones. Do not count fillers and false starts.\n\n"
     "ORGANISATION. opening_with_address is true only if the message starts by addressing "
@@ -609,7 +629,7 @@ def monologue_prompt(brief: str, photo_facts: list[str] | None = None) -> str:
         "and giving the author's opinion on the topic.\n\n"
         f"{_NO_PHONETICS}\n\n"
         f"The student's task was:\n{brief}\n{facts}\n"
-        f"{_MONOLOGUE_RULES}\n\n"
+        f"{_NO_PHONETICS}\n\n{_MONOLOGUE_RULES}\n\n"
         f"{_RU}\n\n"
         "Do NOT give any marks, scores or verdicts — they are calculated from your "
         "answers. Your job is to answer plain yes/no questions about each aspect, and "
@@ -666,7 +686,8 @@ def monologue_prompt(brief: str, photo_facts: list[str] | None = None) -> str:
         "emotions and unforgettable experience», «people can be tired of this», «you're "
         "enjoying the game». This filler is the commonest reason examiners mark aspects "
         "2 and 3 down, so judge it strictly;\n"
-        "- opinion_explicit — the opinion is marked as the author's own;\n"
+        "- opinion_explicit — I prefer / I would choose already marks a personal opinion; "
+        "As for me / In my opinion is NOT mandatory;\n"
         "- justified — a reason is given. FALSE for «I like it», «it's fun», «it's "
         "really my cup of tea»: they repeat the choice instead of explaining it;\n"
         "- plan_verb_form / student_verb_form — quote both literally: the form the last "

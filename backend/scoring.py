@@ -198,15 +198,24 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
                     "explanation": str(it.get("reason") or "").strip(),
                 })
             criteria.append(criterion)
-        errors += _errors_from(obs.get("errors"), limit=8 - len(errors))
+        rejected_text = " ".join(str(c.get("quote") or "") for c in criteria if c["score"] == 0)
+        extra_errors = _errors_from(obs.get("errors"), limit=8 - len(errors))
+        # Rechecking can reverse the initial verdict. Its old accusations must
+        # not remain attached to answers the final pass accepted.
+        errors += [e for e in extra_errors if rejected_text and e.get("quote")
+                   and not ege_scoring.quote_is_fabricated(e["quote"], rejected_text)]
         # Итог — по ОКОНЧАТЕЛЬНЫМ вердиктам, а не по ответу модели: код выше
         # отклоняет и спасает пункты (question_rejected, rejection_refuted,
         # answer_too_short), и до 23.09.2026 эти правки в сумму не попадали —
         # ученик видел «вопрос 3 не засчитан» и балл 4 из 4 на одном экране
         # (поймано живым прогоном №40 в мини-приложении).
         score = sum(c["score"] for c in criteria) if criteria else res["score"]
+        summary = f"Засчитано {score} из {res['max']} " + ("вопросов." if is_dialogue else "ответов.")
         return {"summary": summary, "score": score, "max": res["max"],
-                "errors": errors, "criteria": criteria}
+                "errors": errors, "criteria": criteria,
+                "accuracy_note": "Ориентировочная оценка по распознанному тексту. "
+                "Сверь цитаты со своей записью: ошибка распознавания может изменить балл. "
+                "Это тренировочный ориентир, а не оценка эксперта ФИПИ."}
 
     # monologue: модель отвечает признаками «да/нет», вердикты выводит шкала
     # Форма глагола мнения (аспект 4) — КОДОМ из самой речи (30.08.2026).
@@ -224,6 +233,7 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
         if isinstance(c, dict) and int(c.get("n") or 0) == 4:
             if _speech_form:
                 c["student_verb_form"] = _speech_form
+                c["opinion_explicit"] = True
             if _plan_form:
                 c["plan_verb_form"] = _plan_form
     aspects = ege_scoring.aspect_verdicts(raw_aspects)
@@ -282,7 +292,10 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
     errors += [{"cat": "logic", "quote": str(e.get("quote") or "").strip() or "логика",
                 "correction": "", "explanation": str(e.get("explanation") or "").strip()}
                for e in logic[:3]]
-    return {"summary": summary, "score": res["score"], "max": res["max"],
+    return {"summary": f"Содержание: {res['criteria'][0]['score']}/4; "
+                       f"организация: {res['criteria'][1]['score']}/3; "
+                       f"язык: {res['criteria'][2]['score']}/3. Подробности — в критериях.",
+            "score": res["score"], "max": res["max"],
             "errors": errors, "criteria": res["criteria"],
             # ЧЕСТНАЯ ОГОВОРКА. Замер на восьми работах ФИПИ (30.08.2026): в
             # пределах балла от эксперта мы попадаем в 3-5 случаях из 8, и

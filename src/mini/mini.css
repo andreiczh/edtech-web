@@ -18,12 +18,8 @@
 
 /* ------------------------------------------------------------ каркас */
 .mini {
-  /* Кадр макета 402×874 вписывается в окно ЦЕЛИКОМ — и по ширине, и по
-     высоте. Раньше масштаб считался только по ширине, и на телефоне с
-     панелями браузера или шапкой MAX экран задания был выше окна и
-     скроллился (правка тестировщика 23.09.2026). Цена — на коротком окне
-     всё чуть мельче; svh — видимая высота с панелями, см. @supports ниже. */
-  --u: min(calc(min(100vw, 430px) / 402), calc(100vh / 874));
+  /* Width-based scale; short viewports scroll instead of shrinking type. */
+  --u: calc(min(100vw, 430px) / 402);
   --w: calc(402 * var(--u));
   /* низ нижней панели: 24.3 пункта в макете, но не меньше системного отступа */
   --sb: max(calc(24.3 * var(--u)), env(safe-area-inset-bottom, 0px));
@@ -42,7 +38,7 @@
 .mini--home { background: #fff; }
 .mini--stats, .mini--settings { background: #faf9f5; }
 @supports (height: 100svh) {
-  .mini { --u: min(calc(min(100vw, 430px) / 402), calc(100svh / 874)); }
+  .mini { --u: calc(min(100vw, 430px) / 402); }
 }
 .mini__frame {
   position: absolute;
@@ -1393,3 +1389,85 @@
   }
   .h-sheet { border-radius: 0; }
 }
+
+/* Responsive audit: readable tasks and reachable controls on short screens. */
+.h-nick { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini__scroll { scroll-padding-block: 64px 110px; padding-bottom: 16px; }
+.h-page { min-height: max(100%, calc(900 * var(--u))); }
+.m-instr, .d-instr, .d-points, .mo-instr, .iv-card--text { font-size: max(14px, calc(13 * var(--u))); line-height: 1.45; text-align: left; }
+.m-read { font-size: max(16px, calc(15.4 * var(--u))); line-height: 1.45; text-align: left; }
+.m-note, .d-foot { font-size: max(12px, calc(11 * var(--u))); line-height: 1.4; }
+.q-v, .x-text, .x-err__quote, .x-err__fix, .mr-text { font-size: max(14px, calc(13 * var(--u))); line-height: 1.45; }
+.q-k, .q-why, .x-title, .x-why, .x-row { font-size: max(12px, calc(11 * var(--u))); line-height: 1.4; }
+.q-v--better, .x-err__fix, .x-v--ok { color: #34796a; }
+.m-round, .m-pill, .m-bar { min-height: 44px; }
+.m-round { min-width: 44px; font-size: max(10px, calc(9 * var(--u))); }
+.m-back, .r-star, .m-flag, .x-word__say { min-height: 44px; min-width: 44px; }
+.h-tabs { display: flex; align-items: center; justify-content: space-around; min-height: 56px; }
+.h-tab { position: static; margin: 0; min-height: 44px; min-width: 44px; }
+.m-retry { margin-top: 12px; padding: 12px 18px; min-height: 44px; border-radius: 16px; background: var(--ink); color: white; font-size: 14px; }
+.r-summary { min-height: 160px; height: auto; padding-bottom: 18px; }
+.q-fail { font-size: 13px; line-height: 1.4; }
+.cd-word, .cd-word--iv, .cd-word--mo { top: 35%; }
+.cd-digit { top: 52%; }
+/* Conversation uses available height; transcript scrolls inside its card. */
+.mini--talk .t-orbs { top: 18%; }
+.mini--talk .t-card { top: 31%; bottom: 210px; max-height: none; min-height: 80px; }
+.mini--talk .t-mic { top: auto; bottom: 110px; }
+@media(max-height:600px) {
+ .mini--talk .t-ava { display: none; }
+ .mini--talk .t-orbs { top: 20px; height: 42px; }
+ .mini--talk .t-orb { width: 42px; height: 42px; }
+ .mini--talk .t-card { top: 78px; bottom: 165px; min-height: 60px; padding: 12px 18px; }
+ .mini--talk .t-mic { bottom: 90px; width: 60px; height: 60px; left: calc(50% - 30px); }
+ .mini--talk .t-mic svg { width: 25px; height: 34px; }
+ .m-label { margin-top: 58px; }
+}
+/* Home cards grow with their copy; they are no longer absolute text canvases. */
+.h-page { display: grid; grid-template-columns: 1fr 1fr; align-content: start; gap: 16px 10px; padding: max(145px, calc(165 * var(--u))) 16px 120px; min-height: 100%; }
+.h-card, .h-small { position: relative; inset: auto; width: auto; height: auto; margin: 0; }
+.h-card { grid-column: 1/-1; padding: 20px 16px; min-height: 165px; }
+.h-card--1 { min-height: 220px; }
+.h-card .h-kicker, .h-card .h-title, .h-title1, .h-card .h-sub, .h-btn1, .h-small .h-title, .h-small .h-sub { position: relative; inset: auto; display: block; white-space: normal; width: 70%; }
+.h-kicker { font-size: 10px; line-height: 1.4; margin-bottom: 10px; }
+.h-card .h-title, .h-title1 { font-size: 21px; line-height: 1.12; margin-bottom: 12px; }
+.h-card .h-sub { font-size: 13px; line-height: 1.45; margin-bottom: 12px; }
+.h-sub br { display: none; }
+.h-btn1 { display: inline-flex; align-items: center; justify-content: center; padding: 12px; width: auto; min-height: 44px; font-size: 12px; }
+.h-small { padding: 18px 12px; min-height: 130px; }
+.h-small .h-title { width: 100%; font-size: 16px; line-height: 1.3; margin-bottom: 12px; overflow-wrap: anywhere; }
+.h-small .h-sub { width: 100%; font-size: 12px; line-height: 1.45; }
+.h-card[disabled], .h-small[disabled] { opacity: .72; }
+/* Result summaries keep their copy and optional player in normal flow. */
+.r-summary, .q-summary { height: auto; min-height: 128px; padding: 18px 16px 18px 84px; font-size: 13px; line-height: 1.45; }
+.r-ring, .q-ring { left: 12px; top: 28px; width: 58px; height: 58px; }
+.r-score, .q-score { left: 12px; top: 42px; width: 58px; font-size: 25px; }
+.r-of, .q-of { left: 10px; top: 91px; width: 62px; color: #666071; font-size: 10px; }
+.q-list, .mr-crit, .q-fail { position: static; margin: 0; padding: 0; font-size: 12px; line-height: 1.6; white-space: normal; }
+.q-list .ok, .mr-crit span { color: #34796a; }
+.q-list .no { color: #ae4b36; }
+.mr-crit b { width: 95px; }
+.r-summary .r-player, .q-summary .r-player { position: relative; inset: auto; margin-top: 14px; width: 100%; height: 44px; }
+.r-play { width: 44px; height: 44px; top: 0; left: 0; }
+.r-wave { left: 50px; top: 13px; width: 55px; }
+.r-time { left: auto; right: 7px; font-size: 10px; }
+.r-legend { height: auto; flex-wrap: wrap; white-space: normal; font-size: 11px; line-height: 1.4; padding: 0 16px; }
+.r-p, .r-p--cur { font-size: 15px; line-height: 1.45; color: #534e89; text-align: left; }
+.r-p:not(.r-p--cur) { opacity: .8; }
+.r-next-hit { min-height: 44px; }
+.r-next { font-size: max(11px, calc(10.5 * var(--u))); }
+.m-flag { font-size: 12px; }
+.mr-head { height: auto; min-height: 20px; font-size: 12px; line-height: 1.45; }
+.mr-comment { font-size: 14px; line-height: 1.45; }
+.mr-comment--toggle { min-height: 44px; }
+.m-bar { background: rgba(248,247,242,.96); border-radius: 24px; }
+/* Essential account copy must remain legible at 320 CSS pixels. */
+.pf-row, .pf-consent__txt b, .pf-logout, .pf-sub, .pf-consent__txt, .st-choice__d, .s-mist__txt span, .s-sub--flow { font-size: max(13px, calc(12 * var(--u))); line-height: 1.4; }
+.st-row__l { font-size: max(13px, calc(14.5 * var(--u))); }
+.st-row__val { font-size: max(12px, calc(12.5 * var(--u))); }
+.pf-logout, .st-choice__b, .s-cal__btn { min-height: 44px; }
+.s-cal__btn { min-width: 44px; }
+.mini-auth .auth2-sub, .mini-auth .auth2-consent, .mini-auth .auth2-foot, .mini-auth .auth2-err { font-size: 14px; line-height: 1.45; }
+.mini-auth .auth2-field { font-size: 16px; min-height: 48px; }
+.mini-auth .auth2-btn, .mini-auth .auth2-seg button, .mini-auth .auth2-link { min-height: 44px; font-size: 14px; }
+.mini-auth .auth2-label { font-size: 12px; }
