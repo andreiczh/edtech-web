@@ -69,7 +69,7 @@ class CalibrationTests(unittest.TestCase):
         x=np.zeros(40*16000,dtype=np.float32)
         x[16000:32000]=.2; x[30*16000:31*16000]=-.3
         spans=[{"start":8000,"end":40000},{"start":29*16000,"end":32*16000}]
-        with patch("faster_whisper.vad.get_speech_timestamps",return_value=spans):
+        with patch.object(grading_audio, "speech_spans",return_value=spans):
             out=grading_audio.prepare(wav(x),"a.wav")
         y=audio_check.to_pcm(out,".wav")
         self.assertAlmostEqual(len(y)/16000, 5.5)
@@ -80,6 +80,17 @@ class CalibrationTests(unittest.TestCase):
         data=wav(np.zeros(35*16000,dtype=np.float32))
         with patch("faster_whisper.vad.get_speech_timestamps",return_value=[]):
             self.assertEqual(grading_audio.prepare(data,"a.wav"),data)
+
+    def test_vad_working_set_is_bounded_and_overlap_is_not_duplicated(self):
+        x = np.full(360 * 16000, .1, dtype=np.float32)
+        def entire_window(part, options):
+            self.assertLessEqual(len(part), 20 * 16000)
+            self.assertEqual(options.threshold, .05)
+            part[-64:] = 0  # upstream implementation mutates its input
+            return [{"start": 0, "end": len(part)}]
+        with patch("faster_whisper.vad.get_speech_timestamps", side_effect=entire_window):
+            self.assertEqual(grading_audio.speech_spans(x), [{"start":0,"end":len(x)}])
+        self.assertTrue(np.all(x == np.float32(.1)))
 
     def test_transient_capacity_retries_same_recognizer(self):
         import main
