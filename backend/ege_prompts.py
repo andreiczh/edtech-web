@@ -631,7 +631,7 @@ def monologue_prompt(brief: str, photo_facts: list[str] | None = None) -> str:
         "and giving the author's opinion on the topic.\n\n"
         f"{_NO_PHONETICS}\n\n"
         f"The student's task was:\n{brief}\n{facts}\n"
-        f"{_NO_PHONETICS}\n\n{_MONOLOGUE_RULES}\n\n"
+        f"{_MONOLOGUE_RULES}\n\n"
         f"{_RU}\n\n"
         "Do NOT give any marks, scores or verdicts — they are calculated from your "
         "answers. Your job is to answer plain yes/no questions about each aspect, and "

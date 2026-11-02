@@ -271,6 +271,9 @@ TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AvaMultilingualNeural")
 # OpenRouter за Cloudflare-блоком РФ — 403.) Свапается через .env, см. .env.example.
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.mistral.ai/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "mistral-small-latest")
+# Exam grading uses a separate pinned model; conversation keeps its own model.
+GRADE_MODEL = os.environ.get("GRADE_MODEL", "ministral-14b-2512"
+    if "api.mistral.ai" in LLM_BASE_URL else LLM_MODEL).strip()
 # Запасная модель на случай, когда у ключа НЕТ квоты на основную: 22.09.2026
 # Mistral стал отвечать на mistral-small/medium «429 Rate limit exceeded» с
 # заголовком x-ratelimit-limit-req-minute: 0 (не всплеск, а нулевой лимит
@@ -3424,7 +3427,7 @@ async def health(response: Response):
         "ok": ready,
         "build": os.environ.get("RENDER_GIT_COMMIT", "local"),
         "process_uptime_sec": round(time.monotonic() - _PROCESS_STARTED),
-        "grading": {"monologue_recheck": MONOLOGUE_RECHECK, "consensus": MONO_CONSENSUS,
+        "grading": {"model": GRADE_MODEL, "monologue_recheck": MONOLOGUE_RECHECK, "consensus": MONO_CONSENSUS,
                     "audio_worker": "isolated", "version": "2026-11-03", **_GRADING_DIAGNOSTICS},
         "readiness": availability,
         "stt": (
@@ -3633,7 +3636,7 @@ async def _grading_observations(client, prompt: str, transcript: str, kind: str)
     async def one(seed):
         completion = await asyncio.to_thread(
             lambda: client.chat.completions.create(
-                model=LLM_MODEL,
+                model=GRADE_MODEL,
                 messages=[{"role": "system", "content": prompt},
                           {"role": "user", "content": transcript}],
                 response_format={"type": "json_object"}, temperature=0.0,
@@ -3988,7 +3991,7 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
         for attempt in range(2):
             completion = await asyncio.to_thread(
                 lambda: client.chat.completions.create(
-                    model=LLM_MODEL, messages=messages,
+                    model=GRADE_MODEL, messages=messages,
                     response_format={"type": "json_object"}, temperature=0.0,
                     max_tokens=1400 if kind == "interview" else 800))
             _track_llm(completion)
@@ -4074,7 +4077,7 @@ async def _recheck_aspects(kind: str, observations: dict, ctx: dict,
     try:
         completion = await asyncio.to_thread(
             lambda: client.chat.completions.create(
-                model=LLM_MODEL,
+                model=GRADE_MODEL,
                 messages=[{"role": "system", "content": prompt},
                           {"role": "user", "content": transcript}],
                 response_format={"type": "json_object"},
@@ -4494,7 +4497,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
             try:
                 retry = await asyncio.to_thread(
                     lambda: client.chat.completions.create(
-                        model=LLM_MODEL,
+                        model=GRADE_MODEL,
                         messages=[
                             {"role": "system", "content": prompt},
                             {"role": "user", "content": transcript_text},

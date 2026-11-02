@@ -82,6 +82,15 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual(client.chat.completions.create.call_count,1)
         self.assertGreaterEqual(client.chat.completions.create.call_args.kwargs["max_tokens"],800)
 
+    def test_grading_uses_its_own_pinned_model(self):
+        import main
+        from types import SimpleNamespace
+        client=unittest.mock.MagicMock()
+        client.chat.completions.create.return_value=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"answers":[]}'))])
+        with patch.object(main,"GRADE_MODEL","fixed-exam-model"), patch.object(main,"LLM_MODEL","fast-chat-model"), patch.object(main,"_track_llm"):
+            asyncio.run(main._grading_observations(client,"prompt","spoken answer","interview"))
+        self.assertEqual(client.chat.completions.create.call_args.kwargs["model"],"fixed-exam-model")
+
     def test_incomplete_recheck_retries_complete_schema(self):
         import main, json
         from types import SimpleNamespace
