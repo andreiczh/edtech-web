@@ -86,7 +86,7 @@ export function MiniHome({
         <span className="h-sub h-sub--1">
           Все 4 задания ЕГЭ с подсказками и
           <br />
-          мгновенной обратной связью
+          подробной обратной связью
         </span>
         <span className="h-btn1">Начать практику</span>
       </button>
