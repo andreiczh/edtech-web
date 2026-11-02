@@ -82,6 +82,49 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual(client.chat.completions.create.call_count,1)
         self.assertGreaterEqual(client.chat.completions.create.call_args.kwargs["max_tokens"],800)
 
+    def test_grading_uses_its_own_pinned_model(self):
+        import main
+        from types import SimpleNamespace
+        client=unittest.mock.MagicMock()
+        client.chat.completions.create.return_value=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"answers":[]}'))])
+        with patch.object(main,"GRADE_MODEL","fixed-exam-model"), patch.object(main,"LLM_MODEL","fast-chat-model"), patch.object(main,"_track_llm"):
+            asyncio.run(main._grading_observations(client,"prompt","spoken answer","interview"))
+        self.assertEqual(client.chat.completions.create.call_args.kwargs["model"],"fixed-exam-model")
+
+    def test_incomplete_recheck_retries_complete_schema(self):
+        import main, json
+        from types import SimpleNamespace
+        obs={"answers":[{"n":n,"accepted":True,"heard":"I live here. It is nice.","reason":"correct"} for n in range(1,6)]}
+        good={"items":[{"n":n,"accepted":True,"reason":"correct"} for n in range(1,6)]}
+        def response(body):
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(body)))])
+        client=unittest.mock.MagicMock()
+        client.chat.completions.create.side_effect=[response({"items":good["items"][:2]}),response(good)]
+        with patch.object(main,"_track_llm"):
+            result=asyncio.run(main._recheck_disputed("interview",obs,{"questions":["Where? Why?"]*5},"I live here. It is nice.","",client))
+        self.assertEqual(len(result["answers"]),5)
+        self.assertEqual(client.chat.completions.create.call_count,2)
+
+    def test_persistent_incomplete_recheck_never_assigns_zero(self):
+        import main
+        from types import SimpleNamespace
+        client=unittest.mock.MagicMock()
+        client.chat.completions.create.return_value=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"items":[]}'))])
+        obs={"answers":[{"n":1,"accepted":True,"heard":"I live here. It is nice.","reason":"correct"}]}
+        with patch.object(main,"_track_llm"), patch.object(main,"note_failure"):
+            with self.assertRaises(main.HTTPException):
+                asyncio.run(main._recheck_disputed("interview",obs,{"questions":["Where? Why?"]},"I live here. It is nice.","",client))
+        self.assertEqual(client.chat.completions.create.call_count,2)
+        self.assertTrue(obs["answers"][0]["accepted"])
+
+    def test_aspect_explanation_uses_final_observations(self):
+        c={"n":2,"named_first":True,"named_second":True,"specific_first":True,
+           "specific_second":False,"comment":"No second advantage at all"}
+        text=sc.aspect_comment(c)
+        self.assertIn("слишком общая",text)
+        self.assertNotIn("No second",text)
+        self.assertNotIn("первого",text)
+
     def test_personal_preference_needs_no_fixed_intro(self):
         obs={"aspects":[{"n":4,"opinion_explicit":False,"choice_stated":True,"justified":True}]}
         result=scoring._score_feedback("monologue",obs,{"transcript":"I prefer cycling because it keeps me healthy.","brief":"which activity you prefer"})

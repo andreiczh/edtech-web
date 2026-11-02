@@ -1457,7 +1457,9 @@
 .r-next-hit { min-height: 44px; }
 .r-next { font-size: max(11px, calc(10.5 * var(--u))); }
 .m-flag { font-size: 12px; }
-.mr-head { height: auto; min-height: 20px; font-size: 12px; line-height: 1.45; }
+.mr-head { height: auto; min-height: 20px; padding-left: 22px; font-size: 12px; line-height: 1.45; white-space: normal; overflow: visible; }
+.mr-badge { width: 16px; height: 16px; font-size: 10px; line-height: 16px; }
+.mr-val { display: block; margin-left: 0; color: #47786e; }
 .mr-comment { font-size: 14px; line-height: 1.45; }
 .mr-comment--toggle { min-height: 44px; }
 .m-bar { background: rgba(248,247,242,.96); border-radius: 24px; }

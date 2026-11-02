@@ -58,9 +58,10 @@ def main():
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--kinds", nargs="+", default=["reading", "dialogue", "interview", "monologue"])
     p.add_argument("--runs", type=int, default=1)
+    p.add_argument("--works", nargs="+", help="Optional official work IDs to replay")
     p.add_argument("--resume", action="store_true")
     args = p.parse_args()
-    selected = [(kind, row, payload) for kind, row, payload in cases() if kind in args.kinds]
+    selected = [(kind, row, payload) for kind, row, payload in cases() if kind in args.kinds and (not args.works or row["work"] in args.works)]
     missing = [row["audio"] for _, row, _ in selected if not Path(fipi_audio.path(row["audio"])).is_file()]
     if missing:
         p.error("Missing official recordings: " + ", ".join(missing))
@@ -70,7 +71,7 @@ def main():
                       proxy=urllib.request.getproxies().get("https")) as c:
         health = c.get("/health"); health.raise_for_status()
         report["environment"] = {k: v for k, v in health.json().items()
-                                 if k in ("build", "llm", "stt_task", "stt", "llm_fallback")}
+                                 if k in ("build", "llm_model", "stt_task", "stt", "llm_fallback", "grading", "process_uptime_sec")}
         login = c.post("/auth/login", json={k: secret[k] for k in ("nickname", "password")})
         login.raise_for_status()
         c.headers["Authorization"] = "Bearer " + login.json()["session_token"]
@@ -110,6 +111,12 @@ def main():
                     except Exception as e:
                         item["error"] = type(e).__name__
                     item["seconds"] = round(time.monotonic() - t, 2)
+                    try:
+                        status = c.get("/health").json()
+                        item["build"] = status.get("build")
+                        item["process_uptime_sec"] = status.get("process_uptime_sec")
+                    except Exception:
+                        item["health_unavailable"] = True
                     report["rows"].append(item)
                     report["summary"] = summarize(report["rows"])
                     args.output.parent.mkdir(parents=True, exist_ok=True)

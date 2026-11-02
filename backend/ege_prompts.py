@@ -98,6 +98,8 @@ def recheck_prompt(kind: str, items: list[dict], task_text: str,
         f"Full transcript of the student's recording:\n{transcript}\n\n"
         f"{_NO_PHONETICS}\n\nTHE OFFICIAL RULES:\n{rules}\n\n"
         f"Disputed items:\n{listed}\n\n"
+        f"Return exactly {len(items)} items, using the ORIGINAL numbers "
+        f"{[it['n'] for it in items]}. No items may be omitted. "
         "Re-judge ONLY these items, carefully and by the rules above. You are the "
         "final word: do not split the difference, decide.\n"
         + strictness_block(persona) +
@@ -629,7 +631,7 @@ def monologue_prompt(brief: str, photo_facts: list[str] | None = None) -> str:
         "and giving the author's opinion on the topic.\n\n"
         f"{_NO_PHONETICS}\n\n"
         f"The student's task was:\n{brief}\n{facts}\n"
-        f"{_NO_PHONETICS}\n\n{_MONOLOGUE_RULES}\n\n"
+        f"{_MONOLOGUE_RULES}\n\n"
         f"{_RU}\n\n"
         "Do NOT give any marks, scores or verdicts — they are calculated from your "
         "answers. Your job is to answer plain yes/no questions about each aspect, and "

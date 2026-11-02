@@ -31,6 +31,7 @@ import tempfile
 import threading
 import time
 _PROCESS_STARTED = time.monotonic()
+_GRADING_DIAGNOSTICS = {"incomplete_rechecks": 0, "last_recheck_error": ""}
 from collections import deque
 from datetime import date, datetime, timedelta, timezone
 
@@ -270,6 +271,9 @@ TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AvaMultilingualNeural")
 # OpenRouter за Cloudflare-блоком РФ — 403.) Свапается через .env, см. .env.example.
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.mistral.ai/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "mistral-small-latest")
+# Exam grading uses a separate pinned model; conversation keeps its own model.
+GRADE_MODEL = os.environ.get("GRADE_MODEL", "ministral-14b-2512"
+    if "api.mistral.ai" in LLM_BASE_URL else LLM_MODEL).strip()
 # Запасная модель на случай, когда у ключа НЕТ квоты на основную: 22.09.2026
 # Mistral стал отвечать на mistral-small/medium «429 Rate limit exceeded» с
 # заголовком x-ratelimit-limit-req-minute: 0 (не всплеск, а нулевой лимит
@@ -3423,8 +3427,8 @@ async def health(response: Response):
         "ok": ready,
         "build": os.environ.get("RENDER_GIT_COMMIT", "local"),
         "process_uptime_sec": round(time.monotonic() - _PROCESS_STARTED),
-        "grading": {"monologue_recheck": MONOLOGUE_RECHECK, "consensus": MONO_CONSENSUS,
-                    "audio_worker": "isolated", "version": "2026-11-03"},
+        "grading": {"model": GRADE_MODEL, "monologue_recheck": MONOLOGUE_RECHECK, "consensus": MONO_CONSENSUS,
+                    "audio_worker": "isolated", "version": "2026-11-03", **_GRADING_DIAGNOSTICS},
         "readiness": availability,
         "stt": (
             f"mistral:{STT_REMOTE_MODEL}"
@@ -3632,7 +3636,7 @@ async def _grading_observations(client, prompt: str, transcript: str, kind: str)
     async def one(seed):
         completion = await asyncio.to_thread(
             lambda: client.chat.completions.create(
-                model=LLM_MODEL,
+                model=GRADE_MODEL,
                 messages=[{"role": "system", "content": prompt},
                           {"role": "user", "content": transcript}],
                 response_format={"type": "json_object"}, temperature=0.0,
@@ -3981,24 +3985,37 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
 
     task_text = "\n".join(f"{i + 1}. {p}" for i, p in enumerate(points))
     prompt = ege_prompts.recheck_prompt(kind, disputed, task_text, transcript, persona)
+    expected_numbers = {d["n"] for d in disputed}
+    messages = [{"role": "system", "content": prompt}]
     try:
-        completion = await asyncio.to_thread(
-            lambda: client.chat.completions.create(
-                model=LLM_MODEL,
-                messages=[{"role": "system", "content": prompt}],
-                response_format={"type": "json_object"},
-                temperature=0.0,  # см. объяснение у первого прохода
-                max_tokens=800 if kind == "interview" else 400,
-            )
-        )
-        _track_llm(completion)
-        verdicts = (_loads_forgiving((completion.choices[0].message.content or "").strip())
-                    or {}).get("items") or []
-        if (not isinstance(verdicts, list)
-                or {str(v.get("n")) for v in verdicts if isinstance(v, dict) and isinstance(v.get("accepted"), bool)}
-                != {str(d["n"]) for d in disputed}):
-            raise ValueError("incomplete recheck")
+        for attempt in range(2):
+            completion = await asyncio.to_thread(
+                lambda: client.chat.completions.create(
+                    model=GRADE_MODEL, messages=messages,
+                    response_format={"type": "json_object"}, temperature=0.0,
+                    max_tokens=1400 if kind == "interview" else 800))
+            _track_llm(completion)
+            raw = (completion.choices[0].message.content or "").strip()
+            try:
+                verdicts = json.loads(raw).get("items")
+                if (not isinstance(verdicts, list) or len(verdicts) != len(disputed)
+                        or any(not isinstance(v, dict) or type(v.get("n")) is not int
+                               or type(v.get("accepted")) is not bool for v in verdicts)
+                        or {v["n"] for v in verdicts} != expected_numbers):
+                    raise ValueError("incomplete recheck")
+                break
+            except (ValueError, AttributeError):
+                _GRADING_DIAGNOSTICS["incomplete_rechecks"] += 1
+                if attempt:
+                    raise
+                messages = [*messages, {"role": "user", "content":
+                    "Return the complete result, exactly one item for EACH number: "
+                    + ", ".join(map(str, sorted(expected_numbers)))
+                    + '. Use only {"items":[{"n":1,"accepted":true,"reason":"brief reason"}, ...]}. '
+                    + "Do not return answers/questions as a key. Do not skip accepted or rejected items."}]
     except Exception as e:  # noqa: BLE001
+        _GRADING_DIAGNOSTICS["last_recheck_error"] = type(e).__name__
+        note_failure("grading_recheck", f"{kind}:{type(e).__name__}")
         raise HTTPException(502, "Повторная проверка не завершена — балл не выставлен.") from e
 
     flips = 0
@@ -4060,7 +4077,7 @@ async def _recheck_aspects(kind: str, observations: dict, ctx: dict,
     try:
         completion = await asyncio.to_thread(
             lambda: client.chat.completions.create(
-                model=LLM_MODEL,
+                model=GRADE_MODEL,
                 messages=[{"role": "system", "content": prompt},
                           {"role": "user", "content": transcript}],
                 response_format={"type": "json_object"},
@@ -4480,7 +4497,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
             try:
                 retry = await asyncio.to_thread(
                     lambda: client.chat.completions.create(
-                        model=LLM_MODEL,
+                        model=GRADE_MODEL,
                         messages=[
                             {"role": "system", "content": prompt},
                             {"role": "user", "content": transcript_text},

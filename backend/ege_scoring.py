@@ -255,6 +255,37 @@ def aspect_verdicts(checks: list[dict]) -> list[dict]:
     return out
 
 
+def aspect_comment(check: dict) -> str:
+    """Explain final flags, not a stale narrative from a previous LLM pass."""
+    n = check.get("n")
+    missing = []
+    if n == 1:
+        for key, label in (("described_first", "описание первого фото"),
+                           ("described_second", "описание второго фото"),
+                           ("difference_stated", "различие"),
+                           ("difference_generalised", "обобщение различия по типам"),
+                           ("linked_to_topic", "связь с темой проекта")):
+            if not check.get(key): missing.append(label)
+        if check.get("factual_error"):
+            missing.append("точность описания фотографий")
+    elif n in (2, 3):
+        term = "преимущество" if n == 2 else "недостаток"
+        for side, label in (("first", "первого"), ("second", "второго")):
+            if not check.get("named_" + side):
+                missing.append(f"{term} {label} типа")
+            elif not check.get("specific_" + side):
+                missing.append(f"конкретное {term} {label} типа (формулировка слишком общая)")
+    elif n == 4:
+        for key, label in (("opinion_explicit", "личное мнение"),
+                           ("choice_stated", "названный выбор"), ("justified", "обоснование выбора")):
+            if not check.get(key): missing.append(label)
+        if not verb_form_matches(check.get("plan_verb_form", ""), check.get("student_verb_form", "")):
+            missing.append("глагольная форма мнения, соответствующая плану")
+    if check.get("unintelligible"):
+        missing.append("понятное выражение смысла")
+    return "В разборе не подтверждено: " + "; ".join(missing) + "." if missing else "Аспект раскрыт."
+
+
 # Проверяем и частичный, и полный отказ: уверенно ошибочный отказ тоже
 # меняет балл. В одном запросе помещаются все четыре аспекта.
 _MAX_RECHECK_ASPECTS = 4
