@@ -98,6 +98,8 @@ def recheck_prompt(kind: str, items: list[dict], task_text: str,
         f"Full transcript of the student's recording:\n{transcript}\n\n"
         f"{_NO_PHONETICS}\n\nTHE OFFICIAL RULES:\n{rules}\n\n"
         f"Disputed items:\n{listed}\n\n"
+        f"Return exactly {len(items)} items, using the ORIGINAL numbers "
+        f"{[it['n'] for it in items]}. No items may be omitted. "
         "Re-judge ONLY these items, carefully and by the rules above. You are the "
         "final word: do not split the difference, decide.\n"
         + strictness_block(persona) +

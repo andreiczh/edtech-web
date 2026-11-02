@@ -31,6 +31,7 @@ import tempfile
 import threading
 import time
 _PROCESS_STARTED = time.monotonic()
+_GRADING_DIAGNOSTICS = {"incomplete_rechecks": 0, "last_recheck_error": ""}
 from collections import deque
 from datetime import date, datetime, timedelta, timezone
 
@@ -3424,7 +3425,7 @@ async def health(response: Response):
         "build": os.environ.get("RENDER_GIT_COMMIT", "local"),
         "process_uptime_sec": round(time.monotonic() - _PROCESS_STARTED),
         "grading": {"monologue_recheck": MONOLOGUE_RECHECK, "consensus": MONO_CONSENSUS,
-                    "audio_worker": "isolated", "version": "2026-11-03"},
+                    "audio_worker": "isolated", "version": "2026-11-03", **_GRADING_DIAGNOSTICS},
         "readiness": availability,
         "stt": (
             f"mistral:{STT_REMOTE_MODEL}"
@@ -3981,24 +3982,37 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
 
     task_text = "\n".join(f"{i + 1}. {p}" for i, p in enumerate(points))
     prompt = ege_prompts.recheck_prompt(kind, disputed, task_text, transcript, persona)
+    expected_numbers = {d["n"] for d in disputed}
+    messages = [{"role": "system", "content": prompt}]
     try:
-        completion = await asyncio.to_thread(
-            lambda: client.chat.completions.create(
-                model=LLM_MODEL,
-                messages=[{"role": "system", "content": prompt}],
-                response_format={"type": "json_object"},
-                temperature=0.0,  # см. объяснение у первого прохода
-                max_tokens=800 if kind == "interview" else 400,
-            )
-        )
-        _track_llm(completion)
-        verdicts = (_loads_forgiving((completion.choices[0].message.content or "").strip())
-                    or {}).get("items") or []
-        if (not isinstance(verdicts, list)
-                or {str(v.get("n")) for v in verdicts if isinstance(v, dict) and isinstance(v.get("accepted"), bool)}
-                != {str(d["n"]) for d in disputed}):
-            raise ValueError("incomplete recheck")
+        for attempt in range(2):
+            completion = await asyncio.to_thread(
+                lambda: client.chat.completions.create(
+                    model=LLM_MODEL, messages=messages,
+                    response_format={"type": "json_object"}, temperature=0.0,
+                    max_tokens=1400 if kind == "interview" else 800))
+            _track_llm(completion)
+            raw = (completion.choices[0].message.content or "").strip()
+            try:
+                verdicts = json.loads(raw).get("items")
+                if (not isinstance(verdicts, list) or len(verdicts) != len(disputed)
+                        or any(not isinstance(v, dict) or type(v.get("n")) is not int
+                               or type(v.get("accepted")) is not bool for v in verdicts)
+                        or {v["n"] for v in verdicts} != expected_numbers):
+                    raise ValueError("incomplete recheck")
+                break
+            except (ValueError, AttributeError):
+                _GRADING_DIAGNOSTICS["incomplete_rechecks"] += 1
+                if attempt:
+                    raise
+                messages = [*messages, {"role": "user", "content":
+                    "Return the complete result, exactly one item for EACH number: "
+                    + ", ".join(map(str, sorted(expected_numbers)))
+                    + '. Use only {"items":[{"n":1,"accepted":true,"reason":"brief reason"}, ...]}. '
+                    + "Do not return answers/questions as a key. Do not skip accepted or rejected items."}]
     except Exception as e:  # noqa: BLE001
+        _GRADING_DIAGNOSTICS["last_recheck_error"] = type(e).__name__
+        note_failure("grading_recheck", f"{kind}:{type(e).__name__}")
         raise HTTPException(502, "Повторная проверка не завершена — балл не выставлен.") from e
 
     flips = 0
