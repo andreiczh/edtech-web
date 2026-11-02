@@ -176,14 +176,13 @@
     }
    }
   },
-  "/progress": {
-   "get": {
-    "summary": "Progress",
-    "description": "Какие варианты этот ученик уже сдавал — чтобы выдача сессий вычёркивала\nпройденное на любом устройстве, а не только в этом браузере.",
-    "operationId": "progress_progress_get",
+  "/auth/logout": {
+   "post": {
+    "summary": "Auth Logout",
+    "operationId": "auth_logout_auth_logout_post",
     "parameters": [
      {
-      "name": "x-device",
+      "name": "authorization",
       "in": "header",
       "required": false,
       "schema": {
@@ -195,7 +194,68 @@
          "type": "null"
         }
        ],
-       "title": "X-Device"
+       "title": "Authorization"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/progress": {
+   "get": {
+    "summary": "Progress",
+    "description": "Какие варианты этот ученик уже сдавал — чтобы выдача сессий вычёркивала\nпройденное на любом устройстве, а не только в этом браузере.",
+    "operationId": "progress_progress_get",
+    "parameters": [
+     {
+      "name": "x-admin-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -228,22 +288,6 @@
     "operationId": "me_stats_me_stats_get",
     "parameters": [
      {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
-     {
       "name": "x-admin-key",
       "in": "header",
       "required": false,
@@ -257,6 +301,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -305,22 +365,6 @@
     "operationId": "me_settings_get_me_settings_get",
     "parameters": [
      {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
-     {
       "name": "x-admin-key",
       "in": "header",
       "required": false,
@@ -334,6 +378,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -363,22 +423,6 @@
     "operationId": "me_settings_post_me_settings_post",
     "parameters": [
      {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
-     {
       "name": "x-admin-key",
       "in": "header",
       "required": false,
@@ -392,6 +436,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -435,22 +495,6 @@
     "operationId": "me_favorites_get_me_favorites_get",
     "parameters": [
      {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
-     {
       "name": "x-admin-key",
       "in": "header",
       "required": false,
@@ -464,6 +508,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -494,22 +554,6 @@
     "operationId": "me_favorites_post_me_favorites_post",
     "parameters": [
      {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
-     {
       "name": "x-admin-key",
       "in": "header",
       "required": false,
@@ -523,6 +567,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -567,22 +627,6 @@
     "operationId": "me_analytics_me_analytics_get",
     "parameters": [
      {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
-     {
       "name": "x-admin-key",
       "in": "header",
       "required": false,
@@ -596,6 +640,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -628,22 +688,6 @@
     "operationId": "me_nickname_me_nickname_post",
     "parameters": [
      {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
-     {
       "name": "x-admin-key",
       "in": "header",
       "required": false,
@@ -657,6 +701,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -718,22 +778,6 @@
     "operationId": "task_dispute_task_dispute_post",
     "parameters": [
      {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
-     {
       "name": "x-admin-key",
       "in": "header",
       "required": false,
@@ -747,6 +791,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -932,22 +992,6 @@
       }
      },
      {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
-     {
       "name": "x-admin-key",
       "in": "header",
       "required": false,
@@ -961,6 +1005,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -2646,27 +2706,28 @@
     }
    }
   },
+  "/ready": {
+   "get": {
+    "summary": "Readiness",
+    "description": "Bounded DB probe; this is not a claim that a provider inference succeeded.",
+    "operationId": "readiness_ready_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
   "/talk": {
    "post": {
     "summary": "Talk",
     "operationId": "talk_talk_post",
     "parameters": [
-     {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
      {
       "name": "x-admin-key",
       "in": "header",
@@ -2681,6 +2742,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -2914,22 +2991,6 @@
     "operationId": "monologue_monologue_post",
     "parameters": [
      {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
-     {
       "name": "x-admin-key",
       "in": "header",
       "required": false,
@@ -2943,6 +3004,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -2981,25 +3058,9 @@
   "/task_feedback": {
    "post": {
     "summary": "Task Feedback",
-    "description": "Разбор ответа на задание устной части (39-42). Отдаётся потоком с\n«сердцебиением» — см. `_json_with_heartbeat`; путь обязан быть в\n`_STREAM_PATHS`, иначе gzip молча похоронит стриминг.\n\n`X-Device` — id аккаунта (или устройства): по нему и копится профиль\nошибок, и работает входной шлюз.",
+    "description": "Разбор ответа на задание устной части (39-42). Отдаётся потоком с\n«сердцебиением» — см. `_json_with_heartbeat`; путь обязан быть в\n`_STREAM_PATHS`, иначе gzip молча похоронит стриминг.\n\nAuthorization подтверждает сессию; профиль привязан к найденному аккаунту,\nошибок, и работает входной шлюз.",
     "operationId": "task_feedback_task_feedback_post",
     "parameters": [
-     {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
      {
       "name": "x-admin-key",
       "in": "header",
@@ -3014,6 +3075,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -3055,22 +3132,6 @@
     "operationId": "talk_stream_talk_stream_post",
     "parameters": [
      {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
-     {
       "name": "x-admin-key",
       "in": "header",
       "required": false,
@@ -3084,6 +3145,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -3126,22 +3203,6 @@
     "operationId": "speak_speak_post",
     "parameters": [
      {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
-     {
       "name": "x-admin-key",
       "in": "header",
       "required": false,
@@ -3155,6 +3216,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],
@@ -3199,22 +3276,6 @@
     "operationId": "talk_review_endpoint_talk_review_post",
     "parameters": [
      {
-      "name": "x-device",
-      "in": "header",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Device"
-      }
-     },
-     {
       "name": "x-admin-key",
       "in": "header",
       "required": false,
@@ -3228,6 +3289,22 @@
         }
        ],
        "title": "X-Admin-Key"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
       }
      }
     ],

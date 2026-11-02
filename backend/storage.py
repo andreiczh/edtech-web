@@ -24,9 +24,14 @@ from __future__ import annotations
 
 import os
 import re
+import json
+import hashlib
+import secrets
 import sqlite3
 import threading
+import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
@@ -55,7 +60,7 @@ def describe() -> str:
 def _connect():
     global _conn
     if _IS_PG:
-        _conn = psycopg.connect(DATABASE_URL, autocommit=True)
+        _conn = psycopg.connect(DATABASE_URL, autocommit=True, connect_timeout=5)
     else:
         # timeout=5: при конкуренции двух ПРОЦЕССОВ за файл SQLite ждёт снятия
         # блокировки, а не мгновенно падает «database is locked».
@@ -110,6 +115,24 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+@contextmanager
+def _transaction():
+    """Atomic writes on both databases; never retry an uncertain commit."""
+    with _lock:
+        try:
+            if _conn is None:
+                _connect()
+            if not _IS_PG:
+                _conn.execute("BEGIN IMMEDIATE")
+            with (_conn.transaction() if _IS_PG else _conn):
+                def execute(sql, params=()):
+                    return _conn.execute(sql.replace("?", "%s") if _IS_PG else sql, params)
+                yield execute
+        except Exception:
+            _drop_connection()
+            raise
+
+
 def ensure_schema() -> None:
     # Типы нарочно самые скучные (TEXT/INTEGER): одна и та же DDL проходит и в
     # SQLite, и в Postgres. Ключи строк — uuid-текст: автоинкремент у движков
@@ -135,6 +158,10 @@ def ensure_schema() -> None:
         "CREATE TABLE IF NOT EXISTS accounts ("
         " id TEXT PRIMARY KEY, nickname TEXT NOT NULL UNIQUE,"
         " pass_hash TEXT NOT NULL, exam TEXT NOT NULL, created_at TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS auth_sessions ("
+        " token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL,"
+        " auth_version INTEGER NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_auth_sessions_account ON auth_sessions(account_id)",
         # Банк заданий: payload — JSON с полями варианта (readText/images/steps/...).
         # active как INTEGER (0/1) — булев тип у движков разный, а этот одинаков.
         "CREATE TABLE IF NOT EXISTS tasks ("
@@ -281,6 +308,7 @@ def ensure_schema() -> None:
     # повторном импорте, и видимое происхождение — заимствованное задание
     # должно быть отличимо от своего.
     _add_columns("tasks", ("source TEXT", "source_id TEXT"))
+    _add_columns("accounts", ("auth_version INTEGER NOT NULL DEFAULT 0",))
     # Жалоба ученика: без этих полей у неё нет ни причины, ни обстановки —
     # см. backend/disputes.py. Порядок колонок здесь = порядок в dispute_add.
     # Каким СПОСОБОМ получен замер произношения (смешивать нельзя) и ПЫТАЛСЯ
@@ -576,7 +604,7 @@ def reset_password(nickname: str, pass_hash: str) -> bool:
     """Сброс пароля ПО НИКУ — только для админ-ручки. У аккаунтов нет ни
     почты, ни телефона, так что «забыл пароль» решается через владельца:
     он один знает своих учеников в лицо. False — ника нет."""
-    cur = _exec("UPDATE accounts SET pass_hash=? WHERE nickname=?",
+    cur = _exec("UPDATE accounts SET pass_hash=?, auth_version=auth_version+1 WHERE nickname=?",
                 (pass_hash, nickname))
     return bool(getattr(cur, "rowcount", 0))
 
@@ -670,15 +698,85 @@ def _rebuild_user_digest(student_id: str) -> None:
 
 def is_unique_violation(e: Exception) -> bool:
     """Занятый никнейм у SQLite и Postgres выглядит по-разному — прячем разницу."""
-    name = type(e).__name__
-    return "IntegrityError" in name or "UniqueViolation" in name or "unique" in str(e).lower()
+    return (getattr(e, "sqlstate", None) == "23505"
+            or getattr(e, "sqlite_errorcode", None) in (
+                sqlite3.SQLITE_CONSTRAINT_UNIQUE, sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY)
+            or type(e).__name__ == "UniqueViolation")
 
 
-def create_account(nickname: str, pass_hash: str, exam: str) -> str:
+CONSENT_VERSION = 2
+
+
+def corpus_consent(settings: dict) -> bool:
+    # Legacy true may come from the registration closure bug; ask again.
+    return (settings.get("corpus_consent") is True
+            and settings.get("corpus_consent_version") == CONSENT_VERSION)
+
+
+def update_settings(student_id: str, patch: dict) -> dict:
+    """Merge atomically: a delayed volume update must not undo a withdrawal."""
+    with _transaction() as execute:
+        row = execute("SELECT data FROM settings WHERE student_id=?" +
+                      (" FOR UPDATE" if _IS_PG else ""), (student_id,)).fetchone()
+        try:
+            current = json.loads(row[0]) if row else {}
+        except (ValueError, TypeError):
+            current = {}
+        if not isinstance(current, dict):
+            current = {}
+        current.update(patch)
+        if "corpus_consent" in patch:
+            current["corpus_consent_version"] = CONSENT_VERSION
+        execute("INSERT INTO settings(student_id,data,updated_at) VALUES(?,?,?) "
+                "ON CONFLICT(student_id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at",
+                (student_id, json.dumps(current), _now()))
+    return current
+
+
+def create_account(nickname: str, pass_hash: str, exam: str, consent: bool = False) -> str:
     acc_id = str(uuid.uuid4())
-    _exec("INSERT INTO accounts(id, nickname, pass_hash, exam, created_at)"
-          " VALUES(?,?,?,?,?)", (acc_id, nickname, pass_hash, exam, _now()))
+    with _transaction() as execute:
+        execute("INSERT INTO accounts(id, nickname, pass_hash, exam, created_at)"
+                " VALUES(?,?,?,?,?)", (acc_id, nickname, pass_hash, exam, _now()))
+        execute("INSERT INTO settings(student_id,data,updated_at) VALUES(?,?,?)",
+                (acc_id, json.dumps({"corpus_consent": consent,
+                                    "corpus_consent_version": CONSENT_VERSION}), _now()))
     return acc_id
+
+
+def issue_session(account_id: str, expected_pass_hash: str | None = None,
+                  lifetime: int = 30 * 86400) -> dict:
+    """Store only a SHA-256 digest. Password reset and issuance cannot race."""
+    token = "gs_" + secrets.token_urlsafe(32)
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    now = int(time.time())
+    expires = now + lifetime
+    with _transaction() as execute:
+        execute("DELETE FROM auth_sessions WHERE expires_at<=?", (now,))
+        sql = ("INSERT INTO auth_sessions(token_hash,account_id,auth_version,created_at,expires_at) "
+               "SELECT ?,id,auth_version,?,? FROM accounts WHERE id=?")
+        params = (digest, now, expires, account_id)
+        if expected_pass_hash is not None:
+            sql += " AND pass_hash=?"
+            params += (expected_pass_hash,)
+        cur = execute(sql, params)
+        if cur.rowcount != 1:
+            raise ValueError("account credentials changed")
+    return {"session_token": token, "expires_at": expires}
+
+
+def session_account(token: str) -> str | None:
+    if not re.fullmatch(r"gs_[A-Za-z0-9_-]{43}", token):
+        return None
+    row = _exec("SELECT a.id FROM auth_sessions s JOIN accounts a ON a.id=s.account_id "
+                "WHERE s.token_hash=? AND s.expires_at>? AND s.auth_version=a.auth_version",
+                (hashlib.sha256(token.encode()).hexdigest(), int(time.time()))).fetchone()
+    return row[0] if row else None
+
+
+def revoke_session(token: str) -> None:
+    _exec("DELETE FROM auth_sessions WHERE token_hash=?",
+          (hashlib.sha256(token.encode()).hexdigest(),))
 
 
 def get_account(nickname: str):
@@ -690,8 +788,12 @@ def create_account_with_id(acc_id: str, nickname: str, pass_hash: str, exam: str
     """Аккаунт с заранее известным id — вход через MAX, где id выводится из
     пользователя мессенджера (max_auth.account_id). Занятый id или ник летят
     наружу IntegrityError, как и в create_account."""
-    _exec("INSERT INTO accounts(id, nickname, pass_hash, exam, created_at)"
-          " VALUES(?,?,?,?,?)", (acc_id, nickname, pass_hash, exam, _now()))
+    with _transaction() as execute:
+        execute("INSERT INTO accounts(id, nickname, pass_hash, exam, created_at)"
+                " VALUES(?,?,?,?,?)", (acc_id, nickname, pass_hash, exam, _now()))
+        execute("INSERT INTO settings(student_id,data,updated_at) VALUES(?,?,?)",
+                (acc_id, json.dumps({"corpus_consent": False,
+                                    "corpus_consent_version": CONSENT_VERSION}), _now()))
 
 
 def get_account_by_id(acc_id: str):
@@ -1025,20 +1127,28 @@ def pron_stats() -> dict:
 
 def corpus_add(student_id: str, kind: str, variant: str, audio: bytes,
                mime: str, duration: float, transcript: str, reference: str,
-               score: int | None, max_score: int | None, labels: dict) -> str:
+               score: int | None, max_score: int | None, labels: dict) -> str | None:
     """Записать работу в корпус вместе с автоматической разметкой.
 
     Вызывается ФОНОМ после того, как ученик получил разбор: сбор корпуса не
-    должен стоить ему ни секунды. Согласие проверяется ВЫШЕ по стеку (main),
-    здесь его нет намеренно — функция не должна быть местом, где легко
-    забыть проверку, поэтому она просто пишет то, что ей дали.
+    должен стоить ему ни секунды. Последняя проверка согласия и запись идут
+    в одной транзакции: отзыв во время фонового разбора не теряется.
     """
     import base64 as _b64
     import json as _json
 
     cid = str(uuid.uuid4())
     payload = _b64.b64encode(audio).decode("ascii")
-    _exec("INSERT INTO voice_corpus(id, student_id, kind, variant, mime, data,"
+    with _transaction() as execute:
+        row = execute("SELECT data FROM settings WHERE student_id=?" +
+                      (" FOR UPDATE" if _IS_PG else ""), (student_id,)).fetchone()
+        try:
+            allowed = corpus_consent(json.loads(row[0])) if row else False
+        except (TypeError, ValueError, AttributeError):
+            allowed = False
+        if not allowed:
+            return None
+        execute("INSERT INTO voice_corpus(id, student_id, kind, variant, mime, data,"
           " bytes, duration, transcript, reference, score, max_score, labels,"
           " created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
           (cid, student_id, kind, str(variant or "")[:64], mime[:32], payload,
@@ -1550,6 +1660,9 @@ def restore_all(tables: dict, force: bool = False,
                 f"В базе уже {n} аккаунтов — восстановление только в пустую "
                 "базу (или force=1, если перезаливка сознательная).")
     out: dict = {}
+    if tables.get("accounts"):
+        # A restore can rewind auth_version. Never resurrect a revoked session.
+        _exec("DELETE FROM auth_sessions")
     for t, rows in tables.items():
         if t not in known or not isinstance(rows, list) or not rows:
             continue

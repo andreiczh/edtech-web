@@ -11,7 +11,7 @@
  */
 import { useSyncExternalStore } from 'react'
 
-import { currentUser, identityId } from '../auth/auth'
+import { currentUser, authHeaders } from '../auth/auth'
 
 const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
 const KEY = 'pingo.settings.v1'
@@ -39,7 +39,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'light',
   volume: 1,
   showText: true,
-  corpusConsent: true,
+  corpusConsent: false,
   persona: 'tutor',
 }
 
@@ -143,6 +143,7 @@ function load(): Settings {
 }
 
 let current: Settings = load()
+let settingsRevision = 0
 const listeners = new Set<() => void>()
 
 function persistLocal() {
@@ -175,17 +176,17 @@ function pushRemoteDebounced() {
   // Дебаунс: ползунок громкости меняется десятки раз в секунду, а серверу
   // достаточно финального значения.
   if (pushTimer) clearTimeout(pushTimer)
+  const owner = currentUser()?.id
   pushTimer = setTimeout(() => {
     pushTimer = null
-    if (!currentUser()) return
+    if (!owner || currentUser()?.id !== owner) return
     void fetch(`${BACKEND}/me/settings`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Device': identityId() },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({
         theme: current.theme,
         volume: current.volume,
         show_text: current.showText,
-        corpus_consent: current.corpusConsent,
         persona: current.persona,
       }),
     }).catch(() => {
@@ -194,16 +195,46 @@ function pushRemoteDebounced() {
   }, 800)
 }
 
-export function updateSettings(patch: Partial<Settings>) {
+export function updateSettings(patch: Partial<Omit<Settings, 'corpusConsent'>>) {
+  settingsRevision += 1
   current = normalize({ ...current, ...patch })
   persistLocal()
   listeners.forEach((cb) => cb())
   pushRemoteDebounced()
 }
 
+/** Consent is confirmed by the server, never debounced or silently retried. */
+export async function setCorpusConsent(value: boolean): Promise<void> {
+  const owner = currentUser()?.id
+  settingsRevision += 1
+  if (!owner) throw new Error('Войди в аккаунт, чтобы изменить согласие.')
+  let res: Response
+  try {
+    res = await fetch(`${BACKEND}/me/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ corpus_consent: value }),
+    })
+  } catch {
+    throw new Error('Согласие не изменено: нет связи с сервером. Попробуй ещё раз.')
+  }
+  if (currentUser()?.id !== owner) return
+  noteUnauthorized(res)
+  if (!res.ok) throw new Error('Согласие не изменено на сервере. Попробуй ещё раз.')
+  const data = await res.json() as { settings?: { corpus_consent?: boolean } }
+  if (data.settings?.corpus_consent !== value) throw new Error('Сервер не подтвердил изменение согласия.')
+  if (currentUser()?.id !== owner) return
+  current = { ...current, corpusConsent: value }
+  persistLocal()
+  listeners.forEach((cb) => cb())
+}
+
 /** При выходе из аккаунта: настройки — часть аккаунта, следующий человек за
     этим компьютером должен начать с чистых, а не с чужих. */
 export function resetSettings() {
+  settingsRevision += 1
+  if (pushTimer) clearTimeout(pushTimer)
+  pushTimer = null
   current = { ...DEFAULT_SETTINGS }
   try {
     localStorage.removeItem(KEY)
@@ -215,21 +246,24 @@ export function resetSettings() {
 
 /** При старте и после входа: настройки аккаунта побеждают локальные. */
 export async function syncSettingsFromServer(): Promise<void> {
-  if (!currentUser()) return
+  const startedRevision = settingsRevision
+  const owner = currentUser()?.id
+  if (!owner) return
   try {
     const res = await fetch(`${BACKEND}/me/settings`, {
-      headers: { 'X-Device': identityId() },
+      headers: { ...authHeaders() },
     })
     noteUnauthorized(res)
     if (!res.ok) return
     const data = (await res.json()) as { settings?: Record<string, unknown> }
+    if (currentUser()?.id !== owner || settingsRevision !== startedRevision) return
     const s = data.settings ?? {}
     current = normalize({
       ...current,
       ...('theme' in s ? { theme: s.theme } : {}),
       ...('volume' in s ? { volume: s.volume } : {}),
       ...('show_text' in s ? { showText: s.show_text } : {}),
-      ...('corpus_consent' in s ? { corpusConsent: s.corpus_consent } : {}),
+      corpusConsent: s.corpus_consent === true,
       ...('persona' in s ? { persona: s.persona } : {}),
     })
     persistLocal()
@@ -277,7 +311,7 @@ function noteUnauthorized(res: Response) {
 export async function fetchMeStats(): Promise<MeStats | null> {
   if (!currentUser()) return null
   try {
-    const res = await fetch(`${BACKEND}/me/stats`, { headers: { 'X-Device': identityId() } })
+    const res = await fetch(`${BACKEND}/me/stats`, { headers: { ...authHeaders() } })
     noteUnauthorized(res)
     if (!res.ok) return null
     return (await res.json()) as MeStats
@@ -311,7 +345,7 @@ export interface MeAnalytics {
 export async function fetchMeAnalytics(): Promise<MeAnalytics | null> {
   if (!currentUser()) return null
   try {
-    const res = await fetch(`${BACKEND}/me/analytics`, { headers: { 'X-Device': identityId() } })
+    const res = await fetch(`${BACKEND}/me/analytics`, { headers: { ...authHeaders() } })
     noteUnauthorized(res)
     if (!res.ok) return null
     return (await res.json()) as MeAnalytics
@@ -333,7 +367,7 @@ export async function changeNickname(generate: () => string): Promise<string> {
     try {
       res = await fetch(`${BACKEND}/me/nickname`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Device': identityId() },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ nickname }),
       })
     } catch {

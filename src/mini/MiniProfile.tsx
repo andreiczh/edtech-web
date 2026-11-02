@@ -1,3 +1,4 @@
+import { useConsent } from '../account/useConsent'
 /**
  * Аккаунт — открывается из профиля в настройках. Макета нет, собран в языке
  * экрана настроек (карточки, ряды, тумблер). Всё, что делал прежний кабинет
@@ -7,7 +8,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 
-import { changeNickname, fetchMeStats, resetSettings, updateSettings, useSettings, type MeStats } from '../account/me'
+import { changeNickname, fetchMeStats, resetSettings, useSettings, type MeStats } from '../account/me'
 import { applyNickname, currentUser, logout, randomNickname } from '../auth/auth'
 import { BackButton, useMaxBack } from './ResultBits'
 
@@ -16,6 +17,9 @@ const days = (n: number) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'день' 
 export function MiniProfile({ onBack, onLogout }: { onBack: () => void; onLogout: () => void }) {
   useMaxBack(onBack)
   const settings = useSettings()
+  const consent = useConsent()
+  const [logoutBusy, setLogoutBusy] = useState(false)
+  const [logoutError, setLogoutError] = useState<string | null>(null)
   const user = currentUser()
 
   const [stats, setStats] = useState<MeStats | null>(null)
@@ -51,11 +55,20 @@ export function MiniProfile({ onBack, onLogout }: { onBack: () => void; onLogout
     }
   }, [])
 
-  const doLogout = useCallback(() => {
-    logout()
-    resetSettings() // настройки — тоже личные, как в настольном кабинете
-    onLogout()
-  }, [onLogout])
+  const doLogout = useCallback(async () => {
+    if (logoutBusy) return
+    setLogoutBusy(true)
+    setLogoutError(null)
+    try {
+      await logout()
+      resetSettings()
+      onLogout()
+    } catch (e) {
+      setLogoutError(e instanceof Error ? e.message : 'Не удалось выйти. Попробуй ещё раз.')
+    } finally {
+      setLogoutBusy(false)
+    }
+  }, [onLogout, logoutBusy])
 
   const level = stats?.level
   const streak = stats?.streak
@@ -151,14 +164,17 @@ export function MiniProfile({ onBack, onLogout }: { onBack: () => void; onLogout
               aria-checked={settings.corpusConsent}
               aria-label="Хранить мои записи"
               className={`m-btn st-tog pf-tog${settings.corpusConsent ? ' st-tog--on' : ''}`}
-              onClick={() => updateSettings({ corpusConsent: !settings.corpusConsent })}
+              disabled={consent.busy}
+              onClick={() => void consent.toggle()}
             />
           </div>
+          {consent.error && <p role="alert">{consent.error}</p>}
         </section>
 
-        <button type="button" className="m-btn pf-logout" onClick={doLogout}>
+        <button type="button" className="m-btn pf-logout" disabled={logoutBusy} onClick={() => void doLogout()}>
           Выйти из аккаунта
         </button>
+        {logoutError && <p role="alert">{logoutError}</p>}
       </div>
     </div>
   )

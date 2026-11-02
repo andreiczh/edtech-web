@@ -9,7 +9,7 @@
  */
 import { useSyncExternalStore } from 'react'
 
-import { currentUser, identityId } from '../auth/auth'
+import { currentUser, identityId, authHeaders } from '../auth/auth'
 import { favoriteSession, withFavorite, type FavoriteItem } from './favoritesCore'
 import { TASKS, variantById, type TaskId } from './tasks'
 
@@ -90,7 +90,7 @@ export async function syncFavorites(): Promise<void> {
   followOwner()
   if (!currentUser()) return
   try {
-    const res = await fetch(`${BACKEND}/me/favorites`, { headers: { 'X-Device': identityId() } })
+    const res = await fetch(`${BACKEND}/me/favorites`, { headers: { ...authHeaders() } })
     if (!res.ok) return
     const list = listFrom(await res.json())
     if (list) publish(list)
@@ -112,7 +112,7 @@ export async function toggleFavorite(taskId: TaskId, variantId: string, on: bool
   try {
     const res = await fetch(`${BACKEND}/me/favorites`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Device': identityId() },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ task_id: taskId, variant_id: variantId, on }),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)

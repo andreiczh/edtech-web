@@ -15,7 +15,8 @@ React 19 + Vite 6 + TypeScript, **обычный CSS**. Tailwind осознан�
 Дефолт `BACKEND` — пустая строка (same-origin), потому что бэкенд сам раздаёт
 собранный фронт. В dev (`npm run dev`, :5173) маршруты проксируются на :8000
 через `vite.config.ts` — новый маршрут бэкенда добавляй и туда. Override —
-`VITE_BACKEND_URL`. Аккаунт узнаётся по заголовку `X-Device` (`identityId()`);
+`VITE_BACKEND_URL`. Сессия подтверждается `Authorization: Bearer` (`authHeaders()`);
+`identityId()` служит только локальным ключом владельца. См. `docs/P1-RELEASE.md`.
 ответ 401 от `/me/*` означает «аккаунта нет» — `App` по `onUnauthorized`
 выходит и показывает вход (§6.47).
 

@@ -19,17 +19,17 @@
 
 ```bash
 BASE=https://pingo-ai-dpd9.onrender.com
-# 1. аккаунт → id в X-Device
-ID=$(curl -s -X POST $BASE/auth/register -H 'Content-Type: application/json' -d @register.json | python -c "import sys,json; print(json.load(sys.stdin)['id'])")
+# 1. аккаунт → session_token в Authorization
+TOKEN=$(curl -s -X POST $BASE/auth/register -H 'Content-Type: application/json' -d @register.json | python -c "import sys,json; print(json.load(sys.stdin)['session_token'])")
 # 2. разбор чтения (10–40 с)
-curl -s -X POST $BASE/task_feedback -H "X-Device: $ID" -F audio=@reading_39.mp3 -F kind=reading \
+curl -s -X POST $BASE/task_feedback -H "Authorization: Bearer $TOKEN" -F audio=@reading_39.mp3 -F kind=reading \
   -F "payload=$(python -c "import json; print(json.dumps(json.load(open('task_feedback_payloads.json'))['reading']['payload']))")" -F persona=tutor
 # 3. разговор (NDJSON-поток: {text, audio_b64} … {done, user, reply, latency})
-curl -s -N -X POST $BASE/talk_stream -H "X-Device: $ID" -F audio=@talk_turn.mp3 -F 'history=[]' -F persona=tutor
+curl -s -N -X POST $BASE/talk_stream -H "Authorization: Bearer $TOKEN" -F audio=@talk_turn.mp3 -F 'history=[]' -F persona=tutor
 # 4. разбор беседы
-curl -s -X POST $BASE/talk_review -H "X-Device: $ID" -H 'Content-Type: application/json' -d @talk_review.json
+curl -s -X POST $BASE/talk_review -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d @talk_review.json
 # 5. статистика после работ
-curl -s $BASE/me/stats -H "X-Device: $ID"
+curl -s $BASE/me/stats -H "Authorization: Bearer $TOKEN"
 ```
 
 Ожидаемые коды и поля — в [`../../DATA-API.yaml`](../../DATA-API.yaml). Пустая или

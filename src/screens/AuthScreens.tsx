@@ -15,7 +15,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 
-import { resetSettings, updateSettings } from '../account/me'
+import { resetSettings } from '../account/me'
 import { currentUser, login, loginMax, loginMaxLink, randomNickname, register, type AuthUser, fetchInviteRequired } from '../auth/auth'
 import { clearLinkToken, maxInitData, pendingLinkToken } from '../max/bridge'
 
@@ -44,7 +44,7 @@ export function RegisterScreen({
   /* Согласие на хранение записей. Спрашивается ЗДЕСЬ, а не прячется в условиях:
      голос — персональные данные, и человек должен видеть вопрос, а не узнавать
      о нём потом. Снять можно в кабинете в любой момент. */
-  const [consent, setConsent] = useState(true)
+  const [consent, setConsent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [soon, setSoon] = useState(false)
@@ -62,10 +62,7 @@ export function RegisterScreen({
     setBusy(true)
     setError(null)
     try {
-      const user = await register(nickname.trim(), password, 'ege', invite.trim())
-      // Ответ ученика уезжает на сервер сразу: до первой же записи в корпус
-      // сервер обязан знать, разрешили ему или нет.
-      updateSettings({ corpusConsent: consent })
+      const user = await register(nickname.trim(), password, 'ege', invite.trim(), consent)
       setCreated(user)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -75,7 +72,7 @@ export function RegisterScreen({
     } finally {
       setBusy(false)
     }
-  }, [busy, nickname, password, invite])
+  }, [busy, nickname, password, invite, consent])
 
   if (created) {
     return (

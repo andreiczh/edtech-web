@@ -73,6 +73,9 @@ def _errors_from(raw: object, limit: int = 8) -> list[dict]:
         quote = str(e.get("quote") or "").strip()
         if not quote:
             continue
+        correction = str(e.get("correction") or "").strip()
+        if correction and ege_scoring._words(quote) == ege_scoring._words(correction):
+            continue
         out.append({
             "cat": str(e.get("cat") or "gram"),
             "quote": quote,
@@ -91,89 +94,7 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
     summary = str(obs.get("summary") or "").strip()
 
     if kind == "reading":
-        # Ошибка чтения обязана указывать на слово ИЗ ЭТАЛОНА. Слова, которого
-        # в тексте нет, ученик не мог прочитать неверно — такую «ошибку»
-        # снимаем до подсчёта (05.08.2026, жалоба «находит ошибки там, где их
-        # нет»). Сверяем с эталоном, а не с расшифровкой: expected — это то,
-        # что было НАПИСАНО.
-        reference = str(ctx.get("reference") or "")
-        misread = [m for m in (obs.get("misread") or [])
-                   if isinstance(m, dict) and m.get("real")
-                   and not (reference and ege_scoring.quote_is_fabricated(
-                       str(m.get("expected") or ""), reference))]
-        # Дубли модели схлопываются ДО всего остального: счёт их и так не
-        # считал дважды (gross_errors), но на экране «Повторная ошибка в том
-        # же месте» выглядела как двойное наказание — ровно на это пришла
-        # жалоба 15.08.2026 («одну и ту же ошибку посчитали за 2 разные»).
-        seen_pairs: set[tuple[str, str]] = set()
-        unique: list[dict] = []
-        for m in misread:
-            pair = (str(m.get("expected") or "").strip().lower(),
-                    str(m.get("heard") or "").strip().lower())
-            if pair in seen_pairs:
-                continue
-            seen_pairs.add(pair)
-            unique.append(m)
-        misread = unique
-        # Фонетически ДАЛЁКИЕ подмены засчитывает КОД, модель их простить не
-        # может (05.08.2026). Распознавание ошибается в сторону похожего
-        # звучания; «teachers -> doctors» означает, что другое слово
-        # прозвучало. До этого модель списывала на шум вообще всё: три явные
-        # подмены получали 1/1 и пустой разбор.
-        covered = {str(m.get("expected") or "").strip().lower() for m in misread}
-        swaps = ctx["diff"].get("swaps") or []
-        for s in swaps:
-            if s.get("distant") and s["expected"].strip().lower() not in covered:
-                misread.append({"expected": s["expected"], "heard": s["heard"],
-                                "explanation": "прочитано другое слово"})
-                covered.add(s["expected"].strip().lower())
-        # Систематически искажённые окончания — тоже решение КОДА: одиночное
-        # распознавание глотает честно, но два и больше в одной записи оно не
-        # производит. Правило было только в промпте, и модель его не исполняла.
-        for s in ege_scoring.ending_pattern(swaps):
-            if s["expected"].strip().lower() not in covered:
-                misread.append({"expected": s["expected"], "heard": s["heard"],
-                                "explanation": "форма слова прочитана неверно"})
-                covered.add(s["expected"].strip().lower())
-        # Одиночная потеря окончания — шум распознавания, а не ошибка чтеца.
-        # Для подмен, которые находит КОД, это правило действует давно
-        # (ending_pattern требует двух и больше), но модель могла записать
-        # одиночное окончание грубой ошибкой САМА — и «game» вместо «games»
-        # становилось третьим словом, обнулявшим работу (жалоба 15.08.2026:
-        # счёт 3 = games + choose + thus). Правило одно, исполняет его код:
-        # без систематики ending-подмены не считаются и не показываются.
-        systematic = {(s["expected"].strip().lower(), s["heard"].strip().lower())
-                      for s in ege_scoring.ending_pattern(swaps)}
-        if not systematic:
-            endings = {(s["expected"].strip().lower(), s["heard"].strip().lower())
-                       for s in swaps if s.get("ending_only")}
-            misread = [m for m in misread
-                       if (str(m.get("expected") or "").strip().lower(),
-                           str(m.get("heard") or "").strip().lower())
-                       not in endings]
-        # Считаем СЛОВА, а не пункты списка, и по официальным правилам счёта:
-        # одно и то же перевранное слово — одна ошибка, а каждый пропуск —
-        # отдельная (методичка ФИПИ, задание 1; см. ege_scoring.gross_errors).
-        misread_words = ege_scoring.gross_errors(misread)
-        score, note = ege_scoring.score_reading(ctx["diff"], misread_words)
-        errors = [{
-            "cat": "missing" if not str(m.get("heard") or "").strip() else "lex",
-            "quote": str(m.get("heard") or "").strip() or "пропущено",
-            "correction": str(m.get("expected") or "").strip(),
-            "explanation": str(m.get("explanation") or "").strip(),
-        } for m in misread[:6]]
-        # Оговорка про фонетику здесь обязательна, а не для галочки: в реальном
-        # ЕГЭ этот балл ставят ИМЕННО за произношение и интонацию, а мы их не
-        # слышим. Ученик должен понимать, что 1/1 у нас — не «прочитано идеально».
-        parts = [summary, note if (score == 0 or errors) else "",
-                 "Произношение и интонацию разбор не слышит — он сверяет текст с эталоном."]
-        return {
-            "summary": " ".join(p for p in parts if p).strip(),
-            "score": score, "max": ege_scoring.MAX_SCORE["reading"], "errors": errors,
-            # Счёт грубых ошибок наружу: экран разбора пишет «N ошибок из 2,
-            # искажающих смысл» тем же числом, по которому поставлен балл.
-            "misread_words": misread_words,
-        }
+        return reading_feedback(ctx["diff"])
 
     if kind in ("dialogue", "interview"):
         is_dialogue = kind == "dialogue"
@@ -371,3 +292,40 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
                 "пределы одного балла от эксперта примерно в половине случаев. "
                 "Разбор ошибок ниже точнее самого балла — смотри на него."
             )}
+
+
+def reading_feedback(diff: dict) -> dict:
+    """A reproducible text comparison, never an LLM guess about what audio meant.
+
+    Endings, near-homophones and number formatting remain uncertain even when
+    repeated: a transcript cannot prove a pronunciation error. Only explicit
+    lexical substitutions and omissions contribute to this provisional score.
+    """
+    swaps = diff.get("swaps") or []
+    counted = [s for s in swaps if s.get("distant") and not s.get("ending_only")]
+    uncertain = [s for s in swaps if s not in counted]
+    omissions = [{"expected": fragment, "heard": ""}
+                 for fragment in diff.get("missing_runs", [])]
+    mistakes = counted + omissions
+    misread_words = ege_scoring.gross_errors(mistakes)
+    score, note = ege_scoring.score_reading(diff, misread_words)
+    errors = [{
+        "cat": "lex" if m.get("heard") else "missing",
+        "quote": m.get("heard") or "не найдено в расшифровке",
+        "correction": m.get("expected") or "",
+        "explanation": ("В расшифровке другое слово; проверь запись."
+                        if m.get("heard") else "Этот фрагмент не найден в расшифровке; проверь запись."),
+    } for m in mistakes[:6]]
+    accuracy = ("Балл предварительный: это сверка распознанного текста с эталоном. "
+                "Произношение и интонация не оценены; ошибка распознавания возможна.")
+    if uncertain:
+        accuracy += " Неуверенные различия, включая окончания, не снижают балл."
+    return {
+        "summary": note + ". " + accuracy,
+        "score": score, "max": 1, "errors": errors,
+        "misread_words": misread_words,
+        "score_status": "provisional",
+        "accuracy_note": accuracy,
+        "uncertain_words": [{"expected": s["expected"], "heard": s["heard"]}
+                            for s in uncertain[:8]],
+    }

@@ -58,7 +58,8 @@ https://pingo-ai-dpd9.onrender.com (телефонная версия с ком�
 Поток данных: браузер / WebView MAX → `/task_feedback` или `/talk_stream`
 (multipart с записью) → распознавание Mistral → LLM Mistral (+ шкала ФИПИ в коде)
 → озвучка Mistral → JSON / NDJSON обратно. Профиль ошибок, прогресс и настройки —
-в базе по заголовку `X-Device` (id аккаунта).
+в базе по ID аккаунта, найденному по сессии `Authorization: Bearer`.
+Согласие и миграция доступа: [P1-RELEASE](docs/P1-RELEASE.md).
 
 ## 4. Запуск одной командой (Docker)
 
