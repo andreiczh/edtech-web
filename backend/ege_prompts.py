@@ -164,6 +164,9 @@ def aspect_recheck_prompt(numbers: list[int], brief: str,
         )
     fields = ",\n  ".join(f'{{"n": {n}, "evidence": "<the student\'s exact words>", '
                           f'{_ASPECT_FIELDS[n]}}}' for n in numbers)
+    error_ids = [e["id"] for e in errors or []]
+    checks = ", ".join(
+        f'{{"id": {i}, "valid": true, "reason": "<short explanation>"}}' for i in error_ids)
     return (
         "You are the SENIOR examiner called in for a second opinion on the Russian "
         "EGE oral exam, Task 4 (a voice message about two photos). A first examiner "
@@ -175,7 +178,11 @@ def aspect_recheck_prompt(numbers: list[int], brief: str,
         "or discourse error supported by the transcript. Stylistic alternatives, ASR "
         "punctuation and valid spoken contractions are NOT errors. A corrected false "
         "start is not a second error. Do not forgive genuine missing verbs, agreement "
-        "or wrong prepositions. Return one error_check per supplied id.\n"
+        "or wrong prepositions. Every candidate needs an explicit true/false decision, "
+        "including candidates you reject. Do not omit rejected candidates. "
+        f"Return EXACTLY {len(error_ids)} error_checks with ORIGINAL ids {error_ids}. "
+        f"Return EXACTLY {len(numbers)} aspects with ORIGINAL numbers {numbers}. "
+        "Use empty arrays when there are no items. All flags must be JSON booleans.\n"
         f"Candidate errors: {json.dumps(errors or [], ensure_ascii=False)}\n\n"
         f"Aspects to re-examine:\n" + "\n".join(listed) + "\n\n"
         "Work from the transcript, not from the first examiner's opinion: FIND the "
@@ -187,7 +194,7 @@ def aspect_recheck_prompt(numbers: list[int], brief: str,
         "fit any activity («it's fun», «it's interesting», «the best way to rest»).\n"
         + strictness_block(persona) +
         "\nReturn ONLY this JSON:\n"
-        '{"aspects": [\n  ' + fields + '\n], "error_checks": [{"id": 0, "valid": true, "reason": "short rule-based explanation"}]}'
+        '{"aspects": [\n  ' + fields + '\n], "error_checks": [' + checks + ']}'
     )
 
 

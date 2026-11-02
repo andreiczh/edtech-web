@@ -143,6 +143,46 @@ class CalibrationTests(unittest.TestCase):
             result=asyncio.run(main._recheck_aspects("monologue",obs,{},"I've got to go. He go home.","",client))
         self.assertEqual([e["quote"] for e in result["lang_errors"]],["he go"])
 
+    def test_monologue_retries_omitted_rejected_error(self):
+        import main, json
+        from types import SimpleNamespace
+        obs={"aspects":[],"lang_errors":[{"quote":"I've got to go"},{"quote":"he go"}]}
+        partial={"aspects":[],"error_checks":[{"id":1,"valid":True}]}
+        complete={"aspects":[],"error_checks":[{"id":0,"valid":False},{"id":1,"valid":True}]}
+        client=unittest.mock.MagicMock()
+        client.chat.completions.create.side_effect=[
+            SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(d)))])
+            for d in (partial,complete)]
+        with patch.object(main,"_track_llm"), patch.object(main,"MONOLOGUE_RECHECK",True):
+            result=asyncio.run(main._recheck_aspects("monologue",obs,{},"I've got to go. He go home.","",client))
+        self.assertEqual(client.chat.completions.create.call_count,2)
+        self.assertEqual([e["quote"] for e in result["lang_errors"]],["he go"])
+
+    def test_monologue_twice_incomplete_never_mutates_or_grades(self):
+        import main, json, copy
+        from types import SimpleNamespace
+        from fastapi import HTTPException
+        obs={"aspects":[],"lang_errors":[{"quote":"he go"}]};before=copy.deepcopy(obs)
+        client=unittest.mock.MagicMock()
+        client.chat.completions.create.return_value=SimpleNamespace(choices=[SimpleNamespace(
+            message=SimpleNamespace(content=json.dumps({"aspects":[],"error_checks":[]})))])
+        with patch.object(main,"_track_llm"), patch.object(main,"MONOLOGUE_RECHECK",True):
+            with self.assertRaises(HTTPException) as error:
+                asyncio.run(main._recheck_aspects("monologue",obs,{},"He go home.","",client))
+        self.assertEqual(error.exception.status_code,502)
+        self.assertEqual(client.chat.completions.create.call_count,2)
+        self.assertEqual(obs,before)
+
+    def test_monologue_recheck_rejects_truthy_strings_and_duplicate_aspects(self):
+        import main
+        aspect={"n":2,"named_first":True,"named_second":True,
+                "specific_first":True,"specific_second":False}
+        main._validate_monologue_recheck({"aspects":[aspect],"error_checks":[]},[2],0)
+        with self.assertRaises(ValueError):
+            main._validate_monologue_recheck({"aspects":[{**aspect,"specific_second":"false"}],"error_checks":[]},[2],0)
+        with self.assertRaises(ValueError):
+            main._validate_monologue_recheck({"aspects":[aspect,aspect],"error_checks":[]},[2],0)
+
     def test_duration_is_bounded_even_for_small_compressed_files(self):
         data=wav(np.zeros(32000, dtype=np.float32))
         with patch.object(audio_check, "MAX_AUDIO_SECONDS", 1):
