@@ -3604,6 +3604,40 @@ async def _json_with_heartbeat(work):
             await asyncio.gather(task, return_exceptions=True)
 
 
+async def _grading_observations(client, prompt: str, transcript: str, kind: str):
+    """Independent fixed-seed passes run together; incomplete grading has no score."""
+    async def one(seed):
+        completion = await asyncio.to_thread(
+            lambda: client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[{"role": "system", "content": prompt},
+                          {"role": "user", "content": transcript}],
+                response_format={"type": "json_object"}, temperature=0.0,
+                extra_body={"random_seed": seed},
+                max_tokens=2000 if kind == "monologue" else 900))
+        _track_llm(completion)
+        raw = (completion.choices[0].message.content or "").strip()
+        observations = _loads_forgiving(raw)
+        if not isinstance(observations, dict):
+            raise HTTPException(502, "Разбор не завершён — балл не выставлен. Повтори попытку.")
+        if kind == "monologue":
+            aspects = observations.get("aspects")
+            if (not isinstance(aspects, list) or len(aspects) != 4
+                    or {str(a.get("n")) for a in aspects if isinstance(a, dict)} != {"1", "2", "3", "4"}):
+                raise HTTPException(502, "Разобраны не все пункты монолога — балл не выставлен.")
+        return observations, raw
+
+    if kind == "monologue" and MONO_CONSENSUS:
+        # Wait for both outcomes so failures never leave an unobserved task.
+        results = await asyncio.gather(one(20261102), one(20261103), return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        (observations, raw), (second, _) = results
+        return ege_scoring.merge_two_passes(observations, second), raw
+    return await one(20261102)
+
+
 async def _judge_monologue_text(brief: str, facts: list, script: str) -> dict:
     """Оценка ТЕКСТА монолога тем же путём, что на проде: промпт-эксперт ->
     два прохода с консенсусом -> шкала в коде (scoring._score_feedback).
@@ -3615,26 +3649,12 @@ async def _judge_monologue_text(brief: str, facts: list, script: str) -> dict:
     client = llm_client()
     prompt = ege_prompts.monologue_prompt(brief, facts)
 
-    def one_pass(seed=20261102):
-        c = client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "system", "content": prompt},
-                      {"role": "user", "content": script}],
-            response_format={"type": "json_object"},
-            temperature=0.0, extra_body={"random_seed": seed}, max_tokens=2000)
-        _track_llm(c)
-        return _loads_forgiving((c.choices[0].message.content or "").strip())
-
-    obs = await asyncio.to_thread(one_pass)
-    if obs is None:
-        raise HTTPException(status_code=502, detail="LLM вернул не-JSON.")
-    if MONO_CONSENSUS and (obs.get("aspects") or []):
-        try:
-            obs2 = await asyncio.to_thread(one_pass, 20261103)
-            if obs2:
-                obs = ege_scoring.merge_two_passes(obs, obs2)
-        except Exception as e:  # noqa: BLE001 — консенсус не критичен
-            print(f"[label42] второй проход не удался ({type(e).__name__})")
+    try:
+        obs, _ = await _grading_observations(client, prompt, script, "monologue")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, "Проверка монолога не завершена — балл не выставлен.") from e
 
     fb = _score_feedback("monologue", obs, {"transcript": script, "brief": brief})
     marks = [int(c["score"]) for c in fb.get("criteria", [])][:3]
@@ -3892,7 +3912,7 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
 
     Ограничения по скорости — сознательные (требование владельца: не замедлять):
     один дополнительный вызов на работу, максимум 3 пункта, только 40/41.
-    Любой сбой второго прохода оставляет вердикты первого — хуже не становится.
+    Сбой необходимого повторного прохода отменяет оценку целиком.
     """
     if kind not in ("dialogue", "interview"):
         return observations
@@ -3943,9 +3963,12 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
         _track_llm(completion)
         verdicts = (_loads_forgiving((completion.choices[0].message.content or "").strip())
                     or {}).get("items") or []
+        if (not isinstance(verdicts, list)
+                or {str(v.get("n")) for v in verdicts if isinstance(v, dict) and isinstance(v.get("accepted"), bool)}
+                != {str(d["n"]) for d in disputed}):
+            raise ValueError("incomplete recheck")
     except Exception as e:  # noqa: BLE001
-        print(f"[recheck] второй проход не удался ({type(e).__name__}) — оставляю первый")
-        return observations
+        raise HTTPException(502, "Повторная проверка не завершена — балл не выставлен.") from e
 
     flips = 0
     for v in verdicts:
@@ -3995,8 +4018,8 @@ async def _recheck_aspects(kind: str, observations: dict, ctx: dict,
     зачёл наполовину или подтвердил цитатой, которой в речи нет (отбор —
     ege_scoring.doubtful_aspects).
 
-    Цена: один вызов на работу и только когда спорное есть. Любой сбой
-    оставляет вердикты первого прохода — хуже не становится.
+    Цена: один вызов на работу и только когда спорное есть. Сбой повторного
+    прохода отменяет оценку, чтобы неполная проверка не меняла балл.
     """
     if kind != "monologue" or not MONOLOGUE_RECHECK:
         return observations
@@ -4025,10 +4048,12 @@ async def _recheck_aspects(kind: str, observations: dict, ctx: dict,
         )
         _track_llm(completion)
         data = _loads_forgiving((completion.choices[0].message.content or "").strip()) or {}
+        aspects = data.get("aspects")
+        if (not isinstance(aspects, list)
+                or {str(a.get("n")) for a in aspects if isinstance(a, dict)} != {str(n) for n in numbers}):
+            raise ValueError("incomplete aspect recheck")
     except Exception as e:  # noqa: BLE001
-        print(f"[recheck] второй взгляд на аспекты не удался ({type(e).__name__}) — "
-              f"остаются вердикты первого прохода")
-        return observations
+        raise HTTPException(502, "Повторная проверка монолога не завершена — балл не выставлен.") from e
     changed = ege_scoring.merge_aspect_recheck(observations, data.get("aspects"))
     print(f"[recheck] аспекты {numbers}: изменено признаков {changed}")
     return observations
@@ -4398,62 +4423,11 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     else:
         client = llm_client()
         try:
-            completion = await asyncio.to_thread(
-                lambda: client.chat.completions.create(
-                    model=LLM_MODEL,
-                    messages=[
-                        {"role": "system", "content": prompt},
-                        {"role": "user", "content": transcript_text},
-                    ],
-                    response_format={"type": "json_object"},
-                    # Ноль, а не 0.2 (05.08.2026). Выигрыш здесь не в точности —
-                    # средняя сходимость с экспертами почти не меняется, — а в
-                    # ВОСПРОИЗВОДИМОСТИ: один и тот же ответ обязан получать один и
-                    # тот же балл. Замер на шести работах ФИПИ по три прогона:
-                    # при 0.2 разброс «в пределах ±1» был 2-4 из шести, при нуле
-                    # сузился до 3-4. Проверяющий, который сегодня ставит 4, а
-                    # завтра 6 за ту же работу, несправедлив независимо от среднего.
-                    temperature=0.0,
-                    # Монологу нужно место: четыре аспекта плюс полный список ошибок,
-                    # по числу которых считается балл за язык.
-                    max_tokens=2000 if kind == "monologue" else 900,
-                )
-            )
+            observations, raw = await _grading_observations(client, prompt, transcript_text, kind)
+        except HTTPException:
+            raise
         except Exception as e:  # noqa: BLE001
-            raise HTTPException(status_code=502, detail=f"LLM ошибка ({LLM_MODEL}): {e}")
-
-        _track_llm(completion)
-        raw = (completion.choices[0].message.content or "").strip()
-        observations = _loads_forgiving(raw)
-        if observations is None:
-            raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
-
-        # ВТОРОЙ ПРОХОД монолога и слияние (см. MONO_CONSENSUS). Спорный признак
-        # решается строже, спорное описание фото — в пользу ученика, ошибок берём
-        # больше из двух. Отказ второго прохода не беда: остаётся первый.
-        if kind == "monologue" and MONO_CONSENSUS and (observations.get("aspects") or []):
-            try:
-                second = await asyncio.to_thread(
-                    lambda: client.chat.completions.create(
-                        model=LLM_MODEL,
-                        messages=[
-                            {"role": "system", "content": prompt},
-                            {"role": "user", "content": transcript_text},
-                        ],
-                        response_format={"type": "json_object"},
-                        temperature=0.0,
-                        extra_body={"random_seed": 20261103},
-                        max_tokens=2000,
-                    )
-                )
-                _track_llm(second)
-                obs2 = _loads_forgiving((second.choices[0].message.content or "").strip())
-                if obs2:
-                    observations = ege_scoring.merge_two_passes(observations, obs2)
-                    print("[monologue] два прохода сведены в один разбор")
-            except Exception as e:  # noqa: BLE001 — консенсус не критичен
-                print(f"[monologue] второй проход не удался ({type(e).__name__}) — "
-                      "остаётся первый")
+            raise HTTPException(502, "Проверка не завершена — балл не выставлен. Повтори разбор.") from e
 
         # ОБРЫВ РАЗБОРА. Модель обязана вернуть пункт на каждый вопрос задания:
         # балл — сумма зачтённых, поэтому недостающий пункт молча становится нулём,

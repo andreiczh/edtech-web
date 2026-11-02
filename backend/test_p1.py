@@ -237,6 +237,45 @@ class P1Tests(unittest.TestCase):
             fallback.assert_not_called()
             chat.assert_not_called()
 
+    def test_monologue_passes_run_concurrently_with_fixed_seeds(self):
+        import threading
+        from types import SimpleNamespace
+        barrier = threading.Barrier(2, timeout=2)
+        seeds = []
+        def create(**kw):
+            seeds.append(kw["extra_body"]["random_seed"])
+            barrier.wait()
+            content = json.dumps({"aspects": [{"n": n} for n in range(1, 5)]})
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        with patch.object(main, "MONO_CONSENSUS", True), patch.object(main, "_track_llm"):
+            observations, _ = asyncio.run(main._grading_observations(client, "prompt", "speech", "monologue"))
+        self.assertEqual(sorted(seeds), [20261102, 20261103])
+        self.assertEqual(len(observations["aspects"]), 4)
+
+    def test_incomplete_monologue_consensus_does_not_return_partial_grade(self):
+        from types import SimpleNamespace
+        def create(**kw):
+            if kw["extra_body"]["random_seed"] == 20261103:
+                raise OSError("second pass unavailable")
+            content = json.dumps({"aspects": [{"n": n} for n in range(1, 5)]})
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        with patch.object(main, "MONO_CONSENSUS", True), patch.object(main, "_track_llm"):
+            with self.assertRaises(OSError):
+                asyncio.run(main._grading_observations(client, "prompt", "speech", "monologue"))
+
+    def test_invalid_monologue_structure_is_not_scored(self):
+        from types import SimpleNamespace
+        for aspects in ([], [{"n": n} for n in (1, 2, 3)], [{"n": n} for n in (1, 1, 3, 4)]):
+            with self.subTest(aspects=aspects):
+                response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+                    content=json.dumps({"aspects": aspects})))])
+                client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: response)))
+                with patch.object(main, "MONO_CONSENSUS", False), patch.object(main, "_track_llm"):
+                    with self.assertRaises(main.HTTPException):
+                        asyncio.run(main._grading_observations(client, "prompt", "speech", "monologue"))
+
     def test_grading_generation_is_seeded_and_does_not_switch_models(self):
         from unittest.mock import Mock
         inner = Mock()
