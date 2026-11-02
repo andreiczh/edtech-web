@@ -432,7 +432,7 @@ def _stt_upload_name(data: bytes) -> tuple[str, str]:
     return _STT_UPLOAD.get(audio_check.sniff(data), ("speech.webm", "audio/webm"))
 
 
-async def transcribe_remote(data: bytes) -> str:
+async def transcribe_remote(data: bytes, *, temperature: float | None = None) -> str:
     """STT через Mistral (Voxtral). Возвращает распознанный текст.
 
     `language` передаём ЯВНО, и это не формальность. Voxtral понимает 13 языков и
@@ -442,10 +442,13 @@ async def transcribe_remote(data: bytes) -> str:
     определению англоязычный, гадать язык ему незачем.
     """
     name, mime = _stt_upload_name(data)
+    fields = {"model": STT_REMOTE_MODEL, "language": STT_LANGUAGE}
+    if temperature is not None:
+        fields["temperature"] = str(temperature)
     r = await _stt_client().post(
         f"{LLM_BASE_URL.rstrip('/')}/audio/transcriptions",
         headers={"Authorization": f"Bearer {_require('LLM_API_KEY')}"},
-        data={"model": STT_REMOTE_MODEL, "language": STT_LANGUAGE},
+        data=fields,
         files={"file": (name, data, mime)},
     )
     if r.status_code != 200:
@@ -2521,16 +2524,20 @@ _stt_degraded_until = 0.0
 _STT_DEGRADE_SECONDS = 300.0
 
 
-# Точное распознавание для ОЦЕНИВАЕМЫХ заданий (39-42).
-#
-# У двух режимов приложения требования к распознаванию противоположны:
-#   разговор — ученик ждёт ответа вживую, каждая доля секунды видна;
-#   разбор задания — ученик только что говорил минуту-две и ждёт разбора,
-#   лишняя секунда незаметна, зато КАЖДОЕ слово превращается в балл ФИПИ.
-# Поэтому модель распознавания у них может быть разной: пусто = та же, что в
-# разговоре (voxtral-mini), иначе — чат-модель Voxtral (24B), которой аудио
-# отдаётся как вложение. Любой сбой откатывается на обычный путь.
-STT_TASK_MODEL = os.environ.get("STT_TASK_MODEL", "").strip()
+# Один фиксированный путь для оцениваемых заданий. По умолчанию — доступный
+# endpoint транскрипции (03.11.2026: у voxtral-small-latest на проде HTTP 429).
+# Чат-распознавание можно включить явно после проверки квоты, а не как скрытый
+# запасной путь. При отказе выбранного пути балл не выставляется.
+STT_TASK_MODE = os.environ.get(
+    "STT_TASK_MODE", "transcription" if STT_PROVIDER == "mistral" else "local").strip()
+STT_TASK_MODEL = os.environ.get("STT_TASK_MODEL", "voxtral-small-latest").strip()
+
+
+def _task_stt_label() -> str:
+    model = (STT_REMOTE_MODEL if STT_TASK_MODE == "transcription" else
+             WHISPER_MODEL if STT_TASK_MODE == "local" else STT_TASK_MODEL)
+    return f"{STT_TASK_MODE}:{model}"
+
 
 # Правило «переписывай дословно» здесь не вежливость, а требование продукта:
 # разбор считает ошибки ученика, и «услужливо» исправленная грамматика
@@ -2636,24 +2643,25 @@ _stt_task_ok: int = 0
 
 
 async def transcribe_for_task(data: bytes, filename: str = "speech.webm") -> str:
-    """Распознавание для оцениваемых заданий: точная модель, если она задана.
-
-    Сбой точной модели не подменяется другим распознавателем: иначе повтор
-    одной записи оценивает уже другой текст. В разговоре откат остаётся.
-    """
+    """Fixed recognizer for grading; never silently switch models on failure."""
     global _stt_task_last_error, _stt_task_failures, _stt_task_ok
-    if not STT_TASK_MODEL:
-        return await transcribe_auto(data)
     try:
-        text = await transcribe_chat(data, STT_TASK_MODEL, filename)
+        if STT_TASK_MODE == "transcription":
+            text = await transcribe_remote(data, temperature=0.0)
+        elif STT_TASK_MODE == "chat":
+            text = await transcribe_chat(data, STT_TASK_MODEL, filename)
+        elif STT_TASK_MODE == "local":
+            text = await asyncio.to_thread(transcribe, data, WHISPER_MODEL)
+        else:
+            raise ValueError("Unknown STT_TASK_MODE")
         _stt_task_ok += 1
         return text
     except Exception as e:  # noqa: BLE001
         detail = f"{type(e).__name__}: {str(e)[:200]}"
         _stt_task_last_error = detail
         _stt_task_failures += 1
-        print(f"[stt] точная модель {STT_TASK_MODEL} недоступна — оценка не выставлена")
-        raise SttFailed(detail, "Точное распознавание сейчас недоступно. Балл не выставлен — повтори разбор.") from e
+        print(f"[stt] выбранный путь {_task_stt_label()} недоступен — оценка не выставлена")
+        raise SttFailed(detail, "Распознавание сейчас недоступно. Балл не выставлен — повтори разбор.") from e
 
 
 async def transcribe_auto(data: bytes, local_model: str | None = None) -> str:
@@ -3405,11 +3413,9 @@ async def health(response: Response):
         # Распознавание для оцениваемых заданий: какая модель и не сорвалась ли
         # она в откат. Без этого поля откат молчит, и система выглядит рабочей,
         # хотя точный путь мёртв (ровно так и было поймано 29.07.2026).
-        "stt_task": (f"{STT_TASK_MODEL}: точным путём {_stt_task_ok}, "
-                     f"отказов {_stt_task_failures}"
+        "stt_task": (f"{_task_stt_label()}: успешно {_stt_task_ok}, отказов {_stt_task_failures}"
                      + (f"; последняя осечка — {_stt_task_last_error}"
-                        if _stt_task_last_error else "")
-                     if STT_TASK_MODEL else "та же, что в разговоре"),
+                        if _stt_task_last_error else "")),
         "tts": _tts_health(),
         "llm_base": LLM_BASE_URL,
         "llm_model": LLM_MODEL,
@@ -4205,7 +4211,7 @@ def _corpus_labels(kind: str, feedback: dict, audio_info: dict | None) -> dict:
         "errors_n": len(fb.get("errors") or []),
         "summary": (f"{score}/{max_score}" if score is not None else "без балла"),
         "model": LLM_MODEL,
-        "stt": STT_TASK_MODEL or STT_REMOTE_MODEL,
+        "stt": _task_stt_label(),
         "scored_at": datetime.now(timezone.utc).isoformat(),
     }
     if fb.get("delivery"):

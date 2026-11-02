@@ -213,13 +213,29 @@ class P1Tests(unittest.TestCase):
         self.assertEqual(a, b)
 
     def test_grading_stt_outage_does_not_change_model(self):
-        with patch.object(main, "STT_TASK_MODEL", "precise-test-model"), \
+        with patch.object(main, "STT_TASK_MODE", "chat"), \
+             patch.object(main, "STT_TASK_MODEL", "precise-test-model"), \
              patch.object(main, "transcribe_chat", new=AsyncMock(side_effect=OSError("upstream down"))), \
              patch.object(main, "transcribe_auto", new=AsyncMock()) as fallback:
             with self.assertRaises(main.SttFailed) as error:
                 asyncio.run(main.transcribe_for_task(b"audio", "test.mp3"))
             self.assertIn("Балл не выставлен", error.exception.user_message)
             fallback.assert_not_called()
+
+    def test_grading_uses_fixed_available_transcription_route(self):
+        with patch.object(main, "STT_TASK_MODE", "transcription"), \
+             patch.object(main, "STT_TASK_MODEL", "legacy-unavailable-model"), \
+             patch.object(main, "transcribe_remote", new=AsyncMock(return_value="spoken text")) as remote, \
+             patch.object(main, "transcribe_chat", new=AsyncMock()) as chat, \
+             patch.object(main, "transcribe_auto", new=AsyncMock()) as fallback:
+            self.assertEqual(asyncio.run(main.transcribe_for_task(b"audio")), "spoken text")
+            remote.assert_awaited_once_with(b"audio", temperature=0.0)
+            chat.assert_not_called()
+            remote.side_effect = OSError("transcription unavailable")
+            with self.assertRaises(main.SttFailed):
+                asyncio.run(main.transcribe_for_task(b"audio"))
+            fallback.assert_not_called()
+            chat.assert_not_called()
 
     def test_grading_generation_is_seeded_and_does_not_switch_models(self):
         from unittest.mock import Mock
