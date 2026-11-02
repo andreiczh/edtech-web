@@ -37,6 +37,7 @@ export function ResultScreen42({
   onQuit,
   onNext,
   onBack,
+  onRetry,
 }: {
   taskId: TaskId
   variant: TaskVariant
@@ -47,6 +48,7 @@ export function ResultScreen42({
   seconds: number
   onQuit: () => void
   onNext: () => void
+  onRetry?: () => void
   onBack?: () => void
 }) {
   const criteria = (feedback?.criteria ?? []).slice(0, 3)
@@ -91,6 +93,11 @@ export function ResultScreen42({
           )}
           {blob && <Player blob={blob} seconds={seconds} onProgress={onProgress} />}
         </div>
+
+        {failure && onRetry && <section className="x-card" aria-label="Повторная проверка">
+          <p className="x-text">Можно отправить эту же запись ещё раз.</p>
+          <button type="button" className="m-btn m-retry" onClick={onRetry}>Разобрать заново</button>
+        </section>}
 
         {feedback && (
           <>

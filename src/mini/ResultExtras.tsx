@@ -84,7 +84,7 @@ export function SummaryCard({ feedback }: { feedback: TaskFeedback }) {
   if (!summary && !note) return null
   return (
     <section className="x-card" aria-label="Итог">
-      <h3 className="x-title">ИТОГ</h3>
+      <h3 className="x-title">{feedback.score_status === 'provisional' ? 'ОРИЕНТИРОВОЧНО · ПО ТЕКСТУ' : 'ИТОГ'}</h3>
       {summary && <p className="x-text">{summary}</p>}
       {note && <p className="x-why">{note}</p>}
     </section>

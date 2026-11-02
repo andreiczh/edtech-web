@@ -71,7 +71,7 @@ export function MiniHome({
       <h1 className="h-hi">
         {greeting()},
         <br />
-        {nick}!
+        <span className="h-nick" title={nick}>{nick}!</span>
       </h1>
 
       <button type="button" className="m-btn h-card h-card--1 h-card--btn" onClick={onPractice}>
@@ -143,8 +143,7 @@ export function MiniHome({
       >
         <span className="h-title">ТЕОРИЯ</span>
         <span className="h-sub">
-          Чек-листы для подготовки
-          <br />к заданиям
+          Скоро: чек-листы и примеры ответов
         </span>
       </div>
       <button

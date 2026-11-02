@@ -30,6 +30,7 @@ import socket
 import tempfile
 import threading
 import time
+_PROCESS_STARTED = time.monotonic()
 from collections import deque
 from datetime import date, datetime, timedelta, timezone
 
@@ -2649,16 +2650,17 @@ _stt_task_failures: int = 0
 _stt_task_ok: int = 0
 
 
-async def transcribe_for_task(data: bytes, filename: str = "speech.webm") -> str:
+async def transcribe_for_task(data: bytes, filename: str = "speech.webm", *, prepared: bool = False) -> str:
     """Fixed recognizer for grading; never silently switch models on failure."""
     global _stt_task_last_error, _stt_task_failures, _stt_task_ok
     try:
         if STT_TASK_MODE == "transcription":
             import grading_audio
-            prepared = await asyncio.to_thread(grading_audio.prepare, data, filename)
+            if not prepared:
+                _, data = await asyncio.to_thread(grading_audio.analyze_isolated, data, filename)
             for attempt in range(3):
                 try:
-                    text = await transcribe_remote(prepared, temperature=0.0, timeout=40.0)
+                    text = await transcribe_remote(data, temperature=0.0, timeout=40.0)
                     break
                 except _RemoteSttError as error:
                     if error.status not in (429, 502, 503, 504) or attempt == 2:
@@ -3420,6 +3422,9 @@ async def health(response: Response):
     return {
         "ok": ready,
         "build": os.environ.get("RENDER_GIT_COMMIT", "local"),
+        "process_uptime_sec": round(time.monotonic() - _PROCESS_STARTED),
+        "grading": {"monologue_recheck": MONOLOGUE_RECHECK, "consensus": MONO_CONSENSUS,
+                    "audio_worker": "isolated", "version": "2026-11-03"},
         "readiness": availability,
         "stt": (
             f"mistral:{STT_REMOTE_MODEL}"
@@ -3632,10 +3637,10 @@ async def _grading_observations(client, prompt: str, transcript: str, kind: str)
                           {"role": "user", "content": transcript}],
                 response_format={"type": "json_object"}, temperature=0.0,
                 extra_body={"random_seed": seed},
-                max_tokens=2000 if kind == "monologue" else 1800 if kind == "interview" else 900))
+                max_tokens=2400 if kind == "monologue" else 1800 if kind == "interview" else 900))
         _track_llm(completion)
         raw = (completion.choices[0].message.content or "").strip()
-        observations = _loads_forgiving(raw)
+        observations = json.loads(raw)
         if not isinstance(observations, dict):
             raise HTTPException(502, "Разбор не завершён — балл не выставлен. Повтори попытку.")
         if kind == "monologue":
@@ -3875,7 +3880,7 @@ async def _monologue_work(data: bytes) -> dict:
 
     _track_llm(completion)
     raw = (completion.choices[0].message.content or "").strip()
-    observations = _loads_forgiving(raw)
+    observations = json.loads(raw)
     if observations is None:
         raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
     feedback = _score_feedback("monologue", observations, ctx)
@@ -3929,7 +3934,7 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
         ответ — их метит ege_scoring.flag_suspicious до этого вызова.
 
     Ограничения по скорости — сознательные (требование владельца: не замедлять):
-    один дополнительный вызов на работу, максимум 3 пункта, только 40/41.
+    один дополнительный вызов: до 3 спорных вопросов №40, все 5 ответов №41.
     Сбой необходимого повторного прохода отменяет оценку целиком.
     """
     if kind not in ("dialogue", "interview"):
@@ -3952,18 +3957,26 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
             weight = 2  # балл за обрывок фразы
         elif it.get("borderline"):
             weight = 2
+        elif kind == "interview":
+            # A fluent answer was rejected for "one phrase" despite multiple
+            # explicit clauses. Verify every interview item, not only a model's
+            # self-reported uncertainty (which missed these contradictions).
+            weight = 1
         elif len(reason) < 8:
             weight = 1  # вердикт без обоснования, в любую сторону
         if weight:
             disputed.append({"n": i + 1, "point": points[i], "weight": weight,
+                             "heard": str(it.get("heard") or ""),
+                             "phrase_hint": ege_scoring.count_phrases(str(it.get("heard") or "")),
                              "accepted": bool(it.get("accepted")), "reason": reason})
     if not disputed:
         return observations
     # Раньше здесь стоял выход «спорных больше трёх — не проверяем вовсе»: чем
     # хуже была работа, тем меньше её проверяли. Теперь берём три САМЫХ спорных,
     # порядок пунктов сохраняем — цена та же, один вызов.
-    if len(disputed) > 3:
-        disputed = sorted(disputed, key=lambda d: -d["weight"])[:3]
+    max_items = 5 if kind == "interview" else 3
+    if len(disputed) > max_items:
+        disputed = sorted(disputed, key=lambda d: -d["weight"])[:max_items]
         disputed.sort(key=lambda d: d["n"])
 
     task_text = "\n".join(f"{i + 1}. {p}" for i, p in enumerate(points))
@@ -3975,7 +3988,7 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
                 messages=[{"role": "system", "content": prompt}],
                 response_format={"type": "json_object"},
                 temperature=0.0,  # см. объяснение у первого прохода
-                max_tokens=400,
+                max_tokens=800 if kind == "interview" else 400,
             )
         )
         _track_llm(completion)
@@ -4008,23 +4021,9 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
     return observations
 
 
-# Второй взгляд на спорные аспекты монолога. ПО УМОЛЧАНИЮ ВЫКЛЮЧЕН — так решил
-# замер, а не вкус (05.08.2026, шесть работ ФИПИ, по три прогона на ветку):
-#
-#   в пределах ±1 балла   3.0/6  ->  3.7/6
-#   точное совпадение     2.0/6  ->  1.3/6
-#   средняя ошибка       11.0    -> 10.67 балла  <- решающее число
-#
-# Средняя ошибка не изменилась: второй проход не судит точнее, он судит ДОБРЕЕ.
-# Одна и та же правка (аспект 1 «неполно» -> «раскрыт») спасла работу, которой
-# эксперты дали 4, и испортила ту, которой дали 0. Платить за это лишним вызовом
-# и парой секунд ожидания ученика незачем.
-#
-# Код оставлен и покрыт тестами намеренно: включается одной переменной, и
-# вернуться к нему стоит, когда золотой набор вырастет с шести работ до
-# нескольких десятков (копилка жалоб, docs/DECISIONS.md §6.7). На шести работах
-# разница в 0.3 балла средней ошибки — это шум, а не вывод.
-MONOLOGUE_RECHECK = os.environ.get("MONOLOGUE_RECHECK", "0").strip() not in ("0", "false", "no")
+# Повторная проверка содержания и реальности языковых замечаний включена.
+# Без неё уверенная выдуманная ошибка первого прохода меняет балл.
+MONOLOGUE_RECHECK = os.environ.get("MONOLOGUE_RECHECK", "1").strip() not in ("0", "false", "no")
 
 
 async def _recheck_aspects(kind: str, observations: dict, ctx: dict,
@@ -4042,7 +4041,12 @@ async def _recheck_aspects(kind: str, observations: dict, ctx: dict,
     if kind != "monologue" or not MONOLOGUE_RECHECK:
         return observations
     numbers = ege_scoring.doubtful_aspects(observations, transcript)
-    if not numbers:
+    candidates = []
+    for field in ("lang_errors", "logic_errors"):
+        for error in observations.get(field) or []:
+            if isinstance(error, dict):
+                candidates.append({**error, "id": len(candidates), "field": field})
+    if not numbers and not candidates:
         return observations
     first = {}
     for c in (observations.get("aspects") or []):
@@ -4052,7 +4056,7 @@ async def _recheck_aspects(kind: str, observations: dict, ctx: dict,
             except (TypeError, ValueError):
                 continue
     prompt = ege_prompts.aspect_recheck_prompt(
-        numbers, str(ctx.get("brief") or ""), ctx.get("facts") or [], first, persona)
+        numbers, str(ctx.get("brief") or ""), ctx.get("facts") or [], first, persona, candidates)
     try:
         completion = await asyncio.to_thread(
             lambda: client.chat.completions.create(
@@ -4061,17 +4065,28 @@ async def _recheck_aspects(kind: str, observations: dict, ctx: dict,
                           {"role": "user", "content": transcript}],
                 response_format={"type": "json_object"},
                 temperature=0.0,
-                max_tokens=700,
+                max_tokens=2200,
             )
         )
         _track_llm(completion)
-        data = _loads_forgiving((completion.choices[0].message.content or "").strip()) or {}
+        data = json.loads((completion.choices[0].message.content or "").strip())
         aspects = data.get("aspects")
         if (not isinstance(aspects, list)
                 or {str(a.get("n")) for a in aspects if isinstance(a, dict)} != {str(n) for n in numbers}):
             raise ValueError("incomplete aspect recheck")
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, "Повторная проверка монолога не завершена — балл не выставлен.") from e
+    checks = data.get("error_checks") or []
+    if candidates:
+        if (len(checks) != len(candidates)
+                or any(not isinstance(c, dict) or type(c.get("id")) is not int
+                       or type(c.get("valid")) is not bool for c in checks)
+                or {c["id"] for c in checks} != set(range(len(candidates)))):
+            raise HTTPException(502, "Проверка замечаний не завершена — балл не выставлен.")
+        kept = {c["id"] for c in checks if c["valid"]}
+        for field in ("lang_errors", "logic_errors"):
+            observations[field] = [{k: v for k, v in c.items() if k not in ("id", "field")}
+                                   for c in candidates if c["field"] == field and c["id"] in kept]
     changed = ege_scoring.merge_aspect_recheck(observations, data.get("aspects"))
     print(f"[recheck] аспекты {numbers}: изменено признаков {changed}")
     return observations
@@ -4367,8 +4382,12 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     # секундах тишины выдал 960 слов чужого монолога (замер 05.08.2026).
     # Ученику при этом приписывалось несказанное. Дешевле и честнее не
     # спрашивать: заодно экономятся вызов STT и вызов LLM.
-    sound = await asyncio.to_thread(
-        audio_check.inspect, data, os.path.splitext(filename)[1].lower())
+    import grading_audio
+    try:
+        sound, grading_copy = await asyncio.to_thread(grading_audio.analyze_isolated, data, filename)
+    except Exception as error:
+        note_failure("audio_prepare", type(error).__name__)
+        raise HTTPException(502, "Обработка записи не завершена. Балл не выставлен — повтори разбор.") from error
     quiet = audio_check.silence_reason(sound)
     if quiet is not None:
         print(f"[audio] запись отклонена без распознавания: {sound}")
@@ -4376,7 +4395,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
 
     # Оценка зависит только от текущего ответа и задания, без истории ученика.
     try:
-        transcript_text = await transcribe_for_task(data, filename)
+        transcript_text = await transcribe_for_task(grading_copy, filename, prepared=True)
     except SttFailed as e:
         print(f"[stt] task_feedback не распознал: {e}")
         note_failure("stt", str(e))
@@ -4513,8 +4532,8 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
             print(f"[verify] улики не сошлись — {'; '.join(suspicious)}")
 
         # Второй взгляд на спорные пункты — аналог третьей проверки из методички.
-        # Запускается ТОЛЬКО когда первый проход сам сомневается, поэтому у
-        # обычной работы задержка не растёт вовсе.
+        # В интервью проверяются все пять ответов: уверенность первого прохода
+        # не гарантирует правильного подсчёта фраз.
         observations = await _recheck_disputed(kind, observations, ctx,
                                                transcript_text, persona, client)
         # У монолога спорны не вердикты по вопросам, а аспекты — свой отбор и свой
@@ -4585,7 +4604,7 @@ async def task_feedback(
     payload: str = Form("{}"),
     variant: str = Form(""),
     duration: int = Form(0),
-    # Собеседник: меняет строгость спорных решений и голос разбора, не шкалу.
+    # Собеседник не влияет на экзаменационную оценку.
     persona: str = Form(""),
     # «1» на последнем варианте серии — бонус XP за доведённую до конца сессию.
     # Флаг клиентский, но цена ему 25 XP под общими рейт-лимитами — воровать тут

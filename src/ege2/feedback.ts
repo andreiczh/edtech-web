@@ -60,6 +60,7 @@ export interface TaskFeedback {
       баллом. Держать текст на сервере, а не во фронте: цифры в нём меняются
       вместе с замером, и расходиться этим двум местам нельзя. */
   accuracy_note?: string
+  score_status?: 'provisional' | string
   /** Только у чтения (№39): сколько слов пропущено или прочитано неверно —
       счёт грубых ошибок сервера, по нему ставится балл (≥3 → 0). */
   misread_words?: number
@@ -86,36 +87,44 @@ export async function requestTaskFeedback(
   if (meta?.variantId) fd.append('variant', meta.variantId)
   if (meta?.durationSec) fd.append('duration', String(meta.durationSec))
   if (meta?.sessionDone) fd.append('session_done', '1')
-  // Собеседник: Гондон решает спорное против ученика, Терпеливый — в пользу.
-  // Шкала ФИПИ у всех одна — меняются суждения в спорных местах и тон разбора.
+  // Предпочтение собеседника не меняет экзаменационные баллы.
   fd.append('persona', getSettings().persona)
 
-  let res: Response
+  const controller = new AbortController()
+  // Cover the streamed body as well as headers: a broken heartbeat stream
+  // otherwise leaves the student on the waiting screen forever.
+  const timer = setTimeout(() => controller.abort(), 180_000)
   try {
-    res = await fetch(`${BACKEND}/task_feedback`, {
-      method: 'POST',
-      body: fd,
-      // По X-Device сервер копит профиль ошибок ученика. Не личные данные —
-      // случайный uuid браузера, см. device.ts.
-      headers: { ...authHeaders() },
-    })
-  } catch {
-    throw new Error(backendUnreachableMessage())
-  }
+    let res: Response
+    try {
+      res = await fetch(`${BACKEND}/task_feedback`, {
+        method: 'POST',
+        body: fd,
+        headers: { ...authHeaders() },
+        signal: controller.signal,
+      })
+    } catch {
+      if (controller.signal.aborted) throw new Error('Проверка заняла больше трёх минут. Запись сохранена на этом экране — попробуй отправить её ещё раз.')
+      throw new Error(backendUnreachableMessage())
+    }
 
-  let data: unknown = null
-  let parsed = true
-  try {
-    data = await res.json()
-  } catch {
-    parsed = false
+    let data: unknown = null
+    let parsed = true
+    try {
+      data = await res.json()
+    } catch {
+      if (controller.signal.aborted) throw new Error('Сервер не завершил проверку за три минуты. Попробуй отправить эту запись ещё раз.')
+      parsed = false
+    }
+    const detail =
+      parsed && data && typeof data === 'object' && 'detail' in data
+        ? String((data as { detail: unknown }).detail)
+        : null
+    if (!res.ok || !parsed || detail) throw new Error(httpErrorMessage(res.status, detail))
+    return data as FeedbackResponse
+  } finally {
+    clearTimeout(timer)
   }
-  const detail =
-    parsed && data && typeof data === 'object' && 'detail' in data
-      ? String((data as { detail: unknown }).detail)
-      : null
-  if (!res.ok || !parsed || detail) throw new Error(httpErrorMessage(res.status, detail))
-  return data as FeedbackResponse
 }
 
 /**

@@ -255,10 +255,9 @@ def aspect_verdicts(checks: list[dict]) -> list[dict]:
     return out
 
 
-# Сколько аспектов максимум уходит на второй взгляд. Четвёртый не добавляем
-# намеренно: пересмотр ВСЕГО ответа — это просто второй первый проход, а нам
-# нужен сфокусированный взгляд на спорное.
-_MAX_RECHECK_ASPECTS = 3
+# Проверяем и частичный, и полный отказ: уверенно ошибочный отказ тоже
+# меняет балл. В одном запросе помещаются все четыре аспекта.
+_MAX_RECHECK_ASPECTS = 4
 
 
 def doubtful_aspects(observations: dict, transcript: str) -> list[int]:
@@ -305,7 +304,7 @@ def doubtful_aspects(observations: dict, transcript: str) -> list[int]:
                                 and c.get(f"named_{side}") is False
                                 for side in ("first", "second")):
             weight = 3  # contradictory observations need adjudication
-        elif verdicts.get(n) == PARTIAL:
+        elif verdicts.get(n) in (PARTIAL, MISSING):
             weight = 2
         if weight:
             out.append((weight, n))

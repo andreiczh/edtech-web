@@ -522,6 +522,7 @@ export function Practice({
       : 1
 
   const startedAtRef = useRef(0)
+  const durationRef = useRef(0)
   const finishingRef = useRef(false)
   // Ушли с экрана ожидания — пришедший позже разбор никому не нужен.
   const cancelledRef = useRef(false)
@@ -550,12 +551,12 @@ export function Practice({
     if (recError) setMicError(MIC_NOTE)
   }, [recError])
 
-  const finish = useCallback(async () => {
-    if (finishingRef.current || !item || !variant || !task) return
+  const finish = useCallback(async (retryBlob?: Blob) => {
+    if ((!retryBlob && finishingRef.current) || !item || !variant || !task) return
     finishingRef.current = true
     cancelledRef.current = false
     setStage('analyzing')
-    const rec = await stop()
+    const rec = retryBlob ?? await stop()
     setBlob(rec && rec.size ? rec : null)
     if (!rec || !rec.size) {
       setFailure('Запись пустая — микрофон не отдал ни одного кадра. Попробуй ещё раз.')
@@ -563,10 +564,11 @@ export function Practice({
       setStage('result')
       return
     }
+    if (!retryBlob) durationRef.current = Math.max(0, Math.round((Date.now() - startedAtRef.current) / 1000))
     try {
       const res = await requestTaskFeedback(rec, task.kind, feedbackPayload(task, variant), {
         variantId: variant.id,
-        durationSec: Math.max(0, Math.round((Date.now() - startedAtRef.current) / 1000)),
+        durationSec: durationRef.current,
         sessionDone: index >= items.length - 1,
       })
       if (cancelledRef.current) return
@@ -674,6 +676,7 @@ export function Practice({
           variant={variant}
           feedback={feedback}
           transcript={transcript}
+          onRetry={blob ? () => void finish(blob) : undefined}
           failure={failure}
           blob={blob}
           seconds={seconds}
@@ -691,6 +694,7 @@ export function Practice({
           variant={variant}
           feedback={feedback}
           transcript={transcript}
+          onRetry={blob ? () => void finish(blob) : undefined}
           failure={failure}
           blob={blob}
           seconds={seconds}
@@ -707,6 +711,7 @@ export function Practice({
         variant={variant}
         feedback={feedback}
         transcript={transcript}
+        onRetry={blob ? () => void finish(blob) : undefined}
         failure={failure}
         blob={blob}
         seconds={seconds}

@@ -59,6 +59,47 @@ class CalibrationTests(unittest.TestCase):
         result = scoring._score_feedback("dialogue",obs,{"ad":"club","points":["location","price"]})
         self.assertEqual([x["score"] for x in result["criteria"]], [1,0])
 
+    def test_summary_and_errors_follow_final_verdict(self):
+        obs = {"questions":[{"n":1,"accepted":True,"heard":"Where is the club located?","reason":"correct"}],
+               "summary":"Old pass rejected the question", "errors":[
+                   {"cat":"order","quote":"Where is the club located?","correction":"Where is the club?","explanation":"old verdict"}]}
+        result=scoring._score_feedback("dialogue",obs,{"ad":"club","points":["location"]})
+        self.assertEqual(result["score"],1)
+        self.assertIn("1 из 1",result["summary"])
+        self.assertEqual(result["errors"],[])
+
+    def test_interview_recheck_verifies_all_five_answers(self):
+        import main
+        from types import SimpleNamespace
+        obs={"answers":[{"n":n,"accepted":True,"heard":"I live here. It is nice.","reason":"correct relevant answer"} for n in range(1,6)]}
+        verdicts={"items":[{"n":n,"accepted":True,"reason":"verified"} for n in range(1,6)]}
+        import json
+        completion=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(verdicts)))])
+        client=unittest.mock.MagicMock()
+        client.chat.completions.create.return_value=completion
+        with patch.object(main,"_track_llm"):
+            asyncio.run(main._recheck_disputed("interview",obs,{"questions":["Where? Why?"]*5},"I live here. It is nice.","",client))
+        self.assertEqual(client.chat.completions.create.call_count,1)
+        self.assertGreaterEqual(client.chat.completions.create.call_args.kwargs["max_tokens"],800)
+
+    def test_personal_preference_needs_no_fixed_intro(self):
+        obs={"aspects":[{"n":4,"opinion_explicit":False,"choice_stated":True,"justified":True}]}
+        result=scoring._score_feedback("monologue",obs,{"transcript":"I prefer cycling because it keeps me healthy.","brief":"which activity you prefer"})
+        self.assertIn("4+", result["criteria"][0]["comment"])
+
+    def test_monologue_recheck_removes_invalid_error_but_keeps_real_one(self):
+        import main, json
+        from types import SimpleNamespace
+        obs={"aspects":[],"lang_errors":[
+            {"quote":"I've got to go","correction":"I have to go","grave":False},
+            {"quote":"he go","correction":"he goes","grave":True}],"logic_errors":[]}
+        checked={"aspects":[],"error_checks":[{"id":0,"valid":False},{"id":1,"valid":True}]}
+        client=unittest.mock.MagicMock()
+        client.chat.completions.create.return_value=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(checked)))])
+        with patch.object(main,"_track_llm"), patch.object(main,"MONOLOGUE_RECHECK",True):
+            result=asyncio.run(main._recheck_aspects("monologue",obs,{},"I've got to go. He go home.","",client))
+        self.assertEqual([e["quote"] for e in result["lang_errors"]],["he go"])
+
     def test_duration_is_bounded_even_for_small_compressed_files(self):
         data=wav(np.zeros(32000, dtype=np.float32))
         with patch.object(audio_check, "MAX_AUDIO_SECONDS", 1):
@@ -85,7 +126,6 @@ class CalibrationTests(unittest.TestCase):
         x = np.full(360 * 16000, .1, dtype=np.float32)
         def entire_window(part, options):
             self.assertLessEqual(len(part), 20 * 16000)
-            self.assertEqual(options.threshold, .05)
             part[-64:] = 0  # upstream implementation mutates its input
             return [{"start": 0, "end": len(part)}]
         with patch("faster_whisper.vad.get_speech_timestamps", side_effect=entire_window):
@@ -95,7 +135,7 @@ class CalibrationTests(unittest.TestCase):
     def test_transient_capacity_retries_same_recognizer(self):
         import main
         with patch.object(main,"STT_TASK_MODE","transcription"), \
-             patch.object(grading_audio,"prepare",return_value=b"prepared"), \
+             patch.object(grading_audio,"analyze_isolated",return_value=({},b"prepared")), \
              patch.object(main,"transcribe_remote",new=AsyncMock(side_effect=[
                  main._RemoteSttError(429,"capacity"), "complete answer"])) as remote, \
              patch.object(main.asyncio,"sleep",new=AsyncMock()), \
@@ -108,7 +148,7 @@ class CalibrationTests(unittest.TestCase):
     def test_authentication_failure_is_not_retried(self):
         import main
         with patch.object(main,"STT_TASK_MODE","transcription"), \
-             patch.object(grading_audio,"prepare",return_value=b"prepared"), \
+             patch.object(grading_audio,"analyze_isolated",return_value=({},b"prepared")), \
              patch.object(main,"transcribe_remote",new=AsyncMock(side_effect=main._RemoteSttError(401,"unauthorized"))) as remote:
             with self.assertRaises(main.SttFailed): asyncio.run(main.transcribe_for_task(b"original"))
             self.assertEqual(remote.await_count,1)

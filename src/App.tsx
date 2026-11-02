@@ -84,7 +84,8 @@ export default function App() {
   const [route, setRoute] = useState<Route>(initialRoute)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   // Телефон и MAX — мини-оболочка по мобильным макетам, см. mini/MiniApp.tsx.
-  const mobile = useMobileShell()
+  const [mobileBusy, setMobileBusy] = useState(false)
+  const mobile = useMobileShell(mobileBusy || route.name === 'session' || route.name === 'conversation')
   /* Тема (тёмная/светлая) — настройка кабинета, применяется атрибутом на
      корневом .app: CSS-переменные переопределяются одним селектором. */
   const { theme } = useSettings()
@@ -248,6 +249,7 @@ export default function App() {
     return (
       <div className="app" data-theme={paint} data-mode={mode}>
         <MiniApp
+          onBusyChange={setMobileBusy}
           onLogout={() => setRoute(isMaxLaunch() ? { name: 'maxlogin' } : { name: 'welcome' })}
           onFeedback={onFeedback}
         />
@@ -317,6 +319,7 @@ export default function App() {
           onStats={() => setRoute({ name: 'stats' })}
           onCalendar={() => setRoute({ name: 'calendar' })}
           onProfile={() => setRoute({ name: 'profile' })}
+          onMistakes={(items) => setRoute({ name: 'session', items, nonce: Date.now() })}
         />
         {rail}
         {feedback}

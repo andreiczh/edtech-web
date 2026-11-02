@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react'
 
 import { isMaxLaunch } from '../max/bridge'
 
-const QUERY = '(max-width: 820px)'
+const QUERY = '(max-width: 820px), (max-width: 1024px) and (max-height: 500px)'
 
 function forcedByUrl(): boolean {
   try {
@@ -21,13 +21,15 @@ function forcedByUrl(): boolean {
   }
 }
 
-export function useMobileShell(): boolean {
+export function useMobileShell(locked = false): boolean {
   const [narrow, setNarrow] = useState(() => window.matchMedia(QUERY).matches)
   useEffect(() => {
+    if (locked) return // resizing/rotation must not unmount an active recording
     const mq = window.matchMedia(QUERY)
+    setNarrow(mq.matches)
     const cb = (e: MediaQueryListEvent) => setNarrow(e.matches)
     mq.addEventListener('change', cb)
     return () => mq.removeEventListener('change', cb)
-  }, [])
+  }, [locked])
   return narrow || forcedByUrl() || isMaxLaunch()
 }

@@ -36,55 +36,10 @@ const KIND_RU: Record<string, string> = {
   monologue: 'Голосовое',
 }
 
-/* Серии графика — как на макете: чтение / вопросы и интервью / голосовое. */
-const SERIES: Array<{ label: string; kinds: string[]; color: string }> = [
-  { label: 'Чтение', kinds: ['reading'], color: '#B7A6F0' },
-  { label: 'Вопросы и интервью', kinds: ['dialogue', 'interview'], color: '#F0537F' },
-  { label: 'Голосовое сообщение', kinds: ['monologue'], color: '#2C97E0' },
-]
+import { aggregate, SERIES, type Range } from '../account/statsSeries'
 
-type Range = 'week' | 'month' | 'year'
-
-/** Агрегация истории по корзинам периода: среднее по работам серии в корзине.
-    Возвращает подписи корзин и по значению (или null) на серию. */
-function aggregate(history: MeAnalytics['history'], range: Range) {
-  const now = new Date()
-  const buckets: Array<{ label: string; from: string; to: string }> = []
-  if (range === 'week') {
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(now)
-      d.setDate(d.getDate() - i)
-      const iso = d.toISOString().slice(0, 10)
-      buckets.push({ label: ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'][d.getDay()], from: iso, to: iso })
-    }
-  } else {
-    const months = range === 'month' ? 6 : 12
-    for (let i = months - 1; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const from = d.toISOString().slice(0, 7)
-      buckets.push({
-        label: ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'][d.getMonth()],
-        from,
-        to: from,
-      })
-    }
-  }
-  const series = SERIES.map((s) => ({
-    ...s,
-    points: buckets.map((b) => {
-      const inBucket = history.filter((h) => {
-        const key = range === 'week' ? h.d : h.d.slice(0, 7)
-        return key >= b.from && key <= b.to && s.kinds.includes(h.k)
-      })
-      if (inBucket.length === 0) return null
-      return Math.round(inBucket.reduce((sum, h) => sum + h.p, 0) / inBucket.length)
-    }),
-  }))
-  return { labels: buckets.map((b) => b.label), series }
-}
-
-function AreaChart({ history, range }: { history: MeAnalytics['history']; range: Range }) {
-  const { labels, series } = useMemo(() => aggregate(history, range), [history, range])
+function AreaChart({ history, range, today }: { history: MeAnalytics['history']; range: Range; today: string }) {
+  const { labels, series } = useMemo(() => aggregate(history, range, today), [history, range, today])
   const W = 1200
   const H = 260
   const padL = 46
@@ -95,7 +50,7 @@ function AreaChart({ history, range }: { history: MeAnalytics['history']; range:
   const xs = (i: number) => padL + ((W - padL - padR) * i) / Math.max(1, n - 1)
   const ys = (v: number) => padT + (H - padB - padT) * (1 - v / 100)
 
-  const hasData = series.some((s) => s.points.filter((p) => p !== null).length >= 2)
+  const hasData = series.some((s) => s.points.some((p) => p !== null))
   if (!hasData) {
     return (
       <p className="statpage__empty">
@@ -119,7 +74,7 @@ function AreaChart({ history, range }: { history: MeAnalytics['history']; range:
       })}
       {labels.map((l, i) => (
         <text key={i} x={xs(i)} y={H - 8} textAnchor="middle" fontSize="12" fill="var(--text-dim)" fontWeight="600">
-          {l}
+          {n <= 12 || i % 5 === 0 || i === n-1 ? l : ''}
         </text>
       ))}
       {series.map((s) => {
@@ -258,7 +213,7 @@ export function StatsScreen({ onBack: _onBack }: { onBack?: () => void }) {
           </div>
         </div>
         {analytics ? (
-          <AreaChart history={analytics.history ?? []} range={range} />
+          <AreaChart history={analytics.history ?? []} range={range} today={stats?.today ?? new Date().toISOString().slice(0,10)} />
         ) : (
           <p className="statpage__empty">Загружаю…</p>
         )}
@@ -290,8 +245,7 @@ export function StatsScreen({ onBack: _onBack }: { onBack?: () => void }) {
           ))}
           {weakest && (
             <p className="statpage__note">
-              {KIND_RU[weakest.k] ?? weakest.k} — твоя точка роста. Вариант на основе ошибок уже
-              собран под неё.
+              {KIND_RU[weakest.k] ?? weakest.k} — твоя точка роста. Повтори этот раздел в тренажёре.
             </p>
           )}
         </div>
