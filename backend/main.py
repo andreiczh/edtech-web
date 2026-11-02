@@ -3226,7 +3226,7 @@ async def _count_http(request, call_next):
             _track_usage(http_5xx=1)
         elif code == 429:
             _track_usage(http_429=1)
-        elif code < 400 and request.url.path not in ("/task_feedback", "/monologue"):
+        elif code < 400 and request.url.path not in ("/task_feedback", "/monologue", "/talk_stream"):
             _track_usage(http_ok=1)
     if request.url.path.startswith(("/auth/", "/me/", "/progress")):
         response.headers["Cache-Control"] = "no-store"
@@ -3386,13 +3386,15 @@ def _health_db_refresh() -> None:
 
 
 @app.get("/health")
-def health(response: Response):
-    ready = _storage_ok and bool(os.environ.get("LLM_API_KEY", "").strip())
+async def health(response: Response):
+    availability = await readiness(response)
+    ready = availability["ok"]
     if not ready:
         response.status_code = 503
     return {
         "ok": ready,
         "build": os.environ.get("RENDER_GIT_COMMIT", "local"),
+        "readiness": availability,
         "stt": (
             f"mistral:{STT_REMOTE_MODEL}"
             + (f" (запасной: faster-whisper {WHISPER_MODEL_FAST}/{WHISPER_MODEL})"
@@ -4322,8 +4324,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
         print(f"[audio] запись отклонена без распознавания: {sound}")
         raise HTTPException(status_code=422, detail=quiet)
 
-    # Выжимки памяти тянем ПАРАЛЛЕЛЬНО с распознаванием: STT занимает 0.5-2 с,
-    # SELECT успевает заведомо раньше — добавка к задержке ровно ноль.
+    # Оценка зависит только от текущего ответа и задания, без истории ученика.
     try:
         transcript_text = await transcribe_for_task(data, filename)
     except SttFailed as e:
@@ -4588,8 +4589,7 @@ async def task_feedback(
     «сердцебиением» — см. `_json_with_heartbeat`; путь обязан быть в
     `_STREAM_PATHS`, иначе gzip молча похоронит стриминг.
 
-    Authorization подтверждает сессию; профиль привязан к найденному аккаунту,
-    ошибок, и работает входной шлюз."""
+    Authorization подтверждает сессию; память ошибок привязана к найденному аккаунту."""
     _check_voice_rate(x_device or "admin")
     if kind not in {"reading", "dialogue", "interview", "monologue"}:
         raise HTTPException(status_code=422, detail=f"Неизвестный тип задания: {kind}")
@@ -4663,6 +4663,20 @@ def _sanitize_history(raw: str, turns: int = _HISTORY_TURNS,
         limit = chars if i >= len(out) - full else chars_old
         m["content"] = m["content"][:limit]
     return out
+
+
+async def _observe_conversation(stream):
+    """Count the final NDJSON outcome, not the early HTTP 200."""
+    completed = False
+    try:
+        async for chunk in stream:
+            result = json.loads(chunk)
+            if result.get("done"):
+                completed = bool(result.get("user") and result.get("reply") and not result.get("error"))
+            yield chunk
+    finally:
+        _track_usage(**({"conversation_ok": 1} if completed else {"conversation_failed": 1}))
+        await stream.aclose()
 
 
 @app.post("/talk_stream")
@@ -4948,7 +4962,7 @@ async def talk_stream(audio: UploadFile = File(...),
         ) + "\n"
 
     return StreamingResponse(
-        gen(),
+        _observe_conversation(gen()),
         # text/event-stream, а не application/x-ndjson — см. объяснение у /monologue:
         # на этот тип прокси отключают буферизацию, фронту заголовок безразличен.
         media_type="text/event-stream",

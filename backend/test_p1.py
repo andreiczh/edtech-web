@@ -60,6 +60,26 @@ class P1Tests(unittest.TestCase):
         self.assertEqual(res.headers["cache-control"], "no-store")
         return res.json()
 
+    def test_health_detects_database_loss_after_startup(self):
+        with patch.dict(os.environ, {"LLM_API_KEY": "test-config-only"}), \
+             patch.dict(main._READY_CACHE, {"at": 0, "database": True}), \
+             patch.object(storage, "_exec", side_effect=RuntimeError("database unavailable")):
+            res = self.client.get("/health")
+        self.assertEqual(res.status_code, 503)
+        self.assertFalse(res.json()["ok"])
+        self.assertFalse(res.json()["readiness"]["database"])
+
+    def test_conversation_stream_failure_is_not_http_success(self):
+        with patch.object(main, "transcribe_auto", side_effect=main.SttFailed("test failure")), \
+             patch.object(main, "_load_memory", new=AsyncMock(return_value={})), \
+             patch.object(main, "_track_usage") as track:
+            res = self.client.post("/talk_stream", headers=self.headers,
+                                   files={"audio": ("test.mp3", b"synthetic audio", "audio/mpeg")})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(json.loads(res.text)["user"], "")
+        self.assertIn({"conversation_failed": 1}, [c.kwargs for c in track.call_args_list])
+        self.assertNotIn({"http_ok": 1}, [c.kwargs for c in track.call_args_list])
+
     def test_registration_defaults_to_no_consent(self):
         settings = json.loads(storage.get_settings(self.user["id"]))
         self.assertIs(settings["corpus_consent"], False)

@@ -3058,7 +3058,7 @@
   "/task_feedback": {
    "post": {
     "summary": "Task Feedback",
-    "description": "Разбор ответа на задание устной части (39-42). Отдаётся потоком с\n«сердцебиением» — см. `_json_with_heartbeat`; путь обязан быть в\n`_STREAM_PATHS`, иначе gzip молча похоронит стриминг.\n\nAuthorization подтверждает сессию; профиль привязан к найденному аккаунту,\nошибок, и работает входной шлюз.",
+    "description": "Разбор ответа на задание устной части (39-42). Отдаётся потоком с\n«сердцебиением» — см. `_json_with_heartbeat`; путь обязан быть в\n`_STREAM_PATHS`, иначе gzip молча похоронит стриминг.\n\nAuthorization подтверждает сессию; память ошибок привязана к найденному аккаунту.",
     "operationId": "task_feedback_task_feedback_post",
     "parameters": [
      {

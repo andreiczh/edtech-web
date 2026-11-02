@@ -142,7 +142,7 @@ main.LLM_FALLBACK_MODEL = saved
 
 # ------------------------------------------------------------ /health
 reset()
-h = main.health(main.Response())
+h = asyncio.run(main.health(main.Response()))
 check(isinstance(h.get("llm_fallback"), dict) and h["llm_fallback"]["count"] == 0
       and h["llm_fallback"]["active"] is False and h["llm_fallback"]["model"] == "fallback-model",
       "/health показывает состояние подмены", str(h.get("llm_fallback")))
