@@ -51,10 +51,10 @@ services:
       # только на 100%. Узнаешь реальную квоту в консоли Mistral — поменяй тут.
       - key: MONTHLY_LLM_BUDGET
         value: "30000"
-      # Точное распознавание ТОЛЬКО для оцениваемых заданий 39-42: там каждое
-      # слово превращается в балл ФИПИ, а лишняя секунда незаметна (ученик уже
-      # отговорил минуту). Разговор остаётся на быстрой voxtral-mini. Пусто =
-      # везде одна и та же модель. При сбое точной модели оценка не выставляется.
+      # Fixed transcription endpoint for grading; chat Voxtral currently returns
+      # 429 with this account. No automatic recognizer/model fallback in grading.
+      - key: STT_TASK_MODE
+        value: "transcription"
       - key: STT_TASK_MODEL
         value: "voxtral-small-latest"
       # Вход через мини-приложение MAX: токен бота из business.max.ru. Секрет —
