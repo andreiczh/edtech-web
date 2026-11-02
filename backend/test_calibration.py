@@ -108,6 +108,14 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual(client.chat.completions.create.call_count,2)
         self.assertTrue(obs["answers"][0]["accepted"])
 
+    def test_aspect_explanation_uses_final_observations(self):
+        c={"n":2,"named_first":True,"named_second":True,"specific_first":True,
+           "specific_second":False,"comment":"No second advantage at all"}
+        text=sc.aspect_comment(c)
+        self.assertIn("слишком общая",text)
+        self.assertNotIn("No second",text)
+        self.assertNotIn("первого",text)
+
     def test_personal_preference_needs_no_fixed_intro(self):
         obs={"aspects":[{"n":4,"opinion_explicit":False,"choice_stated":True,"justified":True}]}
         result=scoring._score_feedback("monologue",obs,{"transcript":"I prefer cycling because it keeps me healthy.","brief":"which activity you prefer"})

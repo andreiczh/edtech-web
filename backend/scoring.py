@@ -237,6 +237,9 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
             if _plan_form:
                 c["plan_verb_form"] = _plan_form
     aspects = ege_scoring.aspect_verdicts(raw_aspects)
+    final_checks = {c.get("n"): c for c in raw_aspects if isinstance(c, dict)}
+    for aspect in aspects:
+        aspect["comment"] = ege_scoring.aspect_comment(final_checks.get(aspect["n"], {"n": aspect["n"]}))
     # Ошибки без опоры в речи ученика вон ДО подсчёта (05.08.2026): их число
     # напрямую решает баллы за организацию и за язык, а проверить их ученику
     # нечем. Выдуманная цитата и цитата, которой нет вовсе, несправедливы
