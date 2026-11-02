@@ -76,6 +76,10 @@ def _verdict_from_defects(defects: int, unintelligible: bool = False,
     return FULL if defects == 0 else PARTIAL
 
 
+def normalize_apostrophes(text: str) -> str:
+    return str(text or "").translate(str.maketrans({"’": "'", "‘": "'", "ʼ": "'"}))
+
+
 def verb_form_matches(plan: str, student: str) -> bool:
     """Совпадает ли глагольная форма мнения с той, что требует план задания.
 
@@ -84,7 +88,7 @@ def verb_form_matches(plan: str, student: str) -> bool:
     Сравнение механическое — модель только цитирует обе формы, решение здесь.
     Пустая цитата плана = проверять нечего, придираться не за что.
     """
-    plan_s, student_s = (plan or "").lower(), (student or "").lower()
+    plan_s, student_s = normalize_apostrophes(plan).lower(), normalize_apostrophes(student).lower()
     if not plan_s.strip() or not student_s.strip():
         return True
 
@@ -145,7 +149,7 @@ def merge_two_passes(first: dict, second: dict) -> dict:
                 if val == other:
                     continue
                 if key.startswith("described"):
-                    base[key] = val          # спорное описание — в пользу ученика
+                    base[key] = val or other  # спорное описание — в пользу ученика
                 elif key.startswith("factual"):
                     base[key] = val or other  # замеченную ошибку не прощаем
                 else:
@@ -182,7 +186,7 @@ def opinion_form_from_speech(transcript: str) -> str:
     m = re.search(
         r"\bI(?:'d| would| will|'ll)?\s+(?:definitely\s+|personally\s+)?"
         r"(?:prefer(?:red)?|choose|chose|pick(?:ed)?|rather)\b[^.!?]{0,40}",
-        str(transcript or ""), re.IGNORECASE)
+        normalize_apostrophes(transcript), re.IGNORECASE)
     return m.group(0).strip() if m else ""
 
 
@@ -190,7 +194,7 @@ def plan_form_from_brief(brief: str) -> str:
     """Форма мнения, которую требует ПЛАН задания, — из текста brief кодом."""
     m = re.search(
         r"\byou(?:'d| would)?\s+prefer(?:red)?\b",
-        str(brief or ""), re.IGNORECASE)
+        normalize_apostrophes(brief), re.IGNORECASE)
     return m.group(0).strip() if m else ""
 
 
@@ -229,6 +233,10 @@ def aspect_verdicts(checks: list[dict]) -> list[dict]:
             # является универсальной отпиской, годной для чего угодно.
             defects = sum((no("named_first"), no("named_second"),
                            no("specific_first"), no("specific_second")))
+            # The 2026 guide, p.44: covering only one of the two types is
+            # MISSING, regardless of contradictory specificity flags.
+            if no("named_first") or no("named_second"):
+                defects = max(defects, missing_at)
         else:
             # Мнение: заявлено как своё, выбор назван, обоснован; плюс глагольная
             # форма должна совпадать с той, что требует план задания.
@@ -293,6 +301,10 @@ def doubtful_aspects(observations: dict, transcript: str) -> list[int]:
             weight = 3
         elif not evidence and flags_on:
             weight = 3
+        elif n in (2, 3) and any(c.get(f"specific_{side}") is True
+                                and c.get(f"named_{side}") is False
+                                for side in ("first", "second")):
+            weight = 3  # contradictory observations need adjudication
         elif verdicts.get(n) == PARTIAL:
             weight = 2
         if weight:
@@ -1127,12 +1139,16 @@ def count_phrases(answer: str) -> int:
     «In the village», «Joan Rowling») не в счёт — методичка перечисляет их
     поимённо. Повтор той же фразы второй фразой не становится.
     """
-    text = re.sub(r"\s+", " ", str(answer or "")).strip()
+    text = re.sub(r"\s+", " ", normalize_apostrophes(answer)).strip()
     if not text:
         return 0
     seen: set[str] = set()
     total = 0
-    for raw in re.split(r"[.!?]+", text):
+    # ASR punctuation is arbitrary. Count an explicit subject + predicate
+    # after a clause connector too, as FIPI requires for complex sentences.
+    boundary = (r"[.!?]+|\b(?:and|but|because|although|while|whereas|so|that)\s+"
+                r"(?=(?:i|you|he|she|it|we|they|there)\b)")
+    for raw in re.split(boundary, text, flags=re.IGNORECASE):
         words = re.findall(r"[A-Za-z']+", raw)
         if not words:
             continue
@@ -1142,6 +1158,9 @@ def count_phrases(answer: str) -> int:
         if len(words) <= _FRAGMENT_MAX and not has_verb:
             continue                      # обрывок
         key = " ".join(low)
+        if key in {"i think", "i believe", "i suppose", "i guess", "i mean",
+                   "that's an interesting question", "thank you for your question"}:
+            continue
         if key in seen:
             continue                      # та же фраза дважды — одна фраза
         seen.add(key)

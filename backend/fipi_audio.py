@@ -389,3 +389,78 @@ def dialogue_cases() -> list[dict]:
 def monologue_cases() -> list[dict]:
     """Записи задания 4, для которых файл реально лежит на диске."""
     return [c for c in MONOLOGUE_AUDIO if os.path.exists(path(c["audio"]))]
+
+
+# Official 2026 guide, pp. 75–86. Compare the five item verdicts.
+INTERVIEW_AUDIO = [{'work': '0051',
+  'audio': 'task3_12_0051.ogg',
+  'expert': [0, 1, 1, 1, 0],
+  'questions': ['How much time a week do you usually spend watching TV?',
+                'What TV programmes are now popular among teenagers?',
+                'What is your favourite TV show? Why?',
+                'Why is watching too much TV a bad idea for a teenager?',
+                'What would you like to change about Russian TV?'],
+  'source_pages': [75, 77]},
+ {'work': '5563',
+  'audio': 'task3_13_5563.ogg',
+  'expert': [1, 0, 0, 0, 1],
+  'questions': ['What gadgets do you use in your daily life?',
+                'How do digital technologies make our life easier?',
+                'What do you think the best invention of mankind is?',
+                'What famous Russian inventors do you know? What are they famous for? Name at '
+                'least one.',
+                'Do you think you can live without a mobile phone for a month? Why or why not?'],
+  'source_pages': [77, 78]},
+ {'work': '4596',
+  'audio': 'task3_14_4596.ogg',
+  'expert': [1, 1, 1, 1, 1],
+  'questions': ['In what region do you live? Do you live in a big city, a town or in a village?',
+                'Do you live in a flat or in a house? What is it like?',
+                'What would you like to change about your flat or house? Why?',
+                'What do you like and dislike about your neighbourhood?',
+                'What kind of housing would you like to have in the future?'],
+  'source_pages': [79, 80],
+  'source_note': 'Five item comments award 1 each; the printed total says 4. Compare items, flag '
+                 'the contradictory total.'},
+ {'work': '3775',
+  'audio': 'task3_15_3775.mp3',
+  'expert': [1, 1, 0, 0, 0],
+  'questions': ['What style of clothes do you prefer?',
+                'Where do you buy most of your clothes? How often do you buy clothes for yourself?',
+                'Why do you think teenagers often experiment with their clothes?',
+                'Is fashion important for you? Why or why not?',
+                'Has your taste in clothes changed over time? 80'],
+  'source_pages': [80, 81]},
+ {'work': '9377',
+  'audio': 'task3_16_9377.mp3',
+  'expert': [0, 0, 0, 0, 1],
+  'questions': ['Do you use public transport on a regular basis?',
+                'What public transport is available in the place where you live? Does this place '
+                'need more public transport?',
+                'What are the main advantages and disadvantages of public transport?',
+                'What do you usually do when you get stuck in a traffic jam?',
+                'Do you agree that people should try to use public transport more often? Why or '
+                'why not?'],
+  'source_pages': [82, 83]},
+ {'work': '3128',
+  'audio': 'task3_17_3128.mp3',
+  'expert': [1, 1, 0, 0, 0],
+  'questions': ['Do you like shopping? Is shopping a popular activity in Russia?',
+                'Who do you love shopping with? Why?',
+                'What do you like more: shopping for clothes or shopping for food? Why?',
+                'Why do you think online shopping is so popular these days?',
+                'How do you think people’s shopping habits will change in the future?'],
+  'source_pages': [83, 84]},
+ {'work': '5471',
+  'audio': 'task3_18_5471.mp3',
+  'expert': [1, 0, 1, 1, 0],
+  'questions': ['Why do you think people like taking photographs?',
+                'Do you like having your photo taken? Why or why not?',
+                'How often do you take photos? What of?',
+                'What is your favourite photo? Describe it.',
+                'Why do you think so many people enjoy taking selfies?'],
+  'source_pages': [85, 86]}]
+
+
+def interview_cases() -> list[dict]:
+    return [c for c in INTERVIEW_AUDIO if os.path.exists(path(c["audio"]))]

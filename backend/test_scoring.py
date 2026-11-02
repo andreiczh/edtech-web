@@ -297,8 +297,8 @@ check(len(scoring._errors_from([{"quote": str(i)} for i in range(20)], limit=3))
 
 p_neutral, ctx = scoring._feedback_prompt("dialogue", {"ad": "x", "points": ["a"]}, "t")
 p_critic, _ = scoring._feedback_prompt("dialogue", {"ad": "x", "points": ["a"]}, "t", "critic")
-check(len(p_critic) > len(p_neutral),
-      "промпт: строгость персоны дописывается, а не заменяет правила")
+check(p_critic == p_neutral,
+      "промпт: экзаменационная оценка не зависит от персоны")
 check(ctx["points"] == ["a"], "промпт: контекст для подсчёта балла возвращается")
 check("referenceText" not in p_neutral or True, "промпт: собирается без падения")
 

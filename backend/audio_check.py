@@ -30,6 +30,32 @@ import io
 import av
 import numpy as np
 
+# Compressed size alone does not bound decoded RAM or provider audio minutes.
+# Six minutes accommodates all EGE tasks, including the five-question interview.
+MAX_AUDIO_SECONDS = 360
+
+
+class AudioTooLong(ValueError):
+    pass
+
+
+def validate_duration(data: bytes) -> None:
+    """Bound decoded duration without retaining frames, even without metadata."""
+    try:
+        with av.open(io.BytesIO(data)) as c:
+            if c.duration is not None and c.duration / av.time_base > MAX_AUDIO_SECONDS:
+                raise AudioTooLong("audio exceeds six minutes")
+            seconds = 0.0
+            for frame in c.decode(audio=0):
+                seconds += frame.samples / frame.sample_rate
+                if seconds > MAX_AUDIO_SECONDS:
+                    raise AudioTooLong("audio exceeds six minutes")
+    except AudioTooLong:
+        raise
+    except Exception:
+        # The existing format/silence checks own invalid-file diagnostics.
+        return
+
 # Кадр считаем «громким», если его среднеквадратичная амплитуда выше этого.
 # 0.01 от полной шкалы — это примерно −40 дБFS: тише говорит только тот, кто
 # не говорит. Шум микрофонного пола на порядок ниже.
@@ -99,16 +125,24 @@ def to_pcm(data: bytes, ext: str = ".webm") -> np.ndarray | None:
             rs = av.audio.resampler.AudioResampler(format="s16", layout="mono",
                                                    rate=16000)
             got: list[np.ndarray] = []
+            samples = 0
             for frame in c.decode(audio=0):
                 for f in rs.resample(frame):
+                    samples += f.samples
+                    if samples > MAX_AUDIO_SECONDS * 16000:
+                        raise AudioTooLong("audio exceeds six minutes")
                     got.append(f.to_ndarray().reshape(-1))
             return got
 
     try:
         chunks = decode(ext.lstrip(".") or None)
+    except AudioTooLong:
+        raise
     except Exception:
         try:  # формат не угадали — пусть PyAV определит сам
             chunks = decode(None)
+        except AudioTooLong:
+            raise
         except Exception:
             return None
     if not chunks:

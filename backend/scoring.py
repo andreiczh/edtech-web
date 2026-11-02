@@ -35,7 +35,8 @@ def _feedback_prompt(kind: str, payload: dict, transcript: str,
     `persona` меняет СТРОГОСТЬ и ГОЛОС разбора (см. ege_prompts.STRICTNESS),
     но не правила и не шкалу: спорное решается за или против ученика, а балл
     считается одной и той же таблицей ФИПИ."""
-    extra = ege_prompts.strictness_block(persona)
+    # Exam marks cannot depend on the conversational character selected in UI.
+    extra = ""
     if kind == "reading":
         ref = str(payload.get("referenceText") or "")
         diff = ege_scoring.reading_diff(ref, transcript)
@@ -100,6 +101,8 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
         is_dialogue = kind == "dialogue"
         items = obs.get("questions" if is_dialogue else "answers") or []
         items = [it for it in items if isinstance(it, dict)]
+        if items and all(isinstance(it.get("n"), int) for it in items):
+            items = sorted(items, key=lambda it: it["n"])
         expected = len(ctx.get("points" if is_dialogue else "questions") or [])
         # Задание без списка пунктов — это дырка в банке, а не строгая работа.
         # Балл всё равно считаем из максимума (иначе ученик вовсе без оценки),
@@ -288,9 +291,9 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
             # другое, потеряет доверие ко всему разбору. Живые эксперты, к
             # слову, тоже расходятся: методичка описывает третью проверку.
             "accuracy_note": (
-                "Балл ориентировочный: на проверочных работах мы попадаем в "
-                "пределы одного балла от эксперта примерно в половине случаев. "
-                "Разбор ошибок ниже точнее самого балла — смотри на него."
+                "Ориентировочная оценка по распознанному тексту. Ошибки "
+                "распознавания могут изменить балл и разбор; фонетика не оценена. "
+                "Это тренировочный ориентир, а не оценка эксперта ФИПИ."
             )}
 
 

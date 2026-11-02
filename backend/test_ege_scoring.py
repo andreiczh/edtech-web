@@ -608,7 +608,7 @@ def check_merge() -> list[str]:
     asp = m["aspects"][0]
 
     cases = [
-        (asp["described_second"] is False,
+        (asp["described_second"] is True,
          "спорное описание фото решается в пользу ученика"),
         (asp["linked_to_topic"] is False,
          "спорный признак решается строже: система и так щедрее эксперта"),

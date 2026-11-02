@@ -367,6 +367,9 @@ def dialogue_prompt(ad: str, points: list[str]) -> str:
         'только если не принят>"}], "errors": [{"cat": "gram|lex|order|missing", '
         '"quote": "<English>", "correction": "<English>", "explanation": '
         '"<по-русски>"}], "summary": "<одно предложение по-русски>"}\n'
+        "n is the ORIGINAL NUMBER OF THE ADVERTISEMENT POINT, never the order of "
+        "speech. Keep an empty slot for an unasked point; never shift later questions "
+        "up. In each item judge only the quote matched to that point. "
         "questions must contain exactly one object per point, in order, even when a "
         "question was not asked. errors: up to 6 most important, for the student's "
         "long-term mistake profile.\n"
@@ -410,10 +413,13 @@ _INTERVIEW_RULES = (
     "for only one of two named preferences; an unfinished THIRD phrase when the first "
     "two are already a full and correct answer. Repeated errors inside ONE answer count "
     "once, but each answer is judged on its own.\n\n"
-    "A phrase must be a real sentence with a subject and a verb. «Quite warm», «It's "
-    "green», «In the village», «Somewhere far from big cities», «Maybe on the Maldives» "
+    "A phrase must be a real sentence with a subject and a verb. «Quite warm», "
+    "«In the village», «Somewhere far from big cities», «Maybe on the Maldives» "
     "are not phrases — they are fragments, and an answer built out of them is rejected "
-    "however sensible it sounds.\n\n"
+    "however sensible it sounds. «It's green» DOES contain a subject and a verb. "
+    "A complete subordinate clause with a subject and a predicate also counts; "
+    "punctuation inserted by speech recognition is not a sentence-count rule. "
+    "Ignore false starts that were immediately corrected and benign spoken repetitions.\n\n"
     "CALIBRATION — how real examiners marked real answers:\n"
     "- «In Troitsk. It's a part of Moscow. Quite warm.» — REJECTED: one real sentence "
     "and two fragments.\n"
@@ -464,12 +470,16 @@ def interview_prompt(questions: list[str]) -> str:
         f"{_INTERVIEW_RULES}\n\n"
         f"{_RU}\n\n"
         "Return ONLY this JSON:\n"
-        '{"answers": [{"n": 1, "phrases": <how many countable phrases>, "accepted": '
+        '{"answers": [{"n": 1, "heard": "<complete verbatim student answer, exclude interviewer>", "phrases": <how many countable phrases>, "accepted": '
         'true, "borderline": false, "reason": "<по-русски>"}], "errors": [{"cat": '
         '"gram|lex|order|missing|logic", "quote": "<English>", "correction": '
         '"<English>", "explanation": "<по-русски>"}], "summary": "<одно предложение '
         'по-русски>"}\n'
-        "answers must contain exactly one object per question, in order.\n"
+        "answers must contain exactly one object per question, in order. Keep n tied "
+        "to the supplied question, including missing answers. Copy the complete answer "
+        "into heard BEFORE judging it; never correct its grammar or borrow the "
+        "interviewer's words. Judge word order, subject-verb agreement and missing "
+        "verbs throughout that answer, not merely its opening sentence.\n"
         "reason: at most 12 Russian words; for a rejection it MUST name the rule "
         "broken and quote the offending words («одна фраза и фрагмент: Quite warm», "
         "«ошибка: it save»). Never a bare «не зачтён».\n"
@@ -528,7 +538,14 @@ _MONOLOGUE_RULES = (
     "lang_errors — lexical and grammatical only, never phonetic. grave=true for "
     "elementary-level errors (missing third-person -s, missing verb or link verb, an "
     "article error that changes the meaning, a string of words instead of a sentence) "
-    "and for anything that breaks communication. The same error repeated is listed once.\n\n"
+    "and for anything that breaks communication. The same error repeated is listed once. "
+    "Do not invent grammar errors to improve style: valid spoken contractions, 'I've "
+    "got to go', 'their homes', 'I think I love', and 'the best way of spending time' "
+    "are grammatical. Do not count repetitions/hesitation as grammar errors. "
+    "A factual photo mismatch belongs to content, NOT lang_errors. "
+    "A wrong preposition or agreement belongs to language, NOT logic_errors. "
+    "Every elementary agreement error (e.g. there is + plural, plural subject + "
+    "singular verb) must have grave=true, even when the meaning is understandable.\n\n"
     "LANGUAGE AND CONTENT ARE SEPARATE. Grammar and vocabulary are already punished by "
     "the third criterion, so do NOT lower an aspect just because the sentence is clumsy "
     "or has mistakes. An aspect drops only when the MEANING does not get through: if the "

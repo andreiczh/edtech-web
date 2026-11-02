@@ -229,7 +229,7 @@ class P1Tests(unittest.TestCase):
              patch.object(main, "transcribe_chat", new=AsyncMock()) as chat, \
              patch.object(main, "transcribe_auto", new=AsyncMock()) as fallback:
             self.assertEqual(asyncio.run(main.transcribe_for_task(b"audio")), "spoken text")
-            remote.assert_awaited_once_with(b"audio", temperature=0.0)
+            remote.assert_awaited_once_with(b"audio", temperature=0.0, timeout=40.0)
             chat.assert_not_called()
             remote.side_effect = OSError("transcription unavailable")
             with self.assertRaises(main.SttFailed):

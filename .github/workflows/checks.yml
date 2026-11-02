@@ -13,6 +13,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm audit --audit-level=high
   backend:
     runs-on: ubuntu-latest
     services:
@@ -36,3 +37,13 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: python -m pip install -r backend/requirements.txt
       - run: python scripts/test-backend.py
+      - run: python -m pip install pip-audit && python -m pip_audit -r backend/requirements.txt
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t gospeak-ci .
+      - run: docker run -d --name gospeak-ci -e PORT=7860 -e STT_PROVIDER=mistral -e STT_FALLBACK_LOCAL=0 -p 127.0.0.1:7860:7860 gospeak-ci
+      - run: python scripts/test-container.py
+      - if: always()
+        run: docker logs gospeak-ci

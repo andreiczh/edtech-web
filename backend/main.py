@@ -432,7 +432,8 @@ def _stt_upload_name(data: bytes) -> tuple[str, str]:
     return _STT_UPLOAD.get(audio_check.sniff(data), ("speech.webm", "audio/webm"))
 
 
-async def transcribe_remote(data: bytes, *, temperature: float | None = None) -> str:
+async def transcribe_remote(data: bytes, *, temperature: float | None = None,
+                            timeout: float | None = None) -> str:
     """STT через Mistral (Voxtral). Возвращает распознанный текст.
 
     `language` передаём ЯВНО, и это не формальность. Voxtral понимает 13 языков и
@@ -445,11 +446,13 @@ async def transcribe_remote(data: bytes, *, temperature: float | None = None) ->
     fields = {"model": STT_REMOTE_MODEL, "language": STT_LANGUAGE}
     if temperature is not None:
         fields["temperature"] = str(temperature)
+    options = {"timeout": timeout} if timeout is not None else {}
     r = await _stt_client().post(
         f"{LLM_BASE_URL.rstrip('/')}/audio/transcriptions",
         headers={"Authorization": f"Bearer {_require('LLM_API_KEY')}"},
         data=fields,
         files={"file": (name, data, mime)},
+        **options,
     )
     if r.status_code != 200:
         raise _RemoteSttError(r.status_code, r.text)
@@ -584,6 +587,10 @@ async def _read_audio(audio: UploadFile) -> bytes:
     if len(data) > _AUDIO_MAX:
         raise HTTPException(status_code=413,
                             detail="Запись слишком большая (больше 25 МБ) — запиши ответ заново.")
+    try:
+        await asyncio.to_thread(audio_check.validate_duration, data)
+    except audio_check.AudioTooLong:
+        raise HTTPException(413, "Запись длиннее 6 минут — сократи её и попробуй снова.") from None
     return data
 
 
@@ -2647,7 +2654,18 @@ async def transcribe_for_task(data: bytes, filename: str = "speech.webm") -> str
     global _stt_task_last_error, _stt_task_failures, _stt_task_ok
     try:
         if STT_TASK_MODE == "transcription":
-            text = await transcribe_remote(data, temperature=0.0)
+            import grading_audio
+            prepared = await asyncio.to_thread(grading_audio.prepare, data, filename)
+            for attempt in range(3):
+                try:
+                    text = await transcribe_remote(prepared, temperature=0.0, timeout=40.0)
+                    break
+                except _RemoteSttError as error:
+                    if error.status not in (429, 502, 503, 504) or attempt == 2:
+                        raise
+                    # Retry the SAME recognizer on temporary provider capacity
+                    # failures. Never switch the model or invent a zero score.
+                    await asyncio.sleep(1.0 + attempt)
         elif STT_TASK_MODE == "chat":
             text = await transcribe_chat(data, STT_TASK_MODEL, filename)
         elif STT_TASK_MODE == "local":
@@ -3614,7 +3632,7 @@ async def _grading_observations(client, prompt: str, transcript: str, kind: str)
                           {"role": "user", "content": transcript}],
                 response_format={"type": "json_object"}, temperature=0.0,
                 extra_body={"random_seed": seed},
-                max_tokens=2000 if kind == "monologue" else 900))
+                max_tokens=2000 if kind == "monologue" else 1800 if kind == "interview" else 900))
         _track_llm(completion)
         raw = (completion.choices[0].message.content or "").strip()
         observations = _loads_forgiving(raw)
@@ -4342,6 +4360,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                               filename: str = "speech.webm",
                               persona: str = "") -> dict:
     t0 = time.time()
+    persona = ""  # identical exam rules for every conversational character
 
     # Осмотр САМОГО ЗВУКА до распознавания. Тишину нельзя отдавать в Voxtral:
     # он не умеет отвечать «там ничего нет» и сочиняет текст — на шести
@@ -4474,6 +4493,16 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                     status_code=502,
                     detail="Разбор оборвался на середине — балл не выставляем, "
                            "чтобы не занизить его случайно. Нажми «Повторить разбор».")
+
+        if kind in ("dialogue", "interview"):
+            key = "questions" if kind == "dialogue" else "answers"
+            items = observations.get(key) or []
+            if (len(items) != expected_items
+                    or any(not isinstance(it, dict) or type(it.get("n")) is not int
+                           or type(it.get("accepted")) is not bool for it in items)
+                    or {it["n"] for it in items} != set(range(1, expected_items + 1))):
+                raise HTTPException(502, "Разбор вопросов неполный — балл не выставлен. Повтори попытку.")
+            observations[key] = sorted(items, key=lambda it: it["n"])
 
         # Механическая сверка улик ДО второго прохода: приписана ли ученику фраза,
         # которой он не говорил, и не засчитан ли обрывок вместо ответа. Ничего не

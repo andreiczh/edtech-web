@@ -72,6 +72,34 @@ class UploadTests(unittest.TestCase):
             self.assertEqual(middleware.active, 0)
         asyncio.run(scenario())
 
+    def test_slow_upload_times_out_and_releases_slot(self):
+        async def scenario():
+            sent = []
+            async def slow_receive():
+                await asyncio.sleep(1)
+                return {"type":"http.request", "body":b"x", "more_body":True}
+            async def send(message): sent.append(message)
+            middleware = UploadLimits(self.app, upload_seconds=0.01)
+            scope = {"type":"http", "http_version":"1.1", "method":"POST", "path":"/talk",
+                     "query_string":b"", "headers":[(b"content-type", b"multipart/form-data; boundary=b")],
+                     "scheme":"http", "server":("test",80), "client":("test",1)}
+            await middleware(scope, slow_receive, send)
+            self.assertEqual(sent[0]["status"],408)
+            self.assertEqual(middleware.active,0)
+            self.assertEqual(self.calls,[])
+        asyncio.run(scenario())
+
+    def test_disconnect_releases_slot(self):
+        async def scenario():
+            async def app(*args): raise asyncio.CancelledError()
+            async def receive(): return {"type":"http.disconnect"}
+            async def send(message): pass
+            middleware=UploadLimits(app)
+            with self.assertRaises(asyncio.CancelledError):
+                await middleware({"type":"http", "method":"POST", "path":"/talk", "headers":[]}, receive, send)
+            self.assertEqual(middleware.active,0)
+        asyncio.run(scenario())
+
 
 if __name__ == "__main__":
     unittest.main()
