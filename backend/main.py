@@ -41,7 +41,8 @@ import aiohttp
 import edge_tts
 import httpx
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+load_dotenv()
+from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -58,8 +59,7 @@ import max_auth
 import max_bot
 import speak_check
 import storage
-
-load_dotenv()
+from request_limits import UploadLimits
 
 # Убираем системный HTTP-прокси ИЗ НАШЕГО процесса.
 #
@@ -130,6 +130,11 @@ app.add_middleware(
 # Сжимаем ответы (JS-бандл ~225 КБ несжатым) — важно за нестабильным туннелем
 # (trycloudflare/RF-маршрут): меньше файл — меньше шанс оборваться на середине.
 app.add_middleware(GZipExceptStreams, minimum_size=500)
+app.add_middleware(
+    UploadLimits,
+    authenticate=lambda scope, headers: _require_account(
+        Request(scope), headers.get("x-admin-key"), headers.get("authorization")),
+)
 
 # Собеседники (голос + характер) вынесены в personas.py — это чистые данные
 # без зависимостей от main; здесь только импорт.
@@ -460,21 +465,10 @@ _STORAGE_RETRY: dict = {"attempts": 0, "error": "", "next_at": 0.0}
 
 # ------------------------------------------------------- Входной шлюз API
 #
-# Тяжёлые эндпоинты (STT+LLM+TTS жгут квоту ключа Mistral) закрыты для
-# посторонних: фронт после входа шлёт X-Device = id аккаунта, сервер проверяет,
-# что такой аккаунт существует. Любой curl со случайным uuid получает 401.
-#
-# Скорость: проверка — один SELECT по первичному ключу, и тот кэшируется на
-# 10 минут, так что голосовая петля платит за шлюз ноль почти всегда.
-#
-# Отказ базы = шлюз ОТКРЫТ (fail-open, с криком в лог): назначение шлюза —
-# отсечь халявщиков, а не охранять секреты. Уронить занятия всем ученикам
-# из-за минутной икоты Neon — хуже, чем пропустить одного постороннего.
-#
-# REQUIRE_ACCOUNT=0 выключает шлюз (локальная отладка). ADMIN_KEY проходит
-# всегда — этим пользуются смоук-тесты.
-
-REQUIRE_ACCOUNT = os.environ.get("REQUIRE_ACCOUNT", "1").strip() not in ("0", "false", "no")
+# Authorization: Bearer <random session token>. Only token hashes are stored.
+# The stable account id is for data ownership, never authentication. Database
+# failures deny access; every request checks expiry/revocation (no positive cache).
+# ADMIN_KEY is retained for authorized operational smoke tests.
 
 # Коды доступа на РЕГИСТРАЦИЮ (03.08.2026, хвост №1 из CLAUDE.md: открытая
 # ссылка жгла бы квоту ключа любому прохожему). Логика fail-closed НАМЕРЕННО:
@@ -555,8 +549,6 @@ async def _check_invite(code: str) -> None:
         detail="Неверный код доступа. Спроси код у того, кто поделился ссылкой.",
     )
 
-_ACCOUNT_CACHE: dict[str, float] = {}
-_ACCOUNT_CACHE_TTL = 600.0
 
 # Потолок на загружаемую запись: 3 минуты монолога в webm — около 3 МБ, запас
 # восьмикратный. Без потолка один запрос в сотни мегабайт съедает всю память
@@ -592,33 +584,42 @@ async def _read_audio(audio: UploadFile) -> bytes:
     return data
 
 
-async def _require_account(x_device: str | None, x_admin_key: str | None = None) -> None:
-    if not REQUIRE_ACCOUNT:
-        return
+async def _require_account(request: Request, x_admin_key: str | None = Header(None),
+                           authorization: str | None = Header(None)) -> str:
+    """Account id is never a credential. No positive cache: revocation is immediate."""
     admin = os.environ.get("ADMIN_KEY", "")
     if admin and _safe_eq(x_admin_key, admin):
-        return
-    if not x_device:
-        raise HTTPException(status_code=401, detail="Нужен аккаунт — войди в приложение.")
-    now = time.monotonic()
-    until = _ACCOUNT_CACHE.get(x_device)
-    if until and until > now:
-        return
+        return "admin"
+    if getattr(request.state, "authenticated_account", None):
+        return request.state.authenticated_account
+    token = _bearer_token(authorization)
+    if not token:
+        raise HTTPException(status_code=401, detail="Сессия завершена — войди в приложение.")
     if not _storage_ok:
-        print("[gate] база недоступна — пропускаю без проверки (fail-open)")
-        return
+        raise HTTPException(status_code=503, detail="Не удалось проверить вход — попробуй чуть позже.")
     try:
-        ok = await asyncio.to_thread(storage.account_exists, x_device)
-    except Exception as e:  # noqa: BLE001
-        print(f"[gate] проверка аккаунта не удалась ({type(e).__name__}) — fail-open")
-        return
-    if not ok:
-        raise HTTPException(status_code=401, detail="Нужен аккаунт — войди в приложение.")
-    # Кэш растёт только от НАСТОЯЩИХ аккаунтов — раздуть память мусорными
-    # заголовками нельзя; страховочный сброс на всякий случай.
-    if len(_ACCOUNT_CACHE) > 10_000:
-        _ACCOUNT_CACHE.clear()
-    _ACCOUNT_CACHE[x_device] = now + _ACCOUNT_CACHE_TTL
+        account = await asyncio.to_thread(storage.session_account, token)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Не удалось проверить вход — попробуй чуть позже.")
+    if not account:
+        raise HTTPException(status_code=401, detail="Сессия завершена — войди в приложение.")
+    request.state.authenticated_account = account
+    return account
+
+
+def _bearer_token(authorization: str | None) -> str:
+    if not isinstance(authorization, str):
+        return ""
+    scheme, _, token = authorization.partition(" ")
+    return token.strip() if scheme.lower() == "bearer" else ""
+
+
+async def _auth_result(user: dict, expected_pass_hash: str | None = None) -> dict:
+    try:
+        session = await asyncio.to_thread(storage.issue_session, user["id"], expected_pass_hash)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Не получилось открыть сессию — войди ещё раз.")
+    return {**user, **session}
 
 
 # Рейт-лимит в памяти процесса. Инстанс один (Render free), распределённый
@@ -1035,7 +1036,8 @@ def _check_pw(password: str, stored: str) -> bool:
 async def auth_config():
     """Что показывать на экране регистрации: нужен ли код доступа.
     Фронт прячет поле кода, пока сервер не скажет, что он нужен (§6.48)."""
-    return {"invite_required": INVITE_REQUIRED}
+    return {"invite_required": INVITE_REQUIRED, "auth_scheme": "bearer-v2",
+            "consent_version": storage.CONSENT_VERSION}
 
 
 @app.post("/auth/register")
@@ -1051,6 +1053,9 @@ async def auth_register(request: Request, body: dict = Body(...)):
     nickname = str(body.get("nickname") or "").strip()
     password = str(body.get("password") or "")
     exam = str(body.get("exam") or "ege")
+    consent = body.get("corpus_consent", False)
+    if not isinstance(consent, bool):
+        raise HTTPException(status_code=422, detail="Согласие должно быть да или нет.")
     # Только английские буквы, без цифр: ник генерируется из двух слов, руками
     # его не вводят (23.07.2026). Фронт это и так не даёт, но API обязан
     # проверять сам — в базу не должно попадать то, что нельзя сгенерировать.
@@ -1069,13 +1074,13 @@ async def auth_register(request: Request, body: dict = Body(...)):
     if not _storage_ok:
         raise HTTPException(status_code=503, detail="База недоступна — попробуй чуть позже.")
     try:
-        acc_id = await asyncio.to_thread(storage.create_account, nickname, _hash_pw(password), exam)
+        acc_id = await asyncio.to_thread(storage.create_account, nickname, _hash_pw(password), exam, consent)
     except Exception as e:  # noqa: BLE001
         if storage.is_unique_violation(e):
             raise HTTPException(status_code=409, detail="Этот никнейм занят — нажми Change.")
         print(f"[auth] регистрация не удалась: {type(e).__name__}: {str(e)[:120]}")
         raise HTTPException(status_code=503, detail="Не получилось создать аккаунт — попробуй ещё раз.")
-    return {"id": acc_id, "nickname": nickname, "exam": exam}
+    return await _auth_result({"id": acc_id, "nickname": nickname, "exam": exam})
 
 
 @app.post("/auth/login")
@@ -1090,7 +1095,7 @@ async def auth_login(request: Request, body: dict = Body(...)):
     if row is None or not _check_pw(password, row[2]):
         # Не различаем «нет такого» и «пароль не тот» — нечего дарить перебору.
         raise HTTPException(status_code=401, detail="Неверный никнейм или пароль.")
-    return {"id": row[0], "nickname": row[1], "exam": row[3]}
+    return await _auth_result({"id": row[0], "nickname": row[1], "exam": row[3]}, row[2])
 
 
 # ------------------------------------------------------------ Вход через MAX
@@ -1169,7 +1174,7 @@ async def auth_max(request: Request, body: dict = Body(...)):
         raise HTTPException(status_code=401, detail=f"MAX не подтвердил вход: {res['reason']}.")
     _MAX_STATS["app_logins"] += 1
     _note_miniapp_ready()
-    return await _max_account(res["user"]["id"], body.get("nicknames"))
+    return await _auth_result(await _max_account(res["user"]["id"], body.get("nicknames")))
 
 
 @app.post("/auth/max_link")
@@ -1190,11 +1195,25 @@ async def auth_max_link(request: Request, body: dict = Body(...)):
         raise HTTPException(status_code=401, detail=f"Ссылка не подошла: {res['reason']}.")
     out = await _max_account(res["user_id"], body.get("nicknames"))
     _MAX_STATS["link_logins"] += 1
-    return out
+    return await _auth_result(out)
+
+
+@app.post("/auth/logout")
+async def auth_logout(authorization: str | None = Header(None)):
+    token = _bearer_token(authorization)
+    if not token:
+        raise HTTPException(status_code=401, detail="Нет сессии.")
+    if not _storage_ok:
+        raise HTTPException(status_code=503, detail="Выход не подтверждён — попробуй ещё раз.")
+    try:
+        await asyncio.to_thread(storage.revoke_session, token)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Выход не подтверждён — попробуй ещё раз.")
+    return {"ok": True}
 
 
 @app.get("/progress")
-async def progress(x_device: str | None = Header(None)):
+async def progress(x_device: str = Depends(_require_account)):
     """Какие варианты этот ученик уже сдавал — чтобы выдача сессий вычёркивала
     пройденное на любом устройстве, а не только в этом браузере."""
     if not (_storage_ok and x_device):
@@ -1297,11 +1316,10 @@ def _best_streak(active: set[str]) -> int:
 
 
 @app.get("/me/stats")
-async def me_stats(x_device: str | None = Header(None),
+async def me_stats(x_device: str = Depends(_require_account),
                    x_admin_key: str | None = Header(None)):
     """Стрик, уровень, XP и неделя столбиками — всё для личного кабинета одним
     запросом. Числа считает сервер из activity_days; фронт только рисует."""
-    await _require_account(x_device, x_admin_key)
     if not (_storage_ok and x_device):
         raise HTTPException(status_code=503, detail="Статистика недоступна — база не отвечает.")
     summary = await asyncio.to_thread(storage.activity_summary, x_device)
@@ -1353,6 +1371,11 @@ def _sanitize_settings(raw: dict) -> dict:
     return out
 
 
+def _settings_response(raw: dict) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    return {**_sanitize_settings(raw), "corpus_consent": storage.corpus_consent(raw)}
+
+
 @app.get("/personas")
 async def personas_list():
     """Каталог собеседников для экрана настроек.
@@ -1375,30 +1398,31 @@ async def personas_list():
 
 
 @app.get("/me/settings")
-async def me_settings_get(x_device: str | None = Header(None),
+async def me_settings_get(x_device: str = Depends(_require_account),
                           x_admin_key: str | None = Header(None)):
-    await _require_account(x_device, x_admin_key)
     if not (_storage_ok and x_device):
         return {"settings": {}}
     try:
         raw = json.loads(await asyncio.to_thread(storage.get_settings, x_device))
-    except Exception:  # noqa: BLE001
-        raw = {}
-    return {"settings": _sanitize_settings(raw if isinstance(raw, dict) else {})}
+    except Exception:
+        raise HTTPException(status_code=503, detail="Не удалось загрузить настройки — попробуй ещё раз.")
+    return {"settings": _settings_response(raw)}
 
 
 @app.post("/me/settings")
 async def me_settings_post(body: dict = Body(...),
-                           x_device: str | None = Header(None),
+                           x_device: str = Depends(_require_account),
                            x_admin_key: str | None = Header(None)):
-    await _require_account(x_device, x_admin_key)
     if not x_device:
         raise HTTPException(status_code=401, detail="Нужен аккаунт.")
     if not _storage_ok:
         raise HTTPException(status_code=503, detail="База недоступна — настройки не сохранились.")
     clean = _sanitize_settings(body if isinstance(body, dict) else {})
-    await asyncio.to_thread(storage.save_settings, x_device, json.dumps(clean))
-    return {"settings": clean}
+    try:
+        saved = await asyncio.to_thread(storage.update_settings, x_device, clean)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Настройки не сохранились — попробуй ещё раз.")
+    return {"settings": _settings_response(saved)}
 
 
 # ------------------------------------------------------- Избранные задания
@@ -1419,9 +1443,8 @@ def _fav_out(rows) -> dict:
 
 
 @app.get("/me/favorites")
-async def me_favorites_get(x_device: str | None = Header(None),
+async def me_favorites_get(x_device: str = Depends(_require_account),
                            x_admin_key: str | None = Header(None)):
-    await _require_account(x_device, x_admin_key)
     if not (_storage_ok and x_device):
         return {"items": []}
     try:
@@ -1434,11 +1457,10 @@ async def me_favorites_get(x_device: str | None = Header(None),
 
 @app.post("/me/favorites")
 async def me_favorites_post(body: dict = Body(...),
-                            x_device: str | None = Header(None),
+                            x_device: str = Depends(_require_account),
                             x_admin_key: str | None = Header(None)):
     """Поставить ({"on": true}) или снять звёздочку. Отвечает всем списком —
     фронт сверяет с ним свою копию."""
-    await _require_account(x_device, x_admin_key)
     if not x_device:
         raise HTTPException(status_code=401, detail="Нужен аккаунт.")
     try:
@@ -1460,14 +1482,13 @@ async def me_favorites_post(body: dict = Body(...),
 
 
 @app.get("/me/analytics")
-async def me_analytics(x_device: str | None = Header(None),
+async def me_analytics(x_device: str = Depends(_require_account),
                        x_admin_key: str | None = Header(None)):
     """Аналитика ученика: динамика балла по типам заданий и профиль ошибок.
 
     Считается из уже записываемых results/mistakes — ученик видит, куда
     движется его балл и какие ошибки он таскает за собой из работы в работу.
     Это же сырьё для решения «что решать дальше»."""
-    await _require_account(x_device, x_admin_key)
     if not (_storage_ok and x_device):
         return {"kinds": {}, "history": [], "mistakes": {"total": 0, "by_cat": [], "repeats": []}}
     try:
@@ -1479,12 +1500,11 @@ async def me_analytics(x_device: str | None = Header(None),
 
 @app.post("/me/nickname")
 async def me_nickname(request: Request, body: dict = Body(...),
-                      x_device: str | None = Header(None),
+                      x_device: str = Depends(_require_account),
                       x_admin_key: str | None = Header(None)):
     """Смена ника: имя по-прежнему только генерируется (фронт), сервер проверяет
     те же правила, что при регистрации. Ник — это логин, поэтому под тем же
     рейт-лимитом, что /auth/*."""
-    await _require_account(x_device, x_admin_key)
     if not _rate_ok(f"a:{_client_ip(request)}", 12, 60.0):
         raise HTTPException(status_code=429, detail="Слишком много попыток — подожди минутку.")
     if not x_device:
@@ -1520,7 +1540,7 @@ async def feedback_catalog():
 
 @app.post("/task_dispute")
 async def task_dispute(request: Request, body: dict = Body(...),
-                       x_device: str | None = Header(None),
+                       x_device: str = Depends(_require_account),
                        x_admin_key: str | None = Header(None)):
     """«Не согласен» — с экрана разбора, из разбора беседы и из разговора.
 
@@ -1533,7 +1553,6 @@ async def task_dispute(request: Request, body: dict = Body(...),
     Проверка полноты живёт в disputes.normalize, а не здесь: её же гоняют
     тесты, и обойти её через сырой запрос мимо формы нельзя.
     """
-    await _require_account(x_device, x_admin_key)
     # Щедрый лимит: жалоба — редкое действие, а вот заскриптованный спам мог бы
     # налить в базу гигабайты транскриптов.
     if not _rate_ok(f"d:{_client_ip(request)}", 6, 60.0):
@@ -1613,7 +1632,7 @@ async def admin_shot(shot_id: str, key: str | None = None,
 
 
 @app.get("/pron/weakest")
-async def pron_weakest(variant: str = "", x_device: str | None = Header(None),
+async def pron_weakest(variant: str = "", x_device: str = Depends(_require_account),
                        x_admin_key: str | None = Header(None)):
     """«Переслушай эти слова» — единственное, что фонемный замер показывает ученику.
 
@@ -1626,7 +1645,6 @@ async def pron_weakest(variant: str = "", x_device: str | None = Header(None),
     человеком: распределение говорит, где звук слабее, но не говорит, ошибка это
     или акцент. Совет «переслушай» безвреден при любом ответе, снятый балл — нет.
     """
-    await _require_account(x_device, x_admin_key)
     # ВЫКЛЮЧЕНО по умолчанию с 20.08.2026. Причина — замер на СЕМИ записях
     # живой речи участников ЕГЭ с вердиктами экспертов (fipi_audio.py):
     # показатель GOP не разделяет работы, которым эксперт поставил 1 и 0.
@@ -2581,6 +2599,7 @@ async def transcribe_chat(data: bytes, model: str, filename: str = "speech.webm"
             {"type": "text", "text": _VERBATIM_STT},
         ]}],
         "temperature": 0.0,
+        "random_seed": 20261102,
         "max_tokens": 1200,
     }
     # Таймаут свой: общий STT_TIMEOUT (12 с) заточен под быстрый путь разговора,
@@ -2612,18 +2631,17 @@ async def transcribe_chat(data: bytes, model: str, filename: str = "speech.webm"
 # её затирал следующий успешный запрос, и провал на webm (чат-модель принимает
 # только mp3/wav) прятался за успехом на mp3. Счётчик так не обманешь.
 _stt_task_last_error: str = ""
-_stt_task_fallbacks: int = 0
+_stt_task_failures: int = 0
 _stt_task_ok: int = 0
 
 
 async def transcribe_for_task(data: bytes, filename: str = "speech.webm") -> str:
     """Распознавание для оцениваемых заданий: точная модель, если она задана.
 
-    Откат обязателен и молчаливым быть не должен: разбор без распознавания —
-    это ноль пользы ученику, поэтому при любой осечке точного пути идём
-    обычным, но пишем об этом и в лог, и в /health.
+    Сбой точной модели не подменяется другим распознавателем: иначе повтор
+    одной записи оценивает уже другой текст. В разговоре откат остаётся.
     """
-    global _stt_task_last_error, _stt_task_fallbacks, _stt_task_ok
+    global _stt_task_last_error, _stt_task_failures, _stt_task_ok
     if not STT_TASK_MODEL:
         return await transcribe_auto(data)
     try:
@@ -2633,9 +2651,9 @@ async def transcribe_for_task(data: bytes, filename: str = "speech.webm") -> str
     except Exception as e:  # noqa: BLE001
         detail = f"{type(e).__name__}: {str(e)[:200]}"
         _stt_task_last_error = detail
-        _stt_task_fallbacks += 1
-        print(f"[stt] точная модель {STT_TASK_MODEL} не смогла ({detail}) — откат на обычную")
-        return await transcribe_auto(data)
+        _stt_task_failures += 1
+        print(f"[stt] точная модель {STT_TASK_MODEL} недоступна — оценка не выставлена")
+        raise SttFailed(detail, "Точное распознавание сейчас недоступно. Балл не выставлен — повтори разбор.") from e
 
 
 async def transcribe_auto(data: bytes, local_model: str | None = None) -> str:
@@ -2875,6 +2893,11 @@ class _Completions:
 
     def create(self, **kw):
         global _llm_fallback_count
+        if kw.get("temperature") == 0 and kw.get("response_format"):
+            kw["extra_body"] = {"random_seed": 20261102, **(kw.get("extra_body") or {})}
+            # Grading must not silently switch to a different examiner model.
+            # Conversation still uses the availability fallback below.
+            return self._inner.create(**kw)
         if _llm_use_fallback(kw):
             _llm_fallback_count += 1
             return self._inner.create(**{**kw, "model": LLM_FALLBACK_MODEL})
@@ -3203,8 +3226,10 @@ async def _count_http(request, call_next):
             _track_usage(http_5xx=1)
         elif code == 429:
             _track_usage(http_429=1)
-        elif code < 400:
+        elif code < 400 and request.url.path not in ("/task_feedback", "/monologue", "/talk_stream"):
             _track_usage(http_ok=1)
+    if request.url.path.startswith(("/auth/", "/me/", "/progress")):
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 
@@ -3361,9 +3386,15 @@ def _health_db_refresh() -> None:
 
 
 @app.get("/health")
-def health():
+async def health(response: Response):
+    availability = await readiness(response)
+    ready = availability["ok"]
+    if not ready:
+        response.status_code = 503
     return {
-        "ok": True,
+        "ok": ready,
+        "build": os.environ.get("RENDER_GIT_COMMIT", "local"),
+        "readiness": availability,
         "stt": (
             f"mistral:{STT_REMOTE_MODEL}"
             + (f" (запасной: faster-whisper {WHISPER_MODEL_FAST}/{WHISPER_MODEL})"
@@ -3375,7 +3406,7 @@ def health():
         # она в откат. Без этого поля откат молчит, и система выглядит рабочей,
         # хотя точный путь мёртв (ровно так и было поймано 29.07.2026).
         "stt_task": (f"{STT_TASK_MODEL}: точным путём {_stt_task_ok}, "
-                     f"откатов {_stt_task_fallbacks}"
+                     f"отказов {_stt_task_failures}"
                      + (f"; последняя осечка — {_stt_task_last_error}"
                         if _stt_task_last_error else "")
                      if STT_TASK_MODEL else "та же, что в разговоре"),
@@ -3408,6 +3439,32 @@ def health():
     }
 
 
+_READY_CACHE = {"at": 0.0, "database": False}
+
+
+@app.get("/ready")
+async def readiness(response: Response):
+    """Bounded DB probe; this is not a claim that a provider inference succeeded."""
+    if not _storage_ok:
+        database = False
+    else:
+        if time.monotonic() - _READY_CACHE["at"] > 15:
+            _READY_CACHE["at"] = time.monotonic()
+            _READY_CACHE["database"] = False
+            try:
+                await asyncio.wait_for(asyncio.to_thread(storage._exec, "SELECT 1"), timeout=3)
+                _READY_CACHE["database"] = True
+            except Exception:
+                pass
+        database = _READY_CACHE["database"]
+    key = bool(os.environ.get("LLM_API_KEY", "").strip())
+    ready = bool(database and key)
+    response.status_code = 200 if ready else 503
+    response.headers["Cache-Control"] = "no-store"
+    return {"ok": ready, "database": database, "llm_key_configured": key,
+            "provider_inference": "not_probed"}
+
+
 def _storage_health() -> str:
     """Что с памятью и жив ли фоновый повтор — одной строкой.
 
@@ -3437,9 +3494,8 @@ def _usage_today() -> dict:
 
 @app.post("/talk")
 async def talk(audio: UploadFile = File(...),
-               x_device: str | None = Header(None),
+               x_device: str = Depends(_require_account),
                x_admin_key: str | None = Header(None)):
-    await _require_account(x_device, x_admin_key)
     _check_voice_rate(x_device or "admin")
     t0 = time.time()
     data = await _read_audio(audio)
@@ -3518,17 +3574,28 @@ async def _json_with_heartbeat(work):
     кодом 200. Фронт проверяет и код, и это поле.
     """
     task = asyncio.create_task(work)
-    while True:
-        done, _ = await asyncio.wait({task}, timeout=2.0)
-        if done:
-            break
-        yield "\n"
     try:
-        yield json.dumps(task.result(), ensure_ascii=False)
-    except HTTPException as e:
-        yield json.dumps({"detail": e.detail}, ensure_ascii=False)
-    except Exception as e:  # noqa: BLE001
-        yield json.dumps({"detail": f"Внутренняя ошибка: {e}"}, ensure_ascii=False)
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=2.0)
+            if done:
+                break
+            yield "\n"
+        try:
+            result = task.result()
+            _track_usage(analysis_ok=1)
+            yield json.dumps(result, ensure_ascii=False)
+        except HTTPException as e:
+            _track_usage(analysis_failed=1)
+            yield json.dumps({"detail": e.detail}, ensure_ascii=False)
+        except Exception as e:  # noqa: BLE001
+            _track_usage(analysis_failed=1)
+            print(f"[analysis] failed: {type(e).__name__}")
+            yield json.dumps({"detail": "Не удалось завершить разбор — попробуй ещё раз."}, ensure_ascii=False)
+
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 async def _judge_monologue_text(brief: str, facts: list, script: str) -> dict:
@@ -3542,13 +3609,13 @@ async def _judge_monologue_text(brief: str, facts: list, script: str) -> dict:
     client = llm_client()
     prompt = ege_prompts.monologue_prompt(brief, facts)
 
-    def one_pass():
+    def one_pass(seed=20261102):
         c = client.chat.completions.create(
             model=LLM_MODEL,
             messages=[{"role": "system", "content": prompt},
                       {"role": "user", "content": script}],
             response_format={"type": "json_object"},
-            temperature=0.0, max_tokens=2000)
+            temperature=0.0, extra_body={"random_seed": seed}, max_tokens=2000)
         _track_llm(c)
         return _loads_forgiving((c.choices[0].message.content or "").strip())
 
@@ -3557,7 +3624,7 @@ async def _judge_monologue_text(brief: str, facts: list, script: str) -> dict:
         raise HTTPException(status_code=502, detail="LLM вернул не-JSON.")
     if MONO_CONSENSUS and (obs.get("aspects") or []):
         try:
-            obs2 = await asyncio.to_thread(one_pass)
+            obs2 = await asyncio.to_thread(one_pass, 20261103)
             if obs2:
                 obs = ege_scoring.merge_two_passes(obs, obs2)
         except Exception as e:  # noqa: BLE001 — консенсус не критичен
@@ -3696,7 +3763,7 @@ async def admin_label42_export(x_admin_key: str | None = Header(None)):
 
 @app.post("/monologue")
 async def monologue(audio: UploadFile = File(...),
-                    x_device: str | None = Header(None),
+                    x_device: str = Depends(_require_account),
                     x_admin_key: str | None = Header(None)):
     """Разбор монолога (ЕГЭ Задание 4): полное аудио → batch STT → ОДИН
     структурный проход LLM → JSON-фидбэк (3 критерия + ошибки). Без TTS —
@@ -3705,7 +3772,6 @@ async def monologue(audio: UploadFile = File(...),
     Отдаётся потоком с «сердцебиением» — см. `_json_with_heartbeat`. Тело ответа
     и его разбор на фронте от этого не меняются.
     """
-    await _require_account(x_device, x_admin_key)
     _check_voice_rate(x_device or "admin")
     data = await _read_audio(audio)
     return StreamingResponse(
@@ -4081,7 +4147,7 @@ def _collect_corpus_bg(device: str | None, kind: str, variant: str,
                 settings = json.loads(storage.get_settings(device) or "{}")
             except Exception:  # noqa: BLE001 — битые настройки = нет согласия
                 settings = {}
-            if not settings.get("corpus_consent"):
+            if not storage.corpus_consent(settings):
                 return
             if storage.corpus_bytes_total() >= CORPUS_MAX_MB * 1048576:
                 if not _corpus_full:
@@ -4101,6 +4167,8 @@ def _collect_corpus_bg(device: str | None, kind: str, variant: str,
                 device, kind, variant, data, mime, duration, transcript,
                 reference, labels.pop("_score", None), labels.pop("_max", None),
                 labels)
+            if cid is None:
+                return
             print(f"[corpus] {kind} {len(data) // 1024} КБ, разметка "
                   f"{labels.get('summary', '')} -> {cid[:8]}")
         except Exception as e:  # noqa: BLE001 — сбор корпуса не критичен
@@ -4183,6 +4251,8 @@ def _collect_pron_bg(device: str | None, kind: str, variant: str, data: bytes,
             print("[pron] замер пропущен: процессор занят предыдущим")
             return
         try:
+            if not storage.corpus_consent(json.loads(storage.get_settings(device) or "{}")):
+                return
             import gop
             pcm = audio_check.to_pcm(data, ext)
             if pcm is None:
@@ -4212,6 +4282,8 @@ def _collect_pron_bg(device: str | None, kind: str, variant: str, data: bytes,
             # к ученику они не станут никогда, так что и копить их незачем.
             words = [w for w in words
                      if sum(ch.isalpha() for ch in str(w.get("word") or "")) >= 3]
+            if not storage.corpus_consent(json.loads(storage.get_settings(device) or "{}")):
+                return
             n = storage.pron_add(device, kind, variant, words,
                                  res.get("model", ""), method)
             _pron_done += 1
@@ -4252,9 +4324,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
         print(f"[audio] запись отклонена без распознавания: {sound}")
         raise HTTPException(status_code=422, detail=quiet)
 
-    # Выжимки памяти тянем ПАРАЛЛЕЛЬНО с распознаванием: STT занимает 0.5-2 с,
-    # SELECT успевает заведомо раньше — добавка к задержке ровно ноль.
-    mem_task = asyncio.create_task(_load_memory(device, kind))
+    # Оценка зависит только от текущего ответа и задания, без истории ученика.
     try:
         transcript_text = await transcribe_for_task(data, filename)
     except SttFailed as e:
@@ -4273,7 +4343,6 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     # обвинением: тестировщик поймал ровно это («пишет, я прочитал только
     # 2 слова, хотя фактически прочитал предложение»).
     if audio_check.recognition_failed(sound, transcript_text):
-        mem_task.cancel()
         print(f"[audio] распознавание не справилось: {sound}, "
               f"слов {len(transcript_text.split())}")
         note_failure("stt", "мало слов на длинной записи")
@@ -4294,7 +4363,6 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     # честный ноль сразу, без траты вызова LLM и 3-5 секунд ожидания.
     gate_reason = ege_scoring.sanity_gate(kind, transcript_text)
     if gate_reason is not None:
-        mem_task.cancel()  # выжимки памяти не понадобятся — не бросаем задачу
         print(f"[gate] разбор не запускался: {gate_reason[:80]}")
         feedback = {
             "summary": f"Оценка 0. {gate_reason.capitalize()}.",
@@ -4308,12 +4376,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                         "total": round(time.time() - t0, 2)},
         }
 
-    mem = await mem_task
-    if mem:
-        print(f"[memory] выжимки в промпте разбора: {', '.join(sorted(mem))}")
-
     prompt, ctx = _feedback_prompt(kind, payload, transcript_text, persona)
-    client = llm_client()
 
     # Чтение вслух: ПАРАЛЛЕЛЬНО с разбором меряем подачу (темп и паузы по
     # пословным таймкодам). Параллельно — чтобы замер на процессоре не
@@ -4324,129 +4387,134 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
             asyncio.to_thread(delivery.measure, data,
                               os.path.splitext(filename)[1].lower() or ".mp3"))
 
-    try:
-        completion = await asyncio.to_thread(
-            lambda: client.chat.completions.create(
-                model=LLM_MODEL,
-                messages=[
-                    {"role": "system", "content": prompt + _memory_prompt_block(mem)},
-                    {"role": "user", "content": transcript_text},
-                ],
-                response_format={"type": "json_object"},
-                # Ноль, а не 0.2 (05.08.2026). Выигрыш здесь не в точности —
-                # средняя сходимость с экспертами почти не меняется, — а в
-                # ВОСПРОИЗВОДИМОСТИ: один и тот же ответ обязан получать один и
-                # тот же балл. Замер на шести работах ФИПИ по три прогона:
-                # при 0.2 разброс «в пределах ±1» был 2-4 из шести, при нуле
-                # сузился до 3-4. Проверяющий, который сегодня ставит 4, а
-                # завтра 6 за ту же работу, несправедлив независимо от среднего.
-                temperature=0.0,
-                # Монологу нужно место: четыре аспекта плюс полный список ошибок,
-                # по числу которых считается балл за язык.
-                max_tokens=2000 if kind == "monologue" else 900,
-            )
-        )
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"LLM ошибка ({LLM_MODEL}): {e}")
-
-    _track_llm(completion)
-    raw = (completion.choices[0].message.content or "").strip()
-    observations = _loads_forgiving(raw)
-    if observations is None:
-        raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
-
-    # ВТОРОЙ ПРОХОД монолога и слияние (см. MONO_CONSENSUS). Спорный признак
-    # решается строже, спорное описание фото — в пользу ученика, ошибок берём
-    # больше из двух. Отказ второго прохода не беда: остаётся первый.
-    if kind == "monologue" and MONO_CONSENSUS and (observations.get("aspects") or []):
+    if kind == "reading":
+        feedback = _score_feedback(kind, {}, ctx)
+    else:
+        client = llm_client()
         try:
-            second = await asyncio.to_thread(
+            completion = await asyncio.to_thread(
                 lambda: client.chat.completions.create(
                     model=LLM_MODEL,
                     messages=[
-                        {"role": "system", "content": prompt + _memory_prompt_block(mem)},
+                        {"role": "system", "content": prompt},
                         {"role": "user", "content": transcript_text},
                     ],
                     response_format={"type": "json_object"},
+                    # Ноль, а не 0.2 (05.08.2026). Выигрыш здесь не в точности —
+                    # средняя сходимость с экспертами почти не меняется, — а в
+                    # ВОСПРОИЗВОДИМОСТИ: один и тот же ответ обязан получать один и
+                    # тот же балл. Замер на шести работах ФИПИ по три прогона:
+                    # при 0.2 разброс «в пределах ±1» был 2-4 из шести, при нуле
+                    # сузился до 3-4. Проверяющий, который сегодня ставит 4, а
+                    # завтра 6 за ту же работу, несправедлив независимо от среднего.
                     temperature=0.0,
-                    max_tokens=2000,
+                    # Монологу нужно место: четыре аспекта плюс полный список ошибок,
+                    # по числу которых считается балл за язык.
+                    max_tokens=2000 if kind == "monologue" else 900,
                 )
             )
-            _track_llm(second)
-            obs2 = _loads_forgiving((second.choices[0].message.content or "").strip())
-            if obs2:
-                observations = ege_scoring.merge_two_passes(observations, obs2)
-                print("[monologue] два прохода сведены в один разбор")
-        except Exception as e:  # noqa: BLE001 — консенсус не критичен
-            print(f"[monologue] второй проход не удался ({type(e).__name__}) — "
-                  "остаётся первый")
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"LLM ошибка ({LLM_MODEL}): {e}")
 
-    # ОБРЫВ РАЗБОРА. Модель обязана вернуть пункт на каждый вопрос задания:
-    # балл — сумма зачтённых, поэтому недостающий пункт молча становится нулём,
-    # и ученик с пятью верными ответами видит 1 из 5 и слово «неправильно».
-    # Строгость и обрыв на экране неразличимы, поэтому недобор — это НАША
-    # ошибка, а не его: даём модели второй заход, и только он решает исход.
-    expected_items = len(ctx.get("points" if kind == "dialogue" else "questions") or [])
-    if ege_scoring.missing_items(kind, observations, expected_items):
-        lack = ege_scoring.missing_items(kind, observations, expected_items)
-        print(f"[{kind}] разбор оборвался: не хватает {lack} пунктов из "
-              f"{expected_items} — переспрашиваю модель")
-        try:
-            retry = await asyncio.to_thread(
-                lambda: client.chat.completions.create(
-                    model=LLM_MODEL,
-                    messages=[
-                        {"role": "system", "content": prompt + _memory_prompt_block(mem)},
-                        {"role": "user", "content": transcript_text},
-                        {"role": "assistant", "content": raw[:1500]},
-                        {"role": "user", "content":
-                         f"Разбор неполный: пунктов должно быть РОВНО "
-                         f"{expected_items}, по одному на каждый пункт задания, "
-                         f"даже если ответа на какой-то из них в записи нет. "
-                         f"Верни JSON целиком заново."},
-                    ],
-                    response_format={"type": "json_object"},
-                    temperature=0.0,
-                    max_tokens=900,
+        _track_llm(completion)
+        raw = (completion.choices[0].message.content or "").strip()
+        observations = _loads_forgiving(raw)
+        if observations is None:
+            raise HTTPException(status_code=502, detail=f"LLM вернул не-JSON: {raw[:200]}")
+
+        # ВТОРОЙ ПРОХОД монолога и слияние (см. MONO_CONSENSUS). Спорный признак
+        # решается строже, спорное описание фото — в пользу ученика, ошибок берём
+        # больше из двух. Отказ второго прохода не беда: остаётся первый.
+        if kind == "monologue" and MONO_CONSENSUS and (observations.get("aspects") or []):
+            try:
+                second = await asyncio.to_thread(
+                    lambda: client.chat.completions.create(
+                        model=LLM_MODEL,
+                        messages=[
+                            {"role": "system", "content": prompt},
+                            {"role": "user", "content": transcript_text},
+                        ],
+                        response_format={"type": "json_object"},
+                        temperature=0.0,
+                        extra_body={"random_seed": 20261103},
+                        max_tokens=2000,
+                    )
                 )
-            )
-            _track_llm(retry)
-            again = _loads_forgiving((retry.choices[0].message.content or "").strip())
-            if again is not None and ege_scoring.missing_items(
-                    kind, again, expected_items) < lack:
-                observations = again
-                print(f"[{kind}] второй заход вернул разбор целиком")
-        except Exception as e:  # noqa: BLE001 — второй заход не обязан удаться
-            print(f"[{kind}] второй заход не удался ({type(e).__name__})")
+                _track_llm(second)
+                obs2 = _loads_forgiving((second.choices[0].message.content or "").strip())
+                if obs2:
+                    observations = ege_scoring.merge_two_passes(observations, obs2)
+                    print("[monologue] два прохода сведены в один разбор")
+            except Exception as e:  # noqa: BLE001 — консенсус не критичен
+                print(f"[monologue] второй проход не удался ({type(e).__name__}) — "
+                      "остаётся первый")
 
-        # Не помогло — честный отказ вместо выдуманного низкого балла. Ученик
-        # переспросит разбор; ложная двойка стоит доверия ко всей проверке.
+        # ОБРЫВ РАЗБОРА. Модель обязана вернуть пункт на каждый вопрос задания:
+        # балл — сумма зачтённых, поэтому недостающий пункт молча становится нулём,
+        # и ученик с пятью верными ответами видит 1 из 5 и слово «неправильно».
+        # Строгость и обрыв на экране неразличимы, поэтому недобор — это НАША
+        # ошибка, а не его: даём модели второй заход, и только он решает исход.
+        expected_items = len(ctx.get("points" if kind == "dialogue" else "questions") or [])
         if ege_scoring.missing_items(kind, observations, expected_items):
-            raise HTTPException(
-                status_code=502,
-                detail="Разбор оборвался на середине — балл не выставляем, "
-                       "чтобы не занизить его случайно. Нажми «Повторить разбор».")
+            lack = ege_scoring.missing_items(kind, observations, expected_items)
+            print(f"[{kind}] разбор оборвался: не хватает {lack} пунктов из "
+                  f"{expected_items} — переспрашиваю модель")
+            try:
+                retry = await asyncio.to_thread(
+                    lambda: client.chat.completions.create(
+                        model=LLM_MODEL,
+                        messages=[
+                            {"role": "system", "content": prompt},
+                            {"role": "user", "content": transcript_text},
+                            {"role": "assistant", "content": raw[:1500]},
+                            {"role": "user", "content":
+                             f"Разбор неполный: пунктов должно быть РОВНО "
+                             f"{expected_items}, по одному на каждый пункт задания, "
+                             f"даже если ответа на какой-то из них в записи нет. "
+                             f"Верни JSON целиком заново."},
+                        ],
+                        response_format={"type": "json_object"},
+                        temperature=0.0,
+                        max_tokens=900,
+                    )
+                )
+                _track_llm(retry)
+                again = _loads_forgiving((retry.choices[0].message.content or "").strip())
+                if again is not None and ege_scoring.missing_items(
+                        kind, again, expected_items) < lack:
+                    observations = again
+                    print(f"[{kind}] второй заход вернул разбор целиком")
+            except Exception as e:  # noqa: BLE001 — второй заход не обязан удаться
+                print(f"[{kind}] второй заход не удался ({type(e).__name__})")
 
-    # Механическая сверка улик ДО второго прохода: приписана ли ученику фраза,
-    # которой он не говорил, и не засчитан ли обрывок вместо ответа. Ничего не
-    # решает — только помечает пункты, чтобы старший эксперт посмотрел именно
-    # на них. Без сети и без вызова модели (05.08.2026).
-    suspicious = ege_scoring.flag_suspicious(kind, observations, transcript_text)
-    if suspicious:
-        print(f"[verify] улики не сошлись — {'; '.join(suspicious)}")
+            # Не помогло — честный отказ вместо выдуманного низкого балла. Ученик
+            # переспросит разбор; ложная двойка стоит доверия ко всей проверке.
+            if ege_scoring.missing_items(kind, observations, expected_items):
+                raise HTTPException(
+                    status_code=502,
+                    detail="Разбор оборвался на середине — балл не выставляем, "
+                           "чтобы не занизить его случайно. Нажми «Повторить разбор».")
 
-    # Второй взгляд на спорные пункты — аналог третьей проверки из методички.
-    # Запускается ТОЛЬКО когда первый проход сам сомневается, поэтому у
-    # обычной работы задержка не растёт вовсе.
-    observations = await _recheck_disputed(kind, observations, ctx,
-                                           transcript_text, persona, client)
-    # У монолога спорны не вердикты по вопросам, а аспекты — свой отбор и свой
-    # промпт, но та же цена: один вызов и только когда есть что пересматривать.
-    observations = await _recheck_aspects(kind, observations, ctx,
-                                          transcript_text, persona, client)
+        # Механическая сверка улик ДО второго прохода: приписана ли ученику фраза,
+        # которой он не говорил, и не засчитан ли обрывок вместо ответа. Ничего не
+        # решает — только помечает пункты, чтобы старший эксперт посмотрел именно
+        # на них. Без сети и без вызова модели (05.08.2026).
+        suspicious = ege_scoring.flag_suspicious(kind, observations, transcript_text)
+        if suspicious:
+            print(f"[verify] улики не сошлись — {'; '.join(suspicious)}")
 
-    # Балл считает шкала ФИПИ, а не модель, — см. ege_scoring.py.
-    feedback = _score_feedback(kind, observations, ctx)
+        # Второй взгляд на спорные пункты — аналог третьей проверки из методички.
+        # Запускается ТОЛЬКО когда первый проход сам сомневается, поэтому у
+        # обычной работы задержка не растёт вовсе.
+        observations = await _recheck_disputed(kind, observations, ctx,
+                                               transcript_text, persona, client)
+        # У монолога спорны не вердикты по вопросам, а аспекты — свой отбор и свой
+        # промпт, но та же цена: один вызов и только когда есть что пересматривать.
+        observations = await _recheck_aspects(kind, observations, ctx,
+                                              transcript_text, persona, client)
+
+        # Балл считает шкала ФИПИ, а не модель, — см. ege_scoring.py.
+        feedback = _score_feedback(kind, observations, ctx)
 
     # Подача — ДОПОЛНЕНИЕ к разбору, на балл не влияет. «Дочитано ли» берём из
     # детерминированной сверки с эталоном, а не из аудио: код это знает точно.
@@ -4514,16 +4582,14 @@ async def task_feedback(
     # Флаг клиентский, но цена ему 25 XP под общими рейт-лимитами — воровать тут
     # нечего, а серверу пришлось бы ради него хранить состояние сессий.
     session_done: int = Form(0),
-    x_device: str | None = Header(None),
+    x_device: str = Depends(_require_account),
     x_admin_key: str | None = Header(None),
 ):
     """Разбор ответа на задание устной части (39-42). Отдаётся потоком с
     «сердцебиением» — см. `_json_with_heartbeat`; путь обязан быть в
     `_STREAM_PATHS`, иначе gzip молча похоронит стриминг.
 
-    `X-Device` — id аккаунта (или устройства): по нему и копится профиль
-    ошибок, и работает входной шлюз."""
-    await _require_account(x_device, x_admin_key)
+    Authorization подтверждает сессию; память ошибок привязана к найденному аккаунту."""
     _check_voice_rate(x_device or "admin")
     if kind not in {"reading", "dialogue", "interview", "monologue"}:
         raise HTTPException(status_code=422, detail=f"Неизвестный тип задания: {kind}")
@@ -4599,13 +4665,26 @@ def _sanitize_history(raw: str, turns: int = _HISTORY_TURNS,
     return out
 
 
+async def _observe_conversation(stream):
+    """Count the final NDJSON outcome, not the early HTTP 200."""
+    completed = False
+    try:
+        async for chunk in stream:
+            result = json.loads(chunk)
+            if result.get("done"):
+                completed = bool(result.get("user") and result.get("reply") and not result.get("error"))
+            yield chunk
+    finally:
+        _track_usage(**({"conversation_ok": 1} if completed else {"conversation_failed": 1}))
+        await stream.aclose()
+
+
 @app.post("/talk_stream")
 async def talk_stream(audio: UploadFile = File(...),
                       history: str = Form("[]"),
                       persona: str = Form(""),
-                      x_device: str | None = Header(None),
+                      x_device: str = Depends(_require_account),
                       x_admin_key: str | None = Header(None)):
-    await _require_account(x_device, x_admin_key)
     _check_voice_rate(x_device or "admin")
     """Разговор со СТРИМИНГОМ ответа (Шаг A к <2с бесшовности).
 
@@ -4883,7 +4962,7 @@ async def talk_stream(audio: UploadFile = File(...),
         ) + "\n"
 
     return StreamingResponse(
-        gen(),
+        _observe_conversation(gen()),
         # text/event-stream, а не application/x-ndjson — см. объяснение у /monologue:
         # на этот тип прокси отключают буферизацию, фронту заголовок безразличен.
         media_type="text/event-stream",
@@ -4935,7 +5014,7 @@ async def _check_word_against_task(text: str, variant: str) -> None:
 
 @app.post("/speak")
 async def speak(request: Request, body: dict = Body(...),
-                x_device: str | None = Header(None),
+                x_device: str = Depends(_require_account),
                 x_admin_key: str | None = Header(None)):
     """Озвучить готовый текст. Два режима, и у них разные правила.
 
@@ -4956,7 +5035,6 @@ async def speak(request: Request, body: dict = Body(...),
 
     Своего вызова LLM здесь нет ни в одном режиме — только синтез.
     """
-    await _require_account(x_device, x_admin_key)
     if not _rate_ok(f"say:{x_device or _client_ip(request)}", 40, 60.0):
         raise HTTPException(status_code=429, detail="Слишком часто — подожди минутку.")
     text = str(body.get("text") or "").strip()[:400]
@@ -4992,7 +5070,7 @@ async def speak(request: Request, body: dict = Body(...),
 
 @app.post("/talk_review")
 async def talk_review_endpoint(request: Request, body: dict = Body(...),
-                               x_device: str | None = Header(None),
+                               x_device: str = Depends(_require_account),
                                x_admin_key: str | None = Header(None)):
     """Разбор всей беседы — ОДИН вызов LLM по явному нажатию ученика.
 
@@ -5003,7 +5081,6 @@ async def talk_review_endpoint(request: Request, body: dict = Body(...),
     хранит — приватность). В базу из разбора попадают только ОШИБКИ, как и у
     заданий, — они и есть память, которая делает следующие разборы точнее.
     """
-    await _require_account(x_device, x_admin_key)
     # Разбор — редкое действие: один на сессию. Лимит ловит зациклившийся
     # клиент и скрипт, живому ученику не мешает.
     if not _rate_ok(f"rv:{x_device or _client_ip(request)}", 6, 300.0):

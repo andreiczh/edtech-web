@@ -37,6 +37,8 @@ if os.path.exists(tmp):
     os.remove(tmp)
 storage._SQLITE_PATH = tmp
 storage.ensure_schema()
+for student in ("stud-1", "stud-2"):
+    storage.update_settings(student, {"corpus_consent": True})
 
 AUDIO = b"\x1aE\xdf\xa3" + b"x" * 5000
 
@@ -124,7 +126,7 @@ import time as _t
 _t.sleep(0.4)
 check(calls == [], "БЕЗ СОГЛАСИЯ не записано ничего", f"вызовов {len(calls)}")
 
-storage.save_settings("stud-3", json.dumps({"corpus_consent": True}))
+storage.update_settings("stud-3", {"corpus_consent": True})
 main._collect_corpus_bg("stud-3", "reading", "v1", AUDIO, "audio/webm", 30.0,
                         "text", "ref", {"score": 1, "max_score": 1})
 _t.sleep(0.4)

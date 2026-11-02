@@ -1,3 +1,4 @@
+import { authHeaders } from '../auth/auth'
 ﻿/**
  * Банк заданий устного ЕГЭ и память о прогрессе.
  *
@@ -442,9 +443,9 @@ export async function syncRemoteTasks(): Promise<void> {
  * произвольно — «самые давние» переставали быть давними, и добор в сессию
  * выдавал случайные повторы (03.08.2026).
  */
-export async function syncServerProgress(identity: string): Promise<void> {
+export async function syncServerProgress(): Promise<void> {
   try {
-    const res = await fetch(`${BACKEND}/progress`, { headers: { 'X-Device': identity } })
+    const res = await fetch(`${BACKEND}/progress`, { headers: { ...authHeaders() } })
     if (!res.ok) return
     const data = (await res.json()) as { solved?: string[] }
     const fromServer = (data.solved ?? []).filter((s) => typeof s === 'string')

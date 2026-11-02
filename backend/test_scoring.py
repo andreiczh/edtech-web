@@ -131,14 +131,14 @@ check(fb_r["score"] == 1 and fb_r["max"] == 1, "чтение: прочитано
 check("Произношение" in fb_r["summary"],
       "чтение: оговорка про произношение на месте — ученик должен знать границы оценки")
 
-# Три перевранных слова — по критериям это ноль.
+# Модель не может добавить ошибки, отсутствующие в детерминированной сверке.
 fb_r0 = scoring._score_feedback(
     "reading",
     {"summary": "s", "misread": [{"real": True, "expected": w, "heard": "x"}
                                  for w in ("tree", "trunk", "wood")]},
     {"diff": diff_ok})
-check(fb_r0["score"] == 0, "чтение: три грубые ошибки обнуляют балл")
-check(len(fb_r0["errors"]) == 3, "чтение: каждая ошибка попала в разбор")
+check(fb_r0["score"] == 1, "чтение: выдуманные моделью ошибки не обнуляют балл")
+check(fb_r0["errors"] == [], "чтение: ошибки без расхождений в тексте не попали в разбор")
 
 # Модель пометила расхождения как НЕ настоящие (промах распознавания) —
 # они не должны стоить ученику балла.
@@ -169,8 +169,8 @@ fb_two = scoring._score_feedback(
     "reading",
     {"summary": "s", "misread": [{"real": True, "expected": "wood", "heard": "food"}]},
     {"diff": diff_two})
-check(fb_two["score"] == 0,
-      "чтение: двухсловная далёкая подмена плюс оговорка = три слова = ноль")
+check(fb_two["score"] == 1,
+      "чтение: модель не добавляет третью ошибку, отсутствующую в расшифровке")
 
 # Дубль модели (то же слово, то же прочтение) на экран попадает один раз:
 # жалоба 15.08.2026 — «Повторная ошибка в том же месте» читалась как двойное
@@ -183,8 +183,8 @@ fb_dup = scoring._score_feedback(
         {"real": True, "expected": "tree", "heard": "three"},
     ]},
     {"diff": diff_ok})
-check(len(fb_dup["errors"]) == 2,
-      "чтение: дубль пары от модели схлопнут в одну запись",
+check(len(fb_dup["errors"]) == 0,
+      "чтение: неподтверждённые цитаты и дубли модели не попадают в разбор",
       f"записей {len(fb_dup['errors'])}")
 
 # Одиночная потеря окончания — шум распознавания. Код давно требует
@@ -206,7 +206,7 @@ check(fb_end["score"] == 1,
 check(all(e["correction"] != "branches" for e in fb_end["errors"]),
       "чтение: одиночное окончание не показывается ошибкой")
 
-# А СИСТЕМАТИКА окончаний (две и больше в одной записи) считается как прежде.
+# Даже несколько окончаний могут быть потеряны STT; текст не доказывает фонетическую ошибку.
 diff_sys = ege_scoring.reading_diff(
     ref, ref.replace("branches", "branch").replace("is", "was"))
 sys_swaps = diff_sys.get("swaps") or []
@@ -216,8 +216,8 @@ fb_sys = scoring._score_feedback(
     {"diff": ege_scoring.reading_diff(
         "Cats eat plants and dogs eat bones in gardens near houses.",
         "Cat eat plant and dogs eat bone in gardens near houses.")})
-check(fb_sys["score"] == 0,
-      "чтение: систематика окончаний по-прежнему в счёте",
+check(fb_sys["score"] == 1 and len(fb_sys["uncertain_words"]) == 3,
+      "чтение: повторные окончания отмечены как неопределённость, не как доказанные ошибки",
       f"балл {fb_sys['score']}")
 
 # ------------------------------------------------ обрыв разбора 40/41

@@ -571,7 +571,7 @@ def _endings_only(exp: str, heard: str) -> bool:
     # разница в нём не про окончание, а про другое слово целиком.
     if len(short) < 3:
         return False
-    return long_.startswith(short) and long_[len(short):] in ("s", "es", "d", "ed")
+    return long_.startswith(short) and long_[len(short):] in ("s", "'s", "es", "d", "ed")
 
 
 def _swap_entry(exp_words: list[str], heard_words: list[str]) -> dict:
@@ -712,7 +712,13 @@ def reading_diff(reference: str, transcript: str) -> dict:
                 if i2 == len(ref):
                     tail_missing = lost
             else:
-                swaps.append(_swap_entry(ref[i1:i2], got[j1:j2]))
+                if i2 - i1 == j2 - j1:
+                    # Word-aligned evidence prevents one ending from becoming
+                    # a multi-word accusation ("earliest forms" -> "earliest form").
+                    swaps.extend(_swap_entry([a], [b])
+                                 for a, b in zip(ref[i1:i2], got[j1:j2]) if a != b)
+                else:
+                    swaps.append(_swap_entry(ref[i1:i2], got[j1:j2]))
 
     longest_run = max((len(r) for r in missing_runs), default=0)
     missing_total = sum(len(r) for r in missing_runs)
@@ -725,7 +731,8 @@ def reading_diff(reference: str, transcript: str) -> dict:
         "longest_missing_run": longest_run,
         "tail_missing": tail_missing,
         "missing_fragments": [" ".join(r) for r in missing_runs if len(r) >= 2][:6],
-        "swaps": swaps[:8],
+        "swaps": swaps,
+        "missing_runs": [" ".join(r) for r in missing_runs],
         # Сколько слов зачтено ВТОРЫМ заходом. Ноль — читал сквозняком; больше
         # нуля — возвращался и перечитывал, и это ему не в минус.
         "reread": reread,
@@ -844,6 +851,9 @@ def drop_unsupported(errors: list, transcript: str, need_quote: bool = True) -> 
         if not isinstance(e, dict):
             continue
         quote = str(e.get("quote") or "").strip()
+        correction = str(e.get("correction") or "").strip()
+        if correction and _words(correction) == _words(quote):
+            continue
         if need_quote and not quote:
             continue
         if quote and quote_is_fabricated(quote, transcript):

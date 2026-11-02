@@ -9,7 +9,7 @@
  * Ошибка синтеза не должна ронять экзамен: если озвучить не вышло, экран
  * ПОКАЖЕТ вопрос текстом. Лучше упрощённое задание, чем задание без вопроса.
  */
-import { identityId } from '../auth/auth'
+import { authHeaders } from '../auth/auth'
 import { getSettings } from '../account/me'
 
 const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
@@ -21,7 +21,7 @@ export async function askAloud(text: string, signal?: AbortSignal): Promise<bool
   try {
     const res = await fetch(`${BACKEND}/speak`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Device': identityId() },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ text, persona: getSettings().persona }),
       signal,
     })

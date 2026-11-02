@@ -11,15 +11,15 @@ openapi_file: openapi.json   # тот же документ, снимок в к�
 
 auth:
   student:
-    description: id аккаунта из ответа /auth/register или /auth/login
-    header: X-Device
+    description: Bearer session_token из ответа входа; id не является ключом доступа
+    header: Authorization
   admin:
     description: ключ администратора (выдаётся отдельно, только при необходимости)
     header: X-Admin-Key
 
 roles:
   anonymous: без заголовков
-  student: X-Device = <id тестовой учётной записи>
+  student: Authorization = Bearer <session_token>
   admin: X-Admin-Key = <ключ>
 
 checks:
@@ -53,10 +53,11 @@ checks:
         nickname: "<два английских слова без цифр, от 15 букв>"
         password: "<от 8 символов>"
         exam: ege
+        corpus_consent: false
     expected_status: [200, 409]   # 409 — ник уже занят
     response:
       content_type: application/json
-      required: [id, nickname, exam]
+      required: [id, nickname, exam, session_token, expires_at]
 
   - id: login
     title: Вход по нику и паролю
@@ -69,7 +70,7 @@ checks:
     expected_status: [200]
     response:
       content_type: application/json
-      required: [id, nickname, exam]
+      required: [id, nickname, exam, session_token, expires_at]
 
   - id: login_wrong_password
     title: Неверный пароль — понятный отказ

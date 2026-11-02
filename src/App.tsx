@@ -25,7 +25,7 @@ import {
   useCurrentPersona,
   useSettings,
 } from './account/me'
-import { currentUser, identityId, logout, type AuthUser } from './auth/auth'
+import { currentUser, clearSession, type AuthUser } from './auth/auth'
 import { DisagreeModal } from './components/Disagree'
 import { Rail, type RailItem } from './components/Rail'
 import {
@@ -111,7 +111,7 @@ export default function App() {
   useEffect(() => {
     void syncRemoteTasks()
     if (currentUser()) {
-      void syncServerProgress(identityId())
+      void syncServerProgress()
       void syncSettingsFromServer()
       void syncFavorites()
     }
@@ -122,7 +122,7 @@ export default function App() {
   // выхода (аудит 26.09.2026, §6.47).
   useEffect(() => {
     onUnauthorized(() => {
-      logout()
+      clearSession()
       resetSettings()
       setRoute(isMaxLaunch() ? { name: 'maxlogin' } : { name: 'welcome' })
     })
@@ -130,7 +130,7 @@ export default function App() {
   }, [])
 
   const enterApp = useCallback((_u: AuthUser) => {
-    void syncServerProgress(identityId())
+    void syncServerProgress()
     void syncSettingsFromServer()
     void syncFavorites()
     setRoute({ name: 'home' })
@@ -139,7 +139,7 @@ export default function App() {
   /* После регистрации — интро «что тебя ждёт внутри» (фото-канон), после
      входа существующего аккаунта — сразу дашборд. */
   const enterAfterRegister = useCallback((_u: AuthUser) => {
-    void syncServerProgress(identityId())
+    void syncServerProgress()
     void syncSettingsFromServer()
     void syncFavorites()
     setRoute({ name: 'intro' })
@@ -150,8 +150,8 @@ export default function App() {
      локальное значение по умолчанию уехало бы на сервер с первой же сменой
      настроек. Включить можно в кабинете. */
   const enterFromMax = useCallback((_u: AuthUser, created: boolean) => {
-    if (created) updateSettings({ corpusConsent: false })
-    void syncServerProgress(identityId())
+    resetSettings()
+    void syncServerProgress()
     void syncSettingsFromServer()
     void syncFavorites()
     setRoute(created ? { name: 'intro' } : { name: 'home' })

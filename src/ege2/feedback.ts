@@ -10,7 +10,7 @@
  */
 import { getSettings } from '../account/me'
 import { backendUnreachableMessage, httpErrorMessage } from '../backendError'
-import { identityId } from '../auth/auth'
+import { authHeaders } from '../auth/auth'
 import { audioFileName } from './audioMime'
 import type { DisputeContext, DisputeDraft, DisputeShot } from './dispute'
 import type { TaskKind } from './tasks'
@@ -97,7 +97,7 @@ export async function requestTaskFeedback(
       body: fd,
       // По X-Device сервер копит профиль ошибок ученика. Не личные данные —
       // случайный uuid браузера, см. device.ts.
-      headers: { 'X-Device': identityId() },
+      headers: { ...authHeaders() },
     })
   } catch {
     throw new Error(backendUnreachableMessage())
@@ -183,7 +183,7 @@ export async function sendDispute(
   try {
     res = await fetch(`${BACKEND}/task_dispute`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Device': identityId() },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(body),
     })
   } catch {
@@ -221,7 +221,7 @@ export async function fetchWeakWords(variantId: string): Promise<WeakWord[]> {
   try {
     const res = await fetch(
       `${BACKEND}/pron/weakest?variant=${encodeURIComponent(variantId)}`,
-      { headers: { 'X-Device': identityId() } },
+      { headers: { ...authHeaders() } },
     )
     if (!res.ok) return []
     const data = (await res.json()) as { words?: WeakWord[] }

@@ -21,6 +21,8 @@ export interface AuthUser {
   id: string
   nickname: string
   exam: string
+  session_token: string
+  expires_at: number
 }
 
 let cached: AuthUser | null | undefined
@@ -29,7 +31,10 @@ export function currentUser(): AuthUser | null {
   if (cached !== undefined) return cached
   try {
     const raw = localStorage.getItem(KEY)
-    cached = raw ? (JSON.parse(raw) as AuthUser) : null
+    const user = raw ? (JSON.parse(raw) as AuthUser) : null
+    // v1 stored the account id as a credential. Never migrate it into access.
+    cached = user?.session_token && user.expires_at > Date.now() / 1000 ? user : null
+    if (!cached) localStorage.removeItem(KEY)
   } catch {
     cached = null
   }
@@ -51,7 +56,7 @@ export function applyNickname(nickname: string) {
   if (u) saveUser({ ...u, nickname })
 }
 
-export function logout() {
+export function clearSession() {
   cached = null
   try {
     localStorage.removeItem(KEY)
@@ -65,6 +70,30 @@ export function logout() {
   } catch {
     /* ignore */
   }
+}
+
+/** The id is for local ownership only. Protected requests use a revocable token. */
+export function authHeaders(): Record<string, string> {
+  const token = currentUser()?.session_token
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+export async function logout(): Promise<void> {
+  if (currentUser()) {
+    let response: Response
+    try {
+      response = await fetch(`${BACKEND}/auth/logout`, {
+        method: 'POST', headers: authHeaders(),
+      })
+    } catch {
+      throw new Error('Выход не подтверждён сервером. Проверь связь и попробуй ещё раз.')
+    }
+    if (!response.ok && response.status !== 401) {
+      throw new Error('Выход не подтверждён сервером. Попробуй ещё раз.')
+    }
+  }
+  clearSession()
+  clearLinkToken()
 }
 
 /** Идентичность для памяти об ошибках: аккаунт, а без него — анонимный браузер. */
@@ -138,6 +167,7 @@ export async function register(
   /** Код доступа — нужен, только если сервер его требует (INVITE_REQUIRED=1);
       иначе пустая строка, сервер её не смотрит (§6.48). */
   invite: string,
+  corpusConsent: boolean = false,
 ): Promise<AuthUser> {
   // Занятый ник (409) решаем сами: генерируем другой и пробуем снова — человек
   // ник не выбирает, значит и разруливать коллизию не его работа. Финальное имя
@@ -145,7 +175,9 @@ export async function register(
   let nick = nickname
   for (let attempt = 0; ; attempt++) {
     try {
-      const user = await post('/auth/register', { nickname: nick, password, exam, invite })
+      const user = await post('/auth/register', {
+        nickname: nick, password, exam, invite, corpus_consent: corpusConsent,
+      })
       saveUser(user)
       return user
     } catch (e) {
@@ -181,8 +213,8 @@ export async function loginMaxLink(token: string): Promise<{ user: AuthUser; cre
     if (e instanceof ApiError && e.status >= 400 && e.status < 500) clearLinkToken()
     throw e
   }
-  const user: AuthUser = { id: data.id, nickname: data.nickname, exam: data.exam }
-  if (prev && prev.id !== user.id) logout()
+  const user: AuthUser = data
+  if (prev && prev.id !== user.id) await logout()
   saveUser(user)
   return { user, created: data.created === true }
 }
@@ -192,7 +224,7 @@ export async function loginMax(initData: string): Promise<{ user: AuthUser; crea
   const data = (await post('/auth/max', { init_data: initData, nicknames })) as AuthUser & {
     created?: boolean
   }
-  const user: AuthUser = { id: data.id, nickname: data.nickname, exam: data.exam }
+  const user: AuthUser = data
   saveUser(user)
   return { user, created: data.created === true }
 }

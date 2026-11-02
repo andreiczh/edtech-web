@@ -16,7 +16,7 @@
  * сервер. Образец произношения не должен звучать раздражённо, даже если
  * ученик выбрал Гондона.
  */
-import { identityId } from '../auth/auth'
+import { authHeaders } from '../auth/auth'
 import { getSettings } from '../account/me'
 import { normalizeWord, speakable } from './speakable'
 
@@ -39,7 +39,7 @@ async function fetchWord(word: string, variant?: string): Promise<string | null>
   try {
     const res = await fetch(`${BACKEND}/speak`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Device': identityId() },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ text: word, mode: 'word', variant }),
     })
     if (!res.ok) return null

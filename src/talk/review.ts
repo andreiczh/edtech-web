@@ -7,7 +7,7 @@
  */
 import { getSettings } from '../account/me'
 import { backendUnreachableMessage, httpErrorMessage } from '../backendError'
-import { identityId } from '../auth/auth'
+import { authHeaders } from '../auth/auth'
 
 const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
 
@@ -34,7 +34,7 @@ export async function requestTalkReview(history: DialogTurn[]): Promise<TalkRevi
   try {
     res = await fetch(`${BACKEND}/talk_review`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Device': identityId() },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ history, persona: getSettings().persona }),
     })
   } catch {

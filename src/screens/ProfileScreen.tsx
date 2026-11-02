@@ -1,3 +1,4 @@
+import { useConsent } from '../account/useConsent'
 /**
  * Личный кабинет — макет из утверждённого прототипа (фото-канон владельца).
  *
@@ -56,6 +57,9 @@ export function ProfileScreen({
   onClose?: () => void
 }) {
   const settings = useSettings()
+  const consent = useConsent()
+  const [logoutBusy, setLogoutBusy] = useState(false)
+  const [logoutError, setLogoutError] = useState<string | null>(null)
   const user = currentUser()
 
   const [stats, setStats] = useState<MeStats | null>(null)
@@ -96,11 +100,20 @@ export function ProfileScreen({
     }
   }, [])
 
-  const doLogout = useCallback(() => {
-    logout()
-    resetSettings()
-    onLogout()
-  }, [onLogout])
+  const doLogout = useCallback(async () => {
+    if (logoutBusy) return
+    setLogoutBusy(true)
+    setLogoutError(null)
+    try {
+      await logout()
+      resetSettings()
+      onLogout()
+    } catch (e) {
+      setLogoutError(e instanceof Error ? e.message : 'Не удалось выйти. Попробуй ещё раз.')
+    } finally {
+      setLogoutBusy(false)
+    }
+  }, [onLogout, logoutBusy])
 
   const choosePersona = (p: Persona) => {
     if (p.adult && !adultAccepted(p.id)) {
@@ -162,9 +175,10 @@ export function ProfileScreen({
                 <a href="/privacy.html" target="_blank" rel="noreferrer">
                   Как хранятся твои данные
                 </a>
-                <button type="button" className="proflogout" onClick={doLogout}>
+                <button type="button" className="proflogout" disabled={logoutBusy} onClick={() => void doLogout()}>
                   Выйти из аккаунта
                 </button>
+                {logoutError && <p role="alert">{logoutError}</p>}
               </div>
             </div>
             {nickChanged && (
@@ -309,12 +323,14 @@ export function ProfileScreen({
                 role="switch"
                 aria-checked={settings.corpusConsent}
                 aria-label="Сохранять мои записи для улучшения проверки"
-                onClick={() => updateSettings({ corpusConsent: !settings.corpusConsent })}
+                disabled={consent.busy}
+                onClick={() => void consent.toggle()}
               >
                 <span className="switch__thumb" />
               </button>
             </div>
 
+            {consent.error && <p role="alert">{consent.error}</p>}
             <div className="setrow2">
               <div className="setrow2__t">
                 <b>Экзамен</b>

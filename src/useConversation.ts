@@ -2,7 +2,7 @@
 
 import { getSettings } from './account/me'
 import { backendUnreachableMessage, httpErrorMessage } from './backendError'
-import { identityId } from './auth/auth'
+import { authHeaders } from './auth/auth'
 import { audioFileName, makeRecorder, recordedType } from './ege2/audioMime'
 import type { DialogTurn } from './talk/review'
 
@@ -324,7 +324,7 @@ export function useConversation(): ConversationApi {
           body: fd,
           signal: ac.signal,
           // По X-Device сервер узнаёт аккаунт: и входной шлюз, и профиль ошибок.
-          headers: { 'X-Device': identityId() },
+          headers: { ...authHeaders() },
         })
         if (!res.ok || !res.body) {
           let detail: string | null = null
