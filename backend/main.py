@@ -90,7 +90,7 @@ if not os.environ.get("KEEP_SYSTEM_PROXY"):
 # молча выключится (ответ придёт целиком в самом конце).
 # /monologue и /task_feedback тоже здесь: они шлют «сердцебиение» переводами
 # строк, а zlib копил бы их в буфере — и смысл сердцебиения пропал бы целиком.
-_STREAM_PATHS = {"/talk_stream", "/monologue", "/task_feedback"}
+_STREAM_PATHS = {"/talk_stream", "/monologue", "/task_feedback", "/_release_probe"}
 
 
 class GZipExceptStreams:
@@ -4788,6 +4788,39 @@ async def _focused_attempt(kind: str, payload: dict, goal: dict, data: bytes, fi
                              "note": "Не удалось уверенно проверить фразу. Повтори её чуть отчётливее."}}
     return {"practice": {"status": verdict, "quote": quote[:350],
                          "note": str(note or "")[:350]}}
+
+
+# Temporary paired benchmark. Only the explicitly authorized opaque bodies
+# can invoke the normal judge, once each, with an authenticated session.
+@app.post("/_release_probe", include_in_schema=False)
+async def _release_probe(request: Request, account: str = Depends(_require_account)):
+    from _release_probe_grants import ALLOWED, EXPIRES
+
+    if time.time() >= EXPIRES or not ALLOWED:
+        raise HTTPException(404)
+    body = bytearray()
+    try:
+        async with asyncio.timeout(5):
+            async for chunk in request.stream():
+                if len(chunk) + len(body) > 8192:
+                    raise HTTPException(413)
+                body.extend(chunk)
+    except TimeoutError as error:
+        raise HTTPException(408) from error
+    digest = hashlib.sha256(body).hexdigest()
+    if digest not in ALLOWED:
+        raise HTTPException(404)
+    ALLOWED.remove(digest)
+    parameters = json.loads(body)
+
+    async def work():
+        feedback, _, judge, recheck = await _grade_task_text(
+            parameters["kind"], parameters["payload"], parameters["transcript"])
+        return {"feedback": feedback, "latency": {"judge": judge, "recheck": recheck}}
+
+    return StreamingResponse(_json_with_heartbeat(work(), timeout=130, metric="release_probe"),
+                             media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 
 @app.post("/task_feedback")
