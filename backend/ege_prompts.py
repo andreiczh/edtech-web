@@ -83,6 +83,29 @@ def recheck_prompt(kind: str, items: list[dict], task_text: str,
     # же правилам», не вкладывая их, — и «старший эксперт» судил вслепую,
     # ссылаясь на выдуманное «правило 3.2» и заваливая чистые ответы.
     rules = _DIALOGUE_RULES if kind == "dialogue" else _INTERVIEW_RULES
+    interview_checks = (
+        "\nFor EACH interview answer, independently identify what the question requires, "
+        "what clauses the student actually spoke and any demonstrable elementary error. "
+        "Use the first examiner's reason only as a hypothesis. A choice framed as A OR B "
+        "needs one choice, plus a reason if asked. Do not demand discussion of the unchosen "
+        "alternative. Where AND what are different requests; an activity alone does not give a place. "
+        "'What can you tell me about X?' needs a detail about X beyond listing names, types "
+        "or saying it is a favourite. Check what the speaker says about at least one of them. "
+        "Read the question literally, including who does the action and its time frame. "
+        "Verify supposed missing verbs literally: 'I like walking' already has a verb "
+        "and is valid, and coordinated actions may share an expressed subject. "
+        "Do not manufacture a missing subject or auxiliary in an intelligible spoken list "
+        "with a clear shared subject. Self-correction and repetitions do not erase "
+        "complete clauses. Awkward word choices, a redundant article that preserves meaning, "
+        "or a colloquial intensifier do not by themselves prove an elementary error. "
+        "Check actual noun-phrase structure and word order as well: a malformed possessive "
+        "or an ordinary countable noun missing its required determiner or plural is not "
+        "mere style. Several concrete lexical errors that make a clause incoherent can also "
+        "cause rejection. Name the offending words, and do not assume the recognizer "
+        "preserved or corrected words that are not in the transcript. "
+        "Keep real elementary errors: using an adjective as an adverb of manner with an "
+        "ordinary action verb, wrong verb agreement or a genuinely missing predicate.\n"
+    ) if kind == "interview" else ""
     listed = "\n".join(
         f'- n={it["n"]}: {it["point"]}\n  first verdict: '
         f'{"accepted" if it["accepted"] else "rejected"} ({it["reason"] or "no reason given"})'
@@ -102,6 +125,7 @@ def recheck_prompt(kind: str, items: list[dict], task_text: str,
         f"{[it['n'] for it in items]}. No items may be omitted. "
         "Re-judge ONLY these items, carefully and by the rules above. You are the "
         "final word: do not split the difference, decide.\n"
+        + interview_checks
         + strictness_block(persona) +
         "\nReturn ONLY this JSON:\n"
         '{"items": [{"n": <номер>, "accepted": true, "reason": "<по-русски, до 12 '
@@ -163,7 +187,7 @@ def aspect_recheck_prompt(numbers: list[int], brief: str,
             f"  first examiner's evidence: {ev or '(none found)'}"
         )
     fields = ",\n  ".join(f'{{"n": {n}, "evidence": "<the student\'s exact words>", '
-                          f'{_ASPECT_FIELDS[n]}}}' for n in numbers)
+                          f'{_ASPECT_FIELDS[n]}, "unintelligible": false}}' for n in numbers)
     error_ids = [e["id"] for e in errors or []]
     checks = ", ".join(f'{{"id": {i}, "valid": true}}' for i in error_ids)
     return (
@@ -177,7 +201,10 @@ def aspect_recheck_prompt(numbers: list[int], brief: str,
         "or discourse error supported by the transcript. Stylistic alternatives, ASR "
         "punctuation and valid spoken contractions are NOT errors. A corrected false "
         "start is not a second error. Do not forgive genuine missing verbs, agreement "
-        "or wrong prepositions. Every candidate needs an explicit true/false decision, "
+        "or wrong prepositions. Two candidates for the same error in the same words "
+        "must not both be counted: keep the clearer evidence and reject the duplicate. "
+        "Use the complete sentence to decide whether a change "
+        "of referent is a logic error. Every candidate needs an explicit true/false decision, "
         "including candidates you reject. Do not omit rejected candidates. "
         f"Return EXACTLY {len(error_ids)} error_checks with ORIGINAL ids {error_ids}. "
         f"Return EXACTLY {len(numbers)} aspects with ORIGINAL numbers {numbers}. "
@@ -188,6 +215,8 @@ def aspect_recheck_prompt(numbers: list[int], brief: str,
         "Work from the transcript, not from the first examiner's opinion: FIND the "
         "student's own words for each aspect yourself and copy them out. If there "
         "are no such words, evidence is an empty string and every flag is false. "
+        "Set unintelligible only if the aspect itself cannot be understood. If the choice "
+        "is clear but the reason is not, preserve the choice and set justified=false. "
         "Do not soften and do not toughen out of politeness — decide.\n"
         "Remember the two traps examiners mark down for: an advantage or a "
         "disadvantage named for only ONE of the two types, and filler that would "
@@ -584,11 +613,23 @@ _MONOLOGUE_RULES = (
     "of the answer, a wrong linker (From the one hand), a statement that contradicts "
     "what was said before, an unfinished sentence. Keep a thin comparison or an "
     "opinion that only partly addresses the plan in the content criterion; count it "
-    "as an organization issue only when there is also a concrete break in logic.\n\n"
+    "as an organization issue only when there is also a concrete break in logic. "
+    "Check the transition from comparing the photos to evaluating the options, "
+    "the move from benefits to drawbacks when treated separately, and the move to the "
+    "speaker's preference. Mark a missing transition only at an actual shift of section. "
+    "A standalone conjunction may be unsuitable when it begins a new section with no "
+    "logical link back; a conjunction that connects an actual contrast is fine. "
+    "A change of pronoun with the wrong referent or an assertion that confuses the photos "
+    "with the activities they illustrate can break logic. A coherent discussion that "
+    "pairs each option's pros and cons does not require a separate transition between "
+    "advantages and disadvantages. Quote the surrounding words for each finding.\n\n"
     "lang_errors — lexical and grammatical only, never phonetic. grave=true for "
     "elementary-level errors (missing third-person -s, missing verb or link verb, an "
     "article error that changes the meaning, a string of words instead of a sentence) "
     "and for anything that breaks communication. The same error repeated is listed once. "
+    "Examine every part of the transcript. Record each distinct, local error with the "
+    "shortest verbatim quote that shows it and a minimal correction. A grammatical phrase "
+    "with a valid indirect object (for example 'she shows us a photo') is not an error. "
     "Do not invent grammar errors to improve style: valid spoken contractions, 'I've "
     "got to go', 'their homes', 'I think I love', and 'the best way of spending time' "
     "are grammatical. Do not count repetitions/hesitation as grammar errors. "
@@ -600,7 +641,9 @@ _MONOLOGUE_RULES = (
     "the third criterion, so do NOT lower an aspect just because the sentence is clumsy "
     "or has mistakes. An aspect drops only when the MEANING does not get through: if the "
     "phrase that was supposed to name the difference, an advantage or a disadvantage "
-    "cannot be understood at all, that aspect is missing.\n\n"
+    "cannot be understood at all, that aspect is missing. If the opinion and choice "
+    "are clear but the rationale does not make sense, mark justified=false without "
+    "marking the whole aspect unintelligible.\n\n"
     "CALIBRATION — how real examiners marked real answers:\n"
     "- FULL aspect 1, despite several grammar errors: «The first photo show us a woman "
     "who is sitting on the ground, and perhaps she is planting some tree. The second "
