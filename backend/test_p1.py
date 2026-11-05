@@ -8,6 +8,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch, AsyncMock
 
@@ -218,6 +219,25 @@ class P1Tests(unittest.TestCase):
                                               "playback_followup_2000": 3})
         self.assertEqual(sample["first"]["p90_upper_ms"], 2000)
         self.assertIsNone(sample["followup"]["p90_upper_ms"])
+
+    def test_health_combines_persisted_playback_buckets_across_days(self):
+        today = datetime.now(timezone.utc).date()
+        for age, metrics in (
+            (14, {"playback_first_75000": 40}),
+            (1, {"playback_first_2000": 18, "playback_followup_2000": 6}),
+            (0, {"playback_first_4000": 3, "playback_followup_3000": 7, "conversation_ok": 200}),
+        ):
+            for metric, count in metrics.items():
+                storage._exec("INSERT INTO usage_daily(day, metric, value) VALUES(?,?,?)",
+                              ((today - timedelta(days=age)).isoformat(), metric, count))
+        with patch.dict(os.environ, {"LLM_API_KEY": "test-config-only"}), \
+             patch.dict(main._READY_CACHE, {"at": 0}), patch.dict(main._HEALTH_DB, {"at": 0}):
+            response = self.client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        report = response.json()["voice_latency_14d"]
+        self.assertEqual(report["first"], {"samples": 21, "p90_upper_ms": 4000, "needed_for_p90": 0})
+        self.assertEqual(report["followup"], {"samples": 13, "p90_upper_ms": None, "needed_for_p90": 7})
+        self.assertEqual(response.json()["voice_latency_today"]["first"]["samples"], 3)
 
     def test_registration_defaults_to_no_consent(self):
         settings = json.loads(storage.get_settings(self.user["id"]))

@@ -4,12 +4,13 @@ from __future__ import annotations
 import math
 import secrets
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 
 BUCKETS_MS = (250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500,
               2750, 3000, 3500, 4000, 5000, 6000, 8000, 12000, 20000, 35000, 75000)
 GROUPS = ("first", "followup")
 MIN_SAMPLES = 20
+WINDOW_DAYS = 14
 
 
 class PlaybackTokens:
@@ -52,3 +53,14 @@ def summary(metrics: dict) -> dict:
                     break
         result[group] = {"samples": count, "p90_upper_ms": upper}
     return {"metric": "microphone_stop_to_playback", "min_samples": MIN_SAMPLES, **result}
+
+
+def period_summary(days: dict) -> dict:
+    """Sum bucket counts across days before calculating the percentile."""
+    buckets = Counter()
+    for metrics in days.values():
+        buckets.update({key: value for key, value in metrics.items() if key.startswith("playback_")})
+    result = summary(buckets)
+    for group in GROUPS:
+        result[group]["needed_for_p90"] = max(0, MIN_SAMPLES - result[group]["samples"])
+    return {"window_days": WINDOW_DAYS, **result}

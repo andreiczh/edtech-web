@@ -72,15 +72,19 @@ class CalibrationTests(unittest.TestCase):
         import main
         from types import SimpleNamespace
         obs={"answers":[{"n":n,"accepted":True,"heard":"I live here. It is nice.","reason":"correct relevant answer"} for n in range(1,6)]}
-        verdicts={"items":[{"n":n,"accepted":True,"reason":"verified"} for n in range(1,6)]}
+        verdicts={"items":[{"n":n,"complete":n != 2,"enough_phrases":n != 3,
+                            "blocking_quote":"I live here" if n == 4 else "",
+                            "reason":"verified"} for n in range(1,6)]}
         import json
         completion=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(verdicts)))])
         client=unittest.mock.MagicMock()
         client.chat.completions.create.return_value=completion
         with patch.object(main,"_track_llm"):
-            asyncio.run(main._recheck_disputed("interview",obs,{"questions":["Where? Why?"]*5},"I live here. It is nice.","",client))
+            result=asyncio.run(main._recheck_disputed("interview",obs,{"questions":["Where? Why?"]*5},"I live here. It is nice.","",client))
         self.assertEqual(client.chat.completions.create.call_count,1)
         self.assertGreaterEqual(client.chat.completions.create.call_args.kwargs["max_tokens"],800)
+        self.assertEqual([item["accepted"] for item in result["answers"]],
+                         [True,False,False,False,True])
 
     def test_grading_uses_its_own_pinned_model(self):
         import main
@@ -95,7 +99,8 @@ class CalibrationTests(unittest.TestCase):
         import main, json
         from types import SimpleNamespace
         obs={"answers":[{"n":n,"accepted":True,"heard":"I live here. It is nice.","reason":"correct"} for n in range(1,6)]}
-        good={"items":[{"n":n,"accepted":True,"reason":"correct"} for n in range(1,6)]}
+        good={"items":[{"n":n,"complete":True,"enough_phrases":True,
+                       "blocking_quote":"","reason":"correct"} for n in range(1,6)]}
         def response(body):
             return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(body)))])
         client=unittest.mock.MagicMock()
