@@ -169,6 +169,22 @@ class P1Tests(unittest.TestCase):
         self.assertIn("Балл не выставлен", rows[0]["detail"])
         track.assert_called_once_with(analysis_failed=1)
 
+    def test_exam_header_does_not_erase_greeting_and_a_request_for_reply_counts_as_closing(self):
+        spoken = "Hello Alex! I've found some photos. Please let me know what you think."
+        self.assertEqual(ege_scoring.student_answer_text("Работа 123-456. Задание 4. " + spoken), spoken)
+        self.assertTrue(ege_scoring.closing_rescued(spoken))
+        self.assertFalse(ege_scoring.closing_rescued("Please let me know what you think. Next I would..."))
+        self.assertFalse(ege_scoring.closing_rescued("Thank you for listening."))
+        self.assertEqual(ege_scoring.student_answer_text("Задание 4. Hello!"), "Задание 4. Hello!")
+
+    def test_interview_second_pass_does_not_echo_the_previous_verdict(self):
+        items = [{"n": 1, "point": "How do you travel?", "heard": "I take the bus.",
+                  "reason": "synthetic first-pass mistake", "accepted": False, "phrase_hint": 1}]
+        prompt = main.ege_prompts.recheck_prompt("interview", items, "How do you travel?", "I take the bus.", None)
+        self.assertIn("I take the bus.", prompt)
+        self.assertNotIn("synthetic first-pass mistake", prompt)
+        self.assertIn("valid continuous reading", prompt)
+
     def test_evidence_maps_compacted_audio_to_the_original_recording(self):
         feedback = {"criteria": [{"quote": "we see two children"}],
                     "errors": [{"quote": "it is nice"}, {"quote": "these words are absent"}]}

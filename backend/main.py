@@ -4439,6 +4439,7 @@ async def _grade_task_text(kind: str, payload: dict, transcript: str, *,
                            focused: bool = False) -> tuple[dict, dict, float, float]:
     """Judge exactly the same transcript in the exam, labeler and paired benchmark."""
     started = time.perf_counter()
+    transcript = ege_scoring.student_answer_text(transcript)
     reason = None if focused else ege_scoring.sanity_gate(kind, transcript)
     if reason:
         return {
@@ -4572,7 +4573,8 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
 
     # Оценка зависит только от текущего ответа и задания, без истории ученика.
     try:
-        transcript_text = await transcribe_for_task(grading_copy, filename, prepared=True)
+        transcript_text = ege_scoring.student_answer_text(
+            await transcribe_for_task(grading_copy, filename, prepared=True))
     except SttFailed as e:
         print(f"[stt] task_feedback не распознал: {e}")
         note_failure("stt", str(e))

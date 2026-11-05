@@ -419,6 +419,29 @@ _FILLERS = {"um", "uh", "er", "erm", "mm", "hmm", "so", "well", "okay", "ok",
             "yeah", "yes", "right", "and", "but"}
 
 
+_PROCTOR_HEADER = re.compile(
+    r"^\s*работа\s+(?:№\s*)?\d{1,10}(?:[-– ]\d{1,8}){0,2}\s*[.,:;-]?\s*"
+    r"задание\s+(?:№\s*)?(?:[1-4]|39|4[012])\b\s*[.!?:]+\s*",
+    re.IGNORECASE,
+)
+
+
+def student_answer_text(transcript: str) -> str:
+    """Remove the explicit spoken archive header before judging the student."""
+    return _PROCTOR_HEADER.sub("", transcript, count=1)
+
+
+def closing_rescued(transcript: str) -> bool:
+    """Recognize a direct, completed closing addressed to the friend."""
+    sentences = [s.strip().lower() for s in re.split(r"[.!?]+", transcript) if s.strip()]
+    if not sentences:
+        return False
+    last = sentences[-1]
+    return bool(re.fullmatch(r"bye(?: for now)?|see you(?: soon| later)?|talk to you later", last)
+                or re.match(r"^(?:please\s+)?(?:let me know|tell me)\s+"
+                            r"(?:what|whether|if|how)\s+\S+\s+\S+", last))
+
+
 def opening_rescued(transcript: str) -> bool:
     """Было ли обращение к другу, СЪЕДЕННОЕ распознаванием.
 

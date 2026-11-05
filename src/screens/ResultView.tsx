@@ -566,7 +566,7 @@ export function ResultView({
         </p>
       )}
 
-      {variant && <FeedbackCoach taskId={taskId} variant={variant} feedback={feedback} player={player} />}
+      {variant && <FeedbackCoach taskId={taskId} variant={variant} feedback={feedback} player={player} hasRecording={Boolean(audioUrl)} />}
 
       {taskId === 39 && reference && (
         <ReadingResult feedback={feedback} reference={reference} dispute={dispute}

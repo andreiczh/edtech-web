@@ -14,7 +14,7 @@ function practiceGoals(taskId: TaskId, variant: TaskVariant, feedback: TaskFeedb
     return [{
       key: item.key,
       criterion: taskId === 41 ? `Ответ №${index + 1}` : `Вопрос №${index + 1}`,
-      instruction: taskId === 41 ? 'Ответь на этот вопрос двумя законченными фразами.'
+      instruction: taskId === 41 ? 'Исправь замечание и ответь на все части вопроса двумя законченными фразами.'
         : 'Задай один прямой вопрос по этому пункту объявления.',
       before: item.comment || 'Этот пункт не засчитан.',
       quote: item.audio_span ? item.quote : undefined,
@@ -25,11 +25,12 @@ function practiceGoals(taskId: TaskId, variant: TaskVariant, feedback: TaskFeedb
   })
 }
 
-export function FeedbackCoach({ taskId, variant, feedback, player }: {
+export function FeedbackCoach({ taskId, variant, feedback, player, hasRecording }: {
   taskId: TaskId
   variant: TaskVariant
   feedback: TaskFeedback
   player: RefObject<HTMLAudioElement | null>
+  hasRecording: boolean
 }) {
   const goals = useMemo(() => practiceGoals(taskId, variant, feedback), [taskId, variant, feedback])
   const [selected, setSelected] = useState<string | null>(null)
@@ -71,7 +72,7 @@ export function FeedbackCoach({ taskId, variant, feedback, player }: {
       audio.removeEventListener('seeked', onSeeked)
       audio.removeEventListener('timeupdate', onTimeUpdate)
     }
-  }, [player])
+  }, [player, hasRecording])
 
   useEffect(() => {
     active.current = true
@@ -168,7 +169,7 @@ export function FeedbackCoach({ taskId, variant, feedback, player }: {
           >
             <strong>{target.criterion}</strong>
             {target.quote && <span>{target.quote}</span>}
-            {target.audio_span && <small>▶ Прослушать фрагмент</small>}
+            {target.audio_span && hasRecording && <small>▶ Прослушать фрагмент</small>}
           </button>
         ))}
       </div>

@@ -280,8 +280,9 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
         print("[42] обращение спасено: первая фраза похожа на съеденное "
               "распознаванием приветствие")
 
+    closing = bool(obs.get("closing")) or ege_scoring.closing_rescued(transcript)
     res = ege_scoring.score_monologue(
-        aspects, phrases, opening, bool(obs.get("closing")),
+        aspects, phrases, opening, closing,
         len(logic), len(lang), grave,
     )
 
@@ -311,7 +312,7 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
             quote = ""
         practice.append({"key": "content", "criterion": "Содержание", "quote": quote[:300],
                          "before": aspect["comment"], "instruction": instructions[n]})
-    if not opening or not obs.get("closing"):
+    if not opening or not closing:
         practice.append({"key": "structure", "criterion": "Организация",
                          "before": "В разборе не найдено обращение к другу." if not opening
                          else "В разборе не найдено заключение.",
