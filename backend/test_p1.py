@@ -69,6 +69,25 @@ class P1Tests(unittest.TestCase):
         self.assertFalse(res.json()["ok"])
         self.assertFalse(res.json()["readiness"]["database"])
 
+    def test_startup_initializes_the_dialogue_client(self):
+        with patch.dict(os.environ, {"LLM_API_KEY": "test-config-only"}), \
+             patch.dict(main._VOICE_DAY, clear=True), \
+             patch.object(main, "_max_token", return_value=""), \
+             patch.object(main, "_stt_client"), \
+             patch.object(main, "_ping_pool", return_value=True), \
+             patch.object(main, "_check_llm_route", return_value=True), \
+             patch.object(main, "KEEP_AWAKE_URL", ""), \
+             patch.object(main, "MONTHLY_LLM_BUDGET", 0), \
+             patch.object(main, "notify_owner"), \
+             patch.object(main, "_async_llm", None), \
+             patch.object(main, "llm_http_client"), \
+             patch.object(main, "AsyncOpenAI") as sdk:
+            asyncio.run(main._warmup())
+            sdk.assert_called_once()
+            main.async_llm_client()
+            sdk.assert_called_once()
+            sdk.return_value.chat.completions.create.assert_not_called()
+
     def test_conversation_stream_failure_is_not_http_success(self):
         with patch.object(main, "transcribe_auto", side_effect=main.SttFailed("test failure")), \
              patch.object(main, "_load_memory", new=AsyncMock(return_value={})), \
