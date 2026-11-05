@@ -3268,7 +3268,7 @@ async def _count_http(request, call_next):
             _track_usage(http_5xx=1)
         elif code == 429:
             _track_usage(http_429=1)
-        elif code < 400 and request.url.path not in ("/task_feedback", "/monologue", "/talk_stream"):
+        elif code < 400 and request.url.path not in ("/task_feedback", "/monologue", "/talk_stream", "/talk_metrics"):
             _track_usage(http_ok=1)
     if request.url.path.startswith(("/auth/", "/me/", "/progress")):
         response.headers["Cache-Control"] = "no-store"

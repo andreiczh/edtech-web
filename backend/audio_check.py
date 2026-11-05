@@ -39,8 +39,10 @@ class AudioTooLong(ValueError):
     pass
 
 
-def validate_duration(data: bytes, max_seconds: float = MAX_AUDIO_SECONDS) -> None:
+def validate_duration(data: bytes, max_seconds: float | None = None) -> None:
     """Bound decoded duration without retaining frames, even without metadata."""
+    if max_seconds is None:
+        max_seconds = MAX_AUDIO_SECONDS
     try:
         with av.open(io.BytesIO(data)) as c:
             if c.duration is not None and c.duration / av.time_base > max_seconds:
