@@ -171,7 +171,9 @@ async function postTaskAudio<T>(fd: FormData, timeout: number, signal?: AbortSig
     try {
       data = await res.json()
     } catch {
-      if (controller.signal.aborted) throw new Error(timeoutText)
+      if (controller.signal.aborted) throw new Error(timeout === 180_000
+        ? 'Сервер не завершил проверку за три минуты. Попробуй отправить эту запись ещё раз.'
+        : timeoutText)
       parsed = false
     }
     const detail =
