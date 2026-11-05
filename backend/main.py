@@ -32,7 +32,7 @@ import threading
 import time
 _PROCESS_STARTED = time.monotonic()
 _GRADING_DIAGNOSTICS = {"incomplete_rechecks": 0, "last_recheck_error": ""}
-from collections import Counter, deque
+from collections import deque
 from datetime import date, datetime, timedelta, timezone
 
 # На Windows без Developer Mode huggingface_hub печатает безобидный warning
@@ -2505,16 +2505,12 @@ async def admin_usage(x_admin_key: str | None = Header(None)):
     _require_admin(x_admin_key)
     if not _storage_ok:
         return {"days": {}, "limits": {}}
-    days = await asyncio.to_thread(storage.usage_report, 14)
+    days = await asyncio.to_thread(storage.usage_report, voice_metrics.WINDOW_DAYS)
     month = await asyncio.to_thread(storage.month_report)
-    playback_period = Counter()
-    for metrics in days.values():
-        playback_period.update({name: value for name, value in metrics.items()
-                                if name.startswith("playback_")})
     return {
         "days": days,
         "voice_latency_by_day": {day: voice_metrics.summary(metrics) for day, metrics in days.items()},
-        "voice_latency_14d": voice_metrics.summary(playback_period),
+        "voice_latency_14d": voice_metrics.period_summary(days),
         "month": month,
         "budget": _budget_state(),
         "limits_per_minute": {
@@ -3419,7 +3415,8 @@ def ping():
 # Поля /health, требующие базы, живут в часовом кэше: диагностику человек
 # открывает изредка, и ради неё можно разбудить Neon раз в час, но не каждые
 # десять минут фоновым пингом (так сгорела квота августа-2026).
-_HEALTH_DB = {"at": 0.0, "usage": {}, "invites": -1}
+_HEALTH_DB = {"at": 0.0, "attempt_day": "", "usage_day": "", "usage": {},
+              "playback": None, "invites": -1}
 _HEALTH_DB_TTL = 3600.0
 
 
@@ -3427,12 +3424,17 @@ def _health_db_refresh() -> None:
     if not _storage_ok:
         return
     now = time.monotonic()
-    if _HEALTH_DB["at"] and now - _HEALTH_DB["at"] < _HEALTH_DB_TTL:
+    utc_now = datetime.now(timezone.utc)
+    day = utc_now.date().isoformat()
+    if (_HEALTH_DB["at"] and _HEALTH_DB["attempt_day"] == day
+            and now - _HEALTH_DB["at"] < _HEALTH_DB_TTL):
         return
-    _HEALTH_DB["at"] = now
+    _HEALTH_DB.update(at=now, attempt_day=day)
     try:
-        report = storage.usage_report(1)
-        _HEALTH_DB["usage"] = next(iter(report.values()), {}) if report else {}
+        report = storage.usage_report(voice_metrics.WINDOW_DAYS)
+        _HEALTH_DB.update(usage_day=day, usage=report.get(day, {}),
+                          playback={**voice_metrics.period_summary(report),
+                                    "as_of_utc": utc_now.isoformat(timespec="seconds")})
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -3493,6 +3495,7 @@ async def health(response: Response):
         # уже сожгли» можно без ключа админки. Полная разбивка — /admin/usage.
         "usage_today": usage_today,
         "voice_latency_today": voice_metrics.summary(usage_today),
+        "voice_latency_14d": _HEALTH_DB["playback"] if _storage_ok else None,
         # Месячный бюджет вызовов LLM: mode normal/eco/low/empty (см. _BUDGET).
         "budget_month": _budget_state(),
     }
@@ -3548,7 +3551,8 @@ def _usage_today() -> dict:
     if not _storage_ok:
         return {}
     _health_db_refresh()
-    return _HEALTH_DB["usage"]
+    day = datetime.now(timezone.utc).date().isoformat()
+    return _HEALTH_DB["usage"] if _HEALTH_DB["usage_day"] == day else {}
 
 
 @app.post("/talk")
@@ -4007,6 +4011,9 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
     prompt = ege_prompts.recheck_prompt(kind, disputed, task_text, transcript, persona)
     expected_numbers = {d["n"] for d in disputed}
     messages = [{"role": "system", "content": prompt}]
+    interview = kind == "interview"
+    item_schema = (ege_prompts.INTERVIEW_RECHECK_ITEM if interview else
+                   '{"n":1,"accepted":true,"reason":"brief reason"}')
     try:
         for attempt in range(2):
             completion = await asyncio.to_thread(
@@ -4021,9 +4028,20 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
                 verdicts = json.loads(raw).get("items")
                 if (not isinstance(verdicts, list) or len(verdicts) != len(disputed)
                         or any(not isinstance(v, dict) or type(v.get("n")) is not int
-                               or type(v.get("accepted")) is not bool for v in verdicts)
+                               for v in verdicts)
                         or {v["n"] for v in verdicts} != expected_numbers):
                     raise ValueError("incomplete recheck")
+                if interview:
+                    for v in verdicts:
+                        quote = v.get("blocking_quote")
+                        if (type(v.get("complete")) is not bool
+                                or type(v.get("enough_phrases")) is not bool
+                                or not isinstance(quote, str)
+                                or (quote.strip() and ege_scoring.quote_is_fabricated(quote, transcript))):
+                            raise ValueError("invalid interview evidence")
+                        v["accepted"] = v["complete"] and v["enough_phrases"] and not quote.strip()
+                elif any(type(v.get("accepted")) is not bool for v in verdicts):
+                    raise ValueError("invalid dialogue recheck")
                 break
             except (ValueError, AttributeError):
                 _GRADING_DIAGNOSTICS["incomplete_rechecks"] += 1
@@ -4032,7 +4050,8 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
                 messages = [*messages, {"role": "user", "content":
                     "Return the complete result, exactly one item for EACH number: "
                     + ", ".join(map(str, sorted(expected_numbers)))
-                    + '. Use only {"items":[{"n":1,"accepted":true,"reason":"brief reason"}, ...]}. '
+                    + f'. Use only {{"items":[{item_schema}, ...]}}. '
+                    + ("Use only spoken words in blocking_quote; empty if none. " if interview else "")
                     + "Do not return answers/questions as a key. Do not skip accepted or rejected items."}]
     except Exception as e:  # noqa: BLE001
         _GRADING_DIAGNOSTICS["last_recheck_error"] = type(e).__name__
