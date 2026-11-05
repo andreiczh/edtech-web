@@ -1,0 +1,29 @@
+.feedback-coach {
+  margin-block: 16px;
+  padding: clamp(12px, 2vw, 22px);
+  border: 1px solid currentColor;
+  border-color: color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 20px;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  overflow-wrap: anywhere;
+}
+.feedback-coach h3, .feedback-coach p { margin: 0 0 8px; }
+.feedback-coach button {
+  color: inherit;
+  font: inherit;
+  min-height: 44px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  text-align: start;
+  cursor: pointer;
+}
+.feedback-coach button:disabled { opacity: .65; cursor: default; }
+.feedback-coach button[aria-expanded="true"] { background: color-mix(in srgb, currentColor 13%, transparent); }
+.feedback-coach button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.feedback-coach__goals { display: grid; gap: 6px; }
+.feedback-coach__goals button { display: grid; gap: 3px; }
+.feedback-coach__detail, .feedback-coach__result { margin-top: 12px; }
+.feedback-coach__controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.feedback-coach__result blockquote { margin: 6px 0; font-style: italic; }

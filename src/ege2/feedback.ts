@@ -17,7 +17,10 @@ import type { TaskKind } from './tasks'
 
 const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '')
 
+export interface AudioSpan { start: number; end: number }
+
 export interface FeedbackCriterion {
+  audio_span?: AudioSpan
   key: string
   name: string
   score: number
@@ -29,6 +32,7 @@ export interface FeedbackCriterion {
 }
 
 export interface FeedbackError {
+  audio_span?: AudioSpan
   quote: string
   correction: string
   explanation: string
@@ -48,7 +52,25 @@ export interface Delivery {
   comment: string
 }
 
+export interface PracticeGoal {
+  key: string
+  criterion: string
+  instruction: string
+  before?: string
+  quote?: string
+  example?: string
+  audio_span?: AudioSpan
+  item?: number
+}
+
+export interface PracticeResult {
+  status: 'met' | 'try_again' | 'unclear'
+  quote: string
+  note: string
+}
+
 export interface TaskFeedback {
+  practice?: PracticeGoal[]
   summary: string
   score: number
   max: number
@@ -89,11 +111,47 @@ export async function requestTaskFeedback(
   if (meta?.sessionDone) fd.append('session_done', '1')
   // Предпочтение собеседника не меняет экзаменационные баллы.
   fd.append('persona', getSettings().persona)
+  if (kind !== 'reading') fd.append('evidence', '1')
+  return postTaskAudio<FeedbackResponse>(fd, 180_000)
+}
 
+export async function requestFocusedPractice(
+  blob: Blob,
+  kind: TaskKind,
+  payload: Record<string, unknown>,
+  goal: PracticeGoal,
+  signal: AbortSignal,
+): Promise<PracticeResult> {
+  const fd = new FormData()
+  fd.append('audio', blob, audioFileName('repeat', blob))
+  fd.append('kind', kind)
+  fd.append('payload', JSON.stringify(payload))
+  const { item, criterion, instruction, before, quote, example } = goal
+  fd.append('focus', JSON.stringify(item == null ? {
+    criterion,
+    instruction: instruction.slice(0, 350),
+    before: before?.slice(0, 350),
+    quote: quote?.slice(0, 350),
+    example: example?.slice(0, 350),
+  } : { item }))
+  const { practice } = await postTaskAudio<{ practice: PracticeResult }>(fd, 55_000, signal)
+  if (!practice || !['met', 'try_again', 'unclear'].includes(practice.status)) {
+    throw new Error('Сервер не вернул результат повтора. Попробуй ещё раз.')
+  }
+  return practice
+}
+
+async function postTaskAudio<T>(fd: FormData, timeout: number, signal?: AbortSignal): Promise<T> {
   const controller = new AbortController()
   // Cover the streamed body as well as headers: a broken heartbeat stream
   // otherwise leaves the student on the waiting screen forever.
-  const timer = setTimeout(() => controller.abort(), 180_000)
+  const abort = () => controller.abort()
+  if (signal?.aborted) abort()
+  signal?.addEventListener('abort', abort, { once: true })
+  const timer = setTimeout(abort, timeout)
+  const timeoutText = timeout === 180_000
+    ? 'Проверка заняла больше трёх минут. Запись сохранена на этом экране — попробуй отправить её ещё раз.'
+    : 'Проверка повтора затянулась. Эту запись можно отправить ещё раз.'
   try {
     let res: Response
     try {
@@ -104,7 +162,7 @@ export async function requestTaskFeedback(
         signal: controller.signal,
       })
     } catch {
-      if (controller.signal.aborted) throw new Error('Проверка заняла больше трёх минут. Запись сохранена на этом экране — попробуй отправить её ещё раз.')
+      if (controller.signal.aborted) throw new Error(timeoutText)
       throw new Error(backendUnreachableMessage())
     }
 
@@ -113,7 +171,7 @@ export async function requestTaskFeedback(
     try {
       data = await res.json()
     } catch {
-      if (controller.signal.aborted) throw new Error('Сервер не завершил проверку за три минуты. Попробуй отправить эту запись ещё раз.')
+      if (controller.signal.aborted) throw new Error(timeoutText)
       parsed = false
     }
     const detail =
@@ -121,9 +179,10 @@ export async function requestTaskFeedback(
         ? String((data as { detail: unknown }).detail)
         : null
     if (!res.ok || !parsed || detail) throw new Error(httpErrorMessage(res.status, detail))
-    return data as FeedbackResponse
+    return data as T
   } finally {
     clearTimeout(timer)
+    signal?.removeEventListener('abort', abort)
   }
 }
 

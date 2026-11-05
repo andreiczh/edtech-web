@@ -24,6 +24,8 @@ export function useRecorder() {
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
+  const active = useRef(true)
+  const acquiring = useRef(false)
   const resolveRef = useRef<((b: Blob) => void) | null>(null)
 
   const stopStream = useCallback(() => {
@@ -32,13 +34,19 @@ export function useRecorder() {
   }, [])
 
   const start = useCallback(async () => {
+    if (acquiring.current || recorderRef.current) return false
     setError(null)
     if (!navigator.mediaDevices?.getUserMedia) {
       setError('Микрофон недоступен: нужен https или localhost.')
       return false
     }
+    acquiring.current = true
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (!active.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return false
+      }
       streamRef.current = stream
       const rec = makeRecorder(stream)
       chunksRef.current = []
@@ -46,6 +54,7 @@ export function useRecorder() {
         if (e.data.size) chunksRef.current.push(e.data)
       }
       rec.onstop = () => {
+        recorderRef.current = null
         stopStream()
         try {
           window.WebApp?.disableClosingConfirmation?.()
@@ -55,7 +64,7 @@ export function useRecorder() {
         const blob = new Blob(chunksRef.current, { type: recordedType(rec) })
         resolveRef.current?.(blob)
         resolveRef.current = null
-        setState('idle')
+        if (active.current) setState('idle')
       }
       recorderRef.current = rec
       rec.start()
@@ -68,8 +77,12 @@ export function useRecorder() {
       }
       return true
     } catch {
-      setError('Нет доступа к микрофону — разреши его в браузере.')
+      recorderRef.current = null
+      stopStream()
+      if (active.current) setError('Нет доступа к микрофону — разреши его в браузере.')
       return false
+    } finally {
+      acquiring.current = false
     }
   }, [stopStream])
 
@@ -113,27 +126,28 @@ export function useRecorder() {
       }
       resolveRef.current = (b) => resolve(b)
       rec.stop()
-      recorderRef.current = null
     })
   }, [])
 
-  // Ушли со страницы посреди записи — микрофон обязан погаснуть.
-  useEffect(
-    () => () => {
+  // Also stop a permission request that resolves after this screen is gone.
+  useEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
       try {
         recorderRef.current?.stop()
       } catch {
-        /* уже остановлен */
+        /* already stopped */
       }
+      recorderRef.current = null
       stopStream()
       try {
         window.WebApp?.disableClosingConfirmation?.()
       } catch {
-        /* нет моста */
+        /* no MAX bridge */
       }
-    },
-    [stopStream],
-  )
+    }
+  }, [stopStream])
 
   return { state, error, start, stop, pause, resume }
 }

@@ -51,7 +51,7 @@ def prepare(data: bytes, filename: str = "speech.webm") -> bytes:
         return _prepare(data, audio_check.to_pcm(data, Path(filename).suffix))
 
 
-def _prepare(data: bytes, pcm: np.ndarray | None) -> bytes:
+def _prepare(data: bytes, pcm: np.ndarray | None, timeline: list | None = None) -> bytes:
     if pcm is None or len(pcm) < 30 * 16000:
         return data
     spans = speech_spans(pcm)
@@ -63,10 +63,16 @@ def _prepare(data: bytes, pcm: np.ndarray | None) -> bytes:
     # Keep a half-second separator and the VAD's three-second margins. Grammar,
     # repetitions and self-corrections INSIDE speech are never rewritten.
     parts = []
+    offset = 0
     for s in spans:
         if parts:
             parts.append(np.zeros(8000, dtype=np.float32))
+            offset += 8000
+        length = s["end"] - s["start"]
+        if timeline is not None:
+            timeline.append((offset / 16000, (offset + length) / 16000, s["start"] / 16000))
         parts.append(pcm[s["start"]:s["end"]])
+        offset += length
     compact = np.concatenate(parts)
     out = io.BytesIO()
     with wave.open(out, "wb") as w:
@@ -111,7 +117,10 @@ if __name__ == "__main__":
     sound = audio_check.inspect_pcm(pcm)
     prepared = data
     if sys.argv[2] == "compact" and audio_check.silence_reason(sound) is None:
-        prepared = _prepare(data, pcm)
+        timeline = []
+        prepared = _prepare(data, pcm, timeline)
+        if timeline:
+            sound["timeline"] = timeline
     # When there is no change, the parent already has the original bytes.
     sys.stdout.buffer.write(json.dumps(sound).encode() + b"\n")
     if prepared is not data:

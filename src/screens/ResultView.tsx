@@ -15,9 +15,9 @@
  *   - транскрипции произношения вида [trʌŋk] и пометок об интонации. Разбор
  *     работает с текстовой расшифровкой речи, звука он не слышит, и выдумывать
  *     фонетические ошибки промпты прямо запрещают;
- *   - «мини тренировки» — такой фичи в продукте пока нет.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { FeedbackCoach } from '../components/FeedbackCoach'
 
 import { Disagree } from '../components/Disagree'
 import type { DisputeContext } from '../ege2/dispute'
@@ -95,9 +95,12 @@ function ScoreRing({ score, max }: { score: number; max: number }) {
 
 /** Проигрыватель своей записи. Файл живёт только во вкладке: на сервере записи
     речи не хранятся — ученики несовершеннолетние, отдельного согласия нет. */
-function OwnRecording({ url }: { url: string | null }) {
+function OwnRecording({ url, player }: {
+  url: string | null
+  player: RefObject<HTMLAudioElement | null>
+}) {
   if (!url) return null
-  return <audio className="player" src={url} controls preload="metadata" />
+  return <audio ref={player} className="player" src={url} controls preload="metadata" />
 }
 
 /* --------------------------------------------------- №39: чтение вслух */
@@ -495,6 +498,7 @@ export function ResultView({
 }) {
   const criteria = feedback.criteria ?? []
   // У №40 и №41 критерии — это сами вопросы, их место в шапке, а не в кольце.
+  const player = useRef<HTMLAudioElement>(null)
   const perItem = taskId === 40 || taskId === 41
 
   /* Общая часть жалобы для всех спорных мест этого разбора: улика, снимок
@@ -545,7 +549,7 @@ export function ResultView({
               </div>
             ))}
         </div>
-        <OwnRecording url={audioUrl ?? null} />
+        <OwnRecording url={audioUrl ?? null} player={player} />
       </div>
 
       {feedback.summary && (
@@ -561,6 +565,8 @@ export function ResultView({
           <span aria-hidden="true">ⓘ</span> {feedback.accuracy_note}
         </p>
       )}
+
+      {variant && <FeedbackCoach taskId={taskId} variant={variant} feedback={feedback} player={player} />}
 
       {taskId === 39 && reference && (
         <ReadingResult feedback={feedback} reference={reference} dispute={dispute}

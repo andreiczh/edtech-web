@@ -296,11 +296,39 @@ def _score_feedback(kind: str, obs: dict, ctx: dict) -> dict:
     errors += [{"cat": "logic", "quote": str(e.get("quote") or "").strip() or "логика",
                 "correction": "", "explanation": str(e.get("explanation") or "").strip()}
                for e in logic[:3]]
+    practice = []
+    aspect = next((a for a in aspects if a["verdict"] != ege_scoring.FULL), None)
+    if aspect is not None:
+        instructions = {
+            1: "Кратко опиши оба фото и назови одно различие, связанное с темой проекта.",
+            2: "Назови по одному конкретному преимуществу каждого варианта.",
+            3: "Назови по одному конкретному недостатку каждого варианта.",
+            4: "Скажи, какой вариант предпочитаешь и почему. Сохрани форму глагола из задания.",
+        }
+        n = aspect["n"]
+        quote = str(final_checks.get(n, {}).get("evidence") or "")
+        if not quote or ege_scoring.quote_is_fabricated(quote, transcript):
+            quote = ""
+        practice.append({"key": "content", "criterion": "Содержание", "quote": quote[:300],
+                         "before": aspect["comment"], "instruction": instructions[n]})
+    if not opening or not obs.get("closing"):
+        practice.append({"key": "structure", "criterion": "Организация",
+                         "before": "В разборе не найдено обращение к другу." if not opening
+                         else "В разборе не найдено заключение.",
+                         "instruction": "Начни голосовое сообщение с обращения к другу." if not opening
+                         else "Закончи сообщение фразой к другу, например попроси его ответить."})
+    for index, error in enumerate(errors):
+        if error["cat"] in ("gram", "lex") and error["correction"]:
+            practice.append({"key": f"language-{index}", "criterion": "Язык",
+                             "quote": error["quote"], "before": error["explanation"],
+                             "instruction": "Произнеси эту мысль с исправлением.",
+                             "example": error["correction"]})
+
     return {"summary": f"Содержание: {res['criteria'][0]['score']}/4; "
                        f"организация: {res['criteria'][1]['score']}/3; "
                        f"язык: {res['criteria'][2]['score']}/3. Подробности — в критериях.",
             "score": res["score"], "max": res["max"],
-            "errors": errors, "criteria": res["criteria"],
+            "errors": errors, "criteria": res["criteria"], "practice": practice,
             # ЧЕСТНАЯ ОГОВОРКА. Замер на восьми работах ФИПИ (30.08.2026): в
             # пределах балла от эксперта мы попадаем в 3-5 случаях из 8, и
             # ошибка идёт в обе стороны. Скрыть это значит выдать ориентир за
