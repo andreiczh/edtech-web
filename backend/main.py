@@ -3693,7 +3693,8 @@ async def _grading_observations(client, prompt: str, transcript: str, kind: str)
             if isinstance(result, BaseException):
                 raise result
         (observations, raw), (second, _) = results
-        return ege_scoring.merge_two_passes(observations, second), raw
+        return ege_scoring.merge_two_passes(
+            observations, second, language_recheck=MONOLOGUE_RECHECK), raw
     return await one(20261102)
 
 
@@ -4012,6 +4013,7 @@ async def _recheck_disputed(kind: str, observations: dict, ctx: dict,
                 lambda: client.chat.completions.create(
                     model=GRADE_MODEL, messages=messages,
                     response_format={"type": "json_object"}, temperature=0.0,
+                    extra_body={"random_seed": 20261105} if kind == "interview" else None,
                     max_tokens=1400 if kind == "interview" else 800))
             _track_llm(completion)
             raw = (completion.choices[0].message.content or "").strip()
@@ -4080,7 +4082,8 @@ def _validate_monologue_recheck(data, numbers: list, candidate_count: int) -> No
         4: ("opinion_explicit", "choice_stated", "justified"),
     }
     for aspect in aspects:
-        if any(type(aspect.get(flag)) is not bool for flag in required[int(aspect["n"])]):
+        if any(type(aspect.get(flag)) is not bool
+               for flag in (*required[int(aspect["n"])], "unintelligible")):
             raise ValueError("incomplete aspect flags")
     checks = data.get("error_checks")
     if (not isinstance(checks, list) or len(checks) != candidate_count
@@ -4129,6 +4132,7 @@ async def _recheck_aspects(kind: str, observations: dict, ctx: dict,
                 lambda: client.chat.completions.create(
                     model=GRADE_MODEL, messages=messages,
                     response_format={"type": "json_object"}, temperature=0.0,
+                    extra_body={"random_seed": 20261105},
                     max_tokens=2400,
                 )
             )

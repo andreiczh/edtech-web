@@ -281,9 +281,8 @@ DIALOGUE_AUDIO = [
 # 2026, стр. 93-113. Шкала 2026: 4+3+3=10. У записи task4_19_9213 разбора в
 # методичке НЕТ (ЗАДАНИЕ 19 отсутствует) — в манифест не входит.
 #
-# В brief важна ФОРМА глагола мнения: у 5563 план требует «you prefer»
-# (эксперт валит «I'd prefer» как неверную форму), у остальных — «you'd
-# prefer». Перепутать — сломать правило verb_form_matches.
+# В brief важна форма глагола мнения: у 5563 и 4596 план требует
+# «you prefer» (см. стр. 94 и 96). Перепутать — занизить оценку в проверке.
 # --------------------------------------------------------------------------
 _MONO_BRIEF = (
     "Task 4. Imagine that you and your friend are doing a school project "
@@ -321,7 +320,7 @@ MONOLOGUE_AUDIO = [
         "work": "4596", "audio": "task4_14_4596.ogg",
         # Аспекты: +, ±, ±, ±  →  К1=2; логика 3 ошибки → К2=2; язык → К3=2.
         "expert": (2, 2, 2),
-        "brief": _mono_brief("Ideal weekend", "ways of spending the weekend"),
+        "brief": _mono_brief("Ideal weekend", "ways of spending the weekend", "you prefer"),
         "photoFacts": [
             "A woman wearing headphones is listening to music and relaxing "
             "in her living room with a cat at her side",

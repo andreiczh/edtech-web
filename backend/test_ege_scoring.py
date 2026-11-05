@@ -600,10 +600,15 @@ def check_merge() -> list[str]:
     bad = []
     a = {"aspects": [{"n": 1, "described_first": True, "described_second": False,
                       "linked_to_topic": True, "factual_error": False}],
-         "lang_errors": [1, 2], "logic_errors": [], "phrases": 12}
+         "lang_errors": [{"quote": "he go", "correction": "he goes"},
+                         {"quote": "three woman", "correction": "three women"}],
+         "logic_errors": [], "phrases": 12}
     b = {"aspects": [{"n": 1, "described_first": True, "described_second": True,
                       "linked_to_topic": False, "factual_error": True}],
-         "lang_errors": [1, 2, 3], "logic_errors": [], "phrases": 0}
+         "lang_errors": [{"quote": "He go.", "correction": "He goes."},
+                         {"quote": "a advice", "correction": "some advice"},
+                         {"quote": "it useful", "correction": "it is useful"}],
+         "logic_errors": [], "phrases": 0}
     m = sc.merge_two_passes(a, b)
     asp = m["aspects"][0]
 
@@ -613,7 +618,8 @@ def check_merge() -> list[str]:
         (asp["linked_to_topic"] is False,
          "спорный признак решается строже: система и так щедрее эксперта"),
         (asp["factual_error"] is True, "замеченную фактическую ошибку не прощаем"),
-        (len(m["lang_errors"]) == 3, "ошибок берём больше из двух проходов"),
+        ([e["quote"] for e in m["lang_errors"]] == ["he go", "three woman", "a advice", "it useful"],
+         "новая улика короткого прохода сохраняется, повтор той же ошибки не удваивается"),
         (m["phrases"] == 12,
          "ноль фраз у одного прохода НЕ обнуляет объём (это сбой, не молчание)"),
         (sc.merge_two_passes(a, {}) is a,

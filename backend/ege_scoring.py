@@ -102,7 +102,7 @@ def verb_form_matches(plan: str, student: str) -> bool:
     return shape(plan_s) == shape(student_s)
 
 
-def merge_two_passes(first: dict, second: dict) -> dict:
+def merge_two_passes(first: dict, second: dict, *, language_recheck: bool = True) -> dict:
     """Свести два независимых прохода разбора монолога в один.
 
     Зачем. Замер 30.08.2026 на восьми работах ФИПИ: при ОДНОМ проходе одна и та
@@ -117,8 +117,8 @@ def merge_two_passes(first: dict, second: dict) -> dict:
         было; спорить тут значит наказывать за причуду модели;
       * любое другое расхождение решается СТРОЖЕ (логическое И): по систематике
         проекта система щедрее эксперта везде, где решает модель;
-      * список ошибок берётся оттуда, где их больше (пропуск ошибки — щедрость),
-        число фраз — меньшее из двух (объём режет балл, и завышать его нельзя).
+      * замечания по языку из обоих проходов перепроверяются вместе;
+      * число фраз — меньшее из двух (объём режет балл, и завышать его нельзя).
 
     Замер (8 работ, по три повтора каждого пути):
         один проход      в пределах ±1: 3, 3, 3   разброс между повторами 0.8
@@ -158,10 +158,23 @@ def merge_two_passes(first: dict, second: dict) -> dict:
 
     out = dict(first)
     out["aspects"] = merged
-    for key in ("lang_errors", "logic_errors"):
-        la = first.get(key) or []
-        lb = second.get(key) or []
-        out[key] = la if len(la) >= len(lb) else lb
+    # A shorter list can still contain evidence that the longer one missed.
+    # Send each distinct candidate to the final evidence check.
+    unique = {}
+    for errors in (first.get("lang_errors") or [], second.get("lang_errors") or []):
+        for error in errors:
+            if not isinstance(error, dict):
+                continue
+            quote = tuple(_words(str(error.get("quote") or "")))
+            if not quote:
+                continue
+            fix = tuple(_words(str(error.get("correction") or "")))
+            unique.setdefault((quote, fix), error)
+    out["lang_errors"] = list(unique.values()) if language_recheck else max(
+        first.get("lang_errors") or [], second.get("lang_errors") or [], key=len)
+    la = first.get("logic_errors") or []
+    lb = second.get("logic_errors") or []
+    out["logic_errors"] = la if len(la) >= len(lb) else lb
     # Число фраз режет балл по шкале объёма, поэтому берём МЕНЬШЕЕ — но только
     # из тех проходов, где счёт вообще состоялся. Ноль фраз при непустой речи
     # означает сбой прохода, а не молчание ученика: слепой min обнулял бы

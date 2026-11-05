@@ -176,12 +176,23 @@ class CalibrationTests(unittest.TestCase):
     def test_monologue_recheck_rejects_truthy_strings_and_duplicate_aspects(self):
         import main
         aspect={"n":2,"named_first":True,"named_second":True,
-                "specific_first":True,"specific_second":False}
+                "specific_first":True,"specific_second":False,"unintelligible":False}
         main._validate_monologue_recheck({"aspects":[aspect],"error_checks":[]},[2],0)
         with self.assertRaises(ValueError):
             main._validate_monologue_recheck({"aspects":[{**aspect,"specific_second":"false"}],"error_checks":[]},[2],0)
         with self.assertRaises(ValueError):
             main._validate_monologue_recheck({"aspects":[aspect,aspect],"error_checks":[]},[2],0)
+
+    def test_monologue_recheck_can_keep_clear_choice_without_justification(self):
+        import main
+        first = {"n":4, "opinion_explicit":True, "choice_stated":True,
+                 "justified":False, "unintelligible":True}
+        checked = {**first, "unintelligible":False, "evidence":"I prefer cycling"}
+        obs = {"aspects":[first]}
+        self.assertEqual(sc.aspect_verdicts(obs["aspects"])[3]["verdict"], sc.MISSING)
+        main._validate_monologue_recheck({"aspects":[checked],"error_checks":[]},[4],0)
+        sc.merge_aspect_recheck(obs,[checked])
+        self.assertEqual(sc.aspect_verdicts(obs["aspects"])[3]["verdict"], sc.PARTIAL)
 
     def test_absent_difference_is_not_two_independent_content_flaws(self):
         check={"n":1,"described_first":True,"described_second":True,
