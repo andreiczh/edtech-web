@@ -24,12 +24,6 @@ function tasksWord(n: number): string {
   return 'заданий'
 }
 
-/* Прокрутки здесь нет — по прямой просьбе: «всё должно стоять на одном экране».
-   Высоту диктует сетка (.cardgrid делит остаток между рядами, 3×2 и 2×3), а
-   overflow:hidden ловит случай, если контент всё же окажется выше. Внутренний
-   padding нужен подъёму карточек на ховере — без него верх лифта режется краем. */
-const BODY: CSSProperties = { overflow: 'hidden', justifyContent: 'center', padding: '8px 10px' }
-
 const NOTE: CSSProperties = {
   width: 'min(100%, 900px)',
   margin: 0,
@@ -127,7 +121,7 @@ export function EgeMenuScreen({
   /* Шапку рисует App — общий каркас верхних экранов, см. комментарий там. */
   return (
     <div className="screenbody">
-      <div className="screen__body" style={BODY}>
+      <div className="screen__body exercise-menu scroll-soft">
         <div className="cardgrid cardgrid--menu">
           {progress.map((p) => (
             <TaskCard key={p.id} id={p.id} progress={p} next={p.id === next} onOpen={onOpenTask} />

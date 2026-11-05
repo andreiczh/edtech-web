@@ -58,9 +58,9 @@ export function MiniTalk() {
 
   const canReview = turns >= MIN_TURNS_FOR_REVIEW
   // Без звука (сервер не расслышал) текст показываем всегда — иначе тишина без объяснения.
-  const shownReply = reply && (showText || silentReply) && (state === 'speaking' || state === 'idle') ? reply : ''
+  const shownReply = (showText || silentReply) && state !== 'listening' ? reply : ''
   const text = error ?? reviewError ?? shownReply ?? ''
-  const body = text || CAPTIONS[state]
+  const body = text || (state === 'processing' && transcript ? 'Готовлю ответ…' : CAPTIONS[state])
   const isCaption = !text
 
   return (

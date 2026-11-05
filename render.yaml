@@ -57,8 +57,6 @@ services:
         value: ministral-14b-2512
       - key: STT_TASK_MODE
         value: "transcription"
-      - key: GRADE_MODEL
-        value: ministral-14b-2512
       - key: STT_TASK_MODEL
         value: "voxtral-small-latest"
       # Вход через мини-приложение MAX: токен бота из business.max.ru. Секрет —

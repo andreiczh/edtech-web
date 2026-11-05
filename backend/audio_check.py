@@ -154,7 +154,11 @@ def inspect(data: bytes, ext: str = ".webm") -> dict:
     """Длительность и доля кадров с речью. Ошибка разбора — не приговор:
     возвращаем ok=False, и все проверки ниже пропускают запись дальше.
     """
-    pcm = to_pcm(data, ext)
+    return inspect_pcm(to_pcm(data, ext))
+
+
+def inspect_pcm(pcm: np.ndarray | None) -> dict:
+    """Inspect already decoded samples so the audio worker can reuse them."""
     if pcm is None:
         return {"ok": False}
     if len(pcm) == 0:

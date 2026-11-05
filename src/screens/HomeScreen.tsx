@@ -71,6 +71,11 @@ export function HomeScreen({ onTrainer, onSpeaking, onDemo, onStats, onCalendar,
       </header>
       {loaded && (!stats || !analytics) && <div className="dashboard-status" role="status">Не удалось загрузить часть статистики. <button type="button" onClick={() => setRefresh(v => v + 1)}>Повторить</button></div>}
       <div className="dashboard-grid">
+        <div className="dashboard-primary">
+          <section className="dashboard-card dashboard-trainer"><h2>ТРЕНАЖЁР</h2><p>Практикуй все четыре задания устной части ЕГЭ</p><button type="button" className="dashboard-action dashboard-action--dark" aria-label="Тренажёр — начать" onClick={onTrainer}>Начать →</button></section>
+          <section className="dashboard-card dashboard-speaking"><h2>SPEAKING</h2><p>Свободный разговор с AI-собеседником</p><button type="button" className="dashboard-action dashboard-action--dark" aria-label="Speaking — начать" onClick={onSpeaking}>Начать →</button></section>
+          <section className="dashboard-card dashboard-demo"><img src="/mini/doc.png" alt="" /><h2>DEMO</h2><p>Полный экзамен в формате ЕГЭ</p><button type="button" className="dashboard-action dashboard-action--dark" aria-label="Демо-экзамен — начать" onClick={onDemo}>Начать →</button></section>
+        </div>
         <div className="dashboard-secondary">
           <section className="dashboard-card dashboard-theory">
             <span className="dashboard-kicker">ТЕОРИЯ · СКОРО</span><h2>Повтори теорию по заданиям</h2>
@@ -91,11 +96,7 @@ export function HomeScreen({ onTrainer, onSpeaking, onDemo, onStats, onCalendar,
             </div>
           </section>
         </div>
-        <div className="dashboard-primary">
-          <section className="dashboard-card dashboard-trainer"><h2>ТРЕНАЖЁР</h2><p>Практикуй все четыре задания устной части ЕГЭ</p><button type="button" className="dashboard-action dashboard-action--dark" aria-label="Тренажёр — начать" onClick={onTrainer}>Начать →</button></section>
-          <section className="dashboard-card dashboard-speaking"><h2>SPEAKING</h2><p>Свободный разговор с AI-собеседником</p><button type="button" className="dashboard-action dashboard-action--dark" aria-label="Speaking — начать" onClick={onSpeaking}>Начать →</button></section>
-          <section className="dashboard-card dashboard-demo"><img src="/mini/doc.png" alt="" /><h2>DEMO</h2><p>Полный экзамен в формате ЕГЭ</p><button type="button" className="dashboard-action dashboard-action--dark" aria-label="Демо-экзамен — начать" onClick={onDemo}>Начать →</button></section>
-        </div>
+
       </div>
     </div>
   </main>

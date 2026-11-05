@@ -10,7 +10,7 @@
  * «Время за неделю» из прототипа не переносим: система не замеряет длительность
  * занятий, а выдуманная цифра хуже отсутствующей. Вместо него — реальный XP.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   fetchMeAnalytics,
@@ -40,17 +40,30 @@ import { aggregate, SERIES, type Range } from '../account/statsSeries'
 
 function AreaChart({ history, range, today }: { history: MeAnalytics['history']; range: Range; today: string }) {
   const { labels, series } = useMemo(() => aggregate(history, range, today), [history, range, today])
-  const W = 1200
-  const H = 260
+  const chart = useRef<SVGSVGElement>(null)
+  const [{ width: W, height: H }, setSize] = useState({ width: 800, height: 210 })
+  const hasData = series.some((s) => s.points.some((p) => p !== null))
+  useEffect(() => {
+    if (!chart.current || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect
+      if (width > 0 && height > 0) setSize({ width, height })
+    })
+    observer.observe(chart.current)
+    return () => observer.disconnect()
+  }, [hasData])
   const padL = 46
-  const padR = 16
+  const padR = 22
   const padT = 14
   const padB = 30
   const n = labels.length
   const xs = (i: number) => padL + ((W - padL - padR) * i) / Math.max(1, n - 1)
   const ys = (v: number) => padT + (H - padB - padT) * (1 - v / 100)
+  const tickIntervals = Math.min(Math.max(1, n - 1), Math.max(1, Math.floor((W - padL - padR) / 56)))
+  const tickIndexes = new Set(Array.from({ length: tickIntervals + 1 }, (_, i) =>
+    Math.round(i * (n - 1) / tickIntervals),
+  ))
 
-  const hasData = series.some((s) => s.points.some((p) => p !== null))
   if (!hasData) {
     return (
       <p className="statpage__empty">
@@ -60,7 +73,7 @@ function AreaChart({ history, range, today }: { history: MeAnalytics['history'];
   }
 
   return (
-    <svg className="statpage__area" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Успешность по заданиям">
+    <svg ref={chart} className="statpage__area" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Успешность по заданиям">
       {[0, 1, 2, 3, 4].map((g) => {
         const y = padT + ((H - padB - padT) * g) / 4
         return (
@@ -72,9 +85,9 @@ function AreaChart({ history, range, today }: { history: MeAnalytics['history'];
           </g>
         )
       })}
-      {labels.map((l, i) => (
+      {labels.map((l, i) => tickIndexes.has(i) && (
         <text key={i} x={xs(i)} y={H - 8} textAnchor="middle" fontSize="12" fill="var(--text-dim)" fontWeight="600">
-          {n <= 12 || i % 5 === 0 || i === n-1 ? l : ''}
+          {l}
         </text>
       ))}
       {series.map((s) => {

@@ -3116,22 +3116,10 @@ def _split_sentence(buf: str) -> tuple[str, str]:
     return buf[:end].strip(), buf[end:].lstrip()
 
 
-# Минимальная длина ПЕРВОГО озвучиваемого куска. Не эстетика — арифметика.
-#
-# Реплика режется на два куска: голова уходит в синтез сразу (чтобы звук пошёл
-# быстро), остальное — ОДНИМ куском (чтобы у голоса была сквозная интонация, а
-# не по нейтральной фразе за раз; ровно это и слышно в примере C).
-#
-# Голова обязана ЗВУЧАТЬ дольше, чем синтезируется хвост, иначе в середине
-# реплики появится дыра. Замер Mistral TTS 04.08.2026: синтез ≈ 0.5 с + 0.0065 с
-# на знак, звучание ≈ 0.047 с на знак. Для хвоста в 150-200 знаков синтез
-# занимает 1.5-1.8 с, значит голова должна звучать хотя бы столько же:
-# 1.8 / 0.047 ≈ 40 знаков. Берём 70 с запасом на медленную сеть.
-#
-# Сверху это ограничено скоростью самой модели (~200 знаков/с), то есть ожидание
-# 70 знаков стоит около 0.35 с к паузе до первого звука — на порядок меньше, чем
-# сам синтез.
-_HEAD_MIN_CHARS = 70
+# Once a short, complete sentence is ready, TTS can start while the LLM
+# generates the rest. A minimum keeps greetings such as "Oh!" from turning
+# into an isolated audio clip. The remaining text is voiced as one part.
+_HEAD_MIN_CHARS = 30
 
 
 def _take_head(buf: str) -> tuple[str, str]:
@@ -3428,7 +3416,7 @@ async def health(response: Response):
         "build": os.environ.get("RENDER_GIT_COMMIT", "local"),
         "process_uptime_sec": round(time.monotonic() - _PROCESS_STARTED),
         "grading": {"model": GRADE_MODEL, "monologue_recheck": MONOLOGUE_RECHECK, "consensus": MONO_CONSENSUS,
-                    "audio_worker": "isolated", "version": "2026-11-03", **_GRADING_DIAGNOSTICS},
+                    "audio_worker": "isolated", "version": "2026-11-05", **_GRADING_DIAGNOSTICS},
         "readiness": availability,
         "stt": (
             f"mistral:{STT_REMOTE_MODEL}"
@@ -3590,7 +3578,7 @@ async def talk(audio: UploadFile = File(...),
     }
 
 
-async def _json_with_heartbeat(work):
+async def _json_with_heartbeat(work, *, timeout: float = 150.0):
     """Отдаём JSON потоком: пока считаем — шлём переводы строк.
 
     Зачем. Бесплатные туннели и часть прокси рвут запрос, который не отдал ни
@@ -3606,7 +3594,7 @@ async def _json_with_heartbeat(work):
     больше не может приехать кодом 502 — она приезжает полем `detail` в теле с
     кодом 200. Фронт проверяет и код, и это поле.
     """
-    task = asyncio.create_task(work)
+    task = asyncio.create_task(asyncio.wait_for(work, timeout=timeout))
     try:
         while True:
             done, _ = await asyncio.wait({task}, timeout=2.0)
@@ -3620,6 +3608,10 @@ async def _json_with_heartbeat(work):
         except HTTPException as e:
             _track_usage(analysis_failed=1)
             yield json.dumps({"detail": e.detail}, ensure_ascii=False)
+        except asyncio.TimeoutError:
+            _track_usage(analysis_failed=1)
+            yield json.dumps({"detail": "Разбор занял слишком много времени. "
+                                      "Балл не выставлен. Нажми «Повторить разбор»."}, ensure_ascii=False)
         except Exception as e:  # noqa: BLE001
             _track_usage(analysis_failed=1)
             print(f"[analysis] failed: {type(e).__name__}")
@@ -4426,7 +4418,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                               duration_sec: int, session_done: bool = False,
                               filename: str = "speech.webm",
                               persona: str = "") -> dict:
-    t0 = time.time()
+    t0 = time.perf_counter()
     persona = ""  # identical exam rules for every conversational character
 
     # Осмотр САМОГО ЗВУКА до распознавания. Тишину нельзя отдавать в Voxtral:
@@ -4436,7 +4428,11 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     # спрашивать: заодно экономятся вызов STT и вызов LLM.
     import grading_audio
     try:
-        sound, grading_copy = await asyncio.to_thread(grading_audio.analyze_isolated, data, filename)
+        # Only the timed question/answer tasks have mandatory gaps between
+        # utterances. Continuous speech goes to the same recognizer as recorded.
+        sound, grading_copy = await asyncio.to_thread(
+            grading_audio.analyze_isolated, data, filename, compact=kind in {"dialogue", "interview"},
+        )
     except Exception as error:
         note_failure("audio_prepare", type(error).__name__)
         raise HTTPException(502, "Обработка записи не завершена. Балл не выставлен — повтори разбор.") from error
@@ -4445,6 +4441,8 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
         print(f"[audio] запись отклонена без распознавания: {sound}")
         raise HTTPException(status_code=422, detail=quiet)
 
+    prepared_at = time.perf_counter()
+
     # Оценка зависит только от текущего ответа и задания, без истории ученика.
     try:
         transcript_text = await transcribe_for_task(grading_copy, filename, prepared=True)
@@ -4452,8 +4450,10 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
         print(f"[stt] task_feedback не распознал: {e}")
         note_failure("stt", str(e))
         raise HTTPException(status_code=502, detail=e.user_message)
-    t1 = time.time()
+    t1 = time.perf_counter()
     _track_latency("task_stt", t1 - t0)
+    _track_latency("task_prepare", prepared_at - t0)
+    _track_latency("task_transcription", t1 - prepared_at)
     if not transcript_text:
         raise HTTPException(
             status_code=422, detail="Тишина — ничего не распознали. Запиши ответ ещё раз."
@@ -4510,6 +4510,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
 
     if kind == "reading":
         feedback = _score_feedback(kind, {}, ctx)
+        graded_at = rechecked_at = time.perf_counter()
     else:
         client = llm_client()
         try:
@@ -4575,6 +4576,8 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                 raise HTTPException(502, "Разбор вопросов неполный — балл не выставлен. Повтори попытку.")
             observations[key] = sorted(items, key=lambda it: it["n"])
 
+        graded_at = time.perf_counter()
+
         # Механическая сверка улик ДО второго прохода: приписана ли ученику фраза,
         # которой он не говорил, и не засчитан ли обрывок вместо ответа. Ничего не
         # решает — только помечает пункты, чтобы старший эксперт посмотрел именно
@@ -4592,6 +4595,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
         # промпт, но та же цена: один вызов и только когда есть что пересматривать.
         observations = await _recheck_aspects(kind, observations, ctx,
                                               transcript_text, persona, client)
+        rechecked_at = time.perf_counter()
 
         # Балл считает шкала ФИПИ, а не модель, — см. ege_scoring.py.
         feedback = _score_feedback(kind, observations, ctx)
@@ -4636,14 +4640,18 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
                          os.path.splitext(filename)[1].lower() or ".mp3",
                          transcript_text, method="cross")
 
-    t2 = time.time()
+    t2 = time.perf_counter()
     _track_latency("task_llm", t2 - t1)
     return {
         "transcript": transcript_text,
         "feedback": feedback,
         "latency": {
             "stt": round(t1 - t0, 2),
+            "prepare": round(prepared_at - t0, 2),
+            "transcription": round(t1 - prepared_at, 2),
             "llm": round(t2 - t1, 2),
+            "judge": round(graded_at - t1, 2),
+            "recheck": round(rechecked_at - graded_at, 2),
             "total": round(t2 - t0, 2),
         },
     }
@@ -4768,17 +4776,15 @@ async def talk_stream(audio: UploadFile = File(...),
     _check_voice_rate(x_device or "admin")
     """Разговор со СТРИМИНГОМ ответа (Шаг A к <2с бесшовности).
 
-    Тот же push-to-talk на входе, но ответ течёт пофразно: LLM токенами →
-    режем на предложения → каждое сразу озвучиваем (edge-tts) и отдаём чанком
-    NDJSON `{text, audio_b64}`. Фронт играет их подряд — первый звук идёт,
-    пока генерится остальное. Финальный чанк: `{done, user, reply, latency}`,
-    где latency.first_audio = время до первого озвученного предложения.
+    Первое предложение озвучивается одновременно с генерацией продолжения.
+    Отправляем предварительный текст, затем два звуковых фрагмента по порядку.
+    В финальном чанке — полная реплика и время каждого этапа.
     """
     data = await _read_audio(audio)
     who = persona_of(persona)
 
     async def gen():
-        t0 = time.time()
+        t0 = time.perf_counter()
         # Профиль ученика тянем параллельно с распознаванием — добавка ноль.
         # В разговоре используется только личная выжимка, без общей: тьютор
         # исправляет мягко и по чуть-чуть, сводка всех ошибок ему не нужна.
@@ -4787,62 +4793,33 @@ async def talk_stream(audio: UploadFile = File(...),
         #    Запасной локальный путь — БЫСТРАЯ модель: в живом разговоре полторы
         #    секунды дороже, чем точность одного слова (см. WHISPER_MODEL_FAST).
         try:
-            user_text = await transcribe_auto(data, WHISPER_MODEL_FAST)
-        except SttFailed as e:
-            # Ученику — человеческая фраза (у разных причин она разная: битая
-            # запись vs перегрузка сервиса), техника уходит в лог сервера.
-            print(f"[stt] не распознал: {e}")
-            note_failure("stt", str(e))
-            yield json.dumps(
-                {"done": True, "user": "", "reply": e.user_message,
-                 "latency": {"stt": round(time.time() - t0, 2), "first_audio": 0,
-                             "total": round(time.time() - t0, 2)}}
-            ) + "\n"
-            return
-        t1 = time.time()
-        if not user_text:
-            yield json.dumps(
-                {"done": True, "user": "", "reply": "(не расслышал — скажи ещё раз)",
-                 "latency": {"stt": round(t1 - t0, 2), "first_audio": 0, "total": round(t1 - t0, 2)}}
-            ) + "\n"
-            return
-
-        _track_latency("conv_stt", t1 - t0)
-        # Расшифровку отдаём сразу — фронт покажет «Ты сказал…», пока стримится ответ.
-        yield json.dumps({"user": user_text}) + "\n"
-
-        # 2) LLM стримингом → 3) пофразный TTS
-        client = async_llm_client()
-        reply_full = ""
-        buf = ""
-        first_audio_at = None
-        # Ушло ли ученику хоть одно ОЗВУЧЕННОЕ предложение. Именно это, а не
-        # «пришёл ли хоть один токен», решает, можно ли повторить запрос:
-        # токены, не сложившиеся в предложение, до ученика не доехали и
-        # проиграться дважды не могут.
-        emitted = False
-
-        async def emit(sentence: str):
-            nonlocal first_audio_at, emitted
-            sentence = _strip_md(sentence)
-            t_tts = time.time()
             try:
-                wav = await synthesize(sentence, who)
-            except Exception as e:  # noqa: BLE001
-                raise TtsFailed(str(e)) from e
-            if first_audio_at is None:
-                first_audio_at = time.time()
-                # Синтез ПЕРВОГО куска — самая крупная доля паузы (замер
-                # 05.08.2026: ~1.3 из 2.9 с). Меряем отдельно: без разложения
-                # по этапам любое «ускорение» будет угадыванием.
-                _track_latency("conv_tts", first_audio_at - t_tts)
-            emitted = True
-            return json.dumps({"text": sentence, "audio_b64": base64.b64encode(wav).decode()}) + "\n"
+                user_text = await transcribe_auto(data, WHISPER_MODEL_FAST)
+            except SttFailed as e:
+                print(f"[stt] не распознал: {e}")
+                note_failure("stt", str(e))
+                elapsed = round(time.perf_counter() - t0, 3)
+                yield json.dumps({"done": True, "user": "", "reply": e.user_message,
+                                  "latency": {"stt": elapsed, "first_audio": 0, "total": elapsed}}) + "\n"
+                return
+            t1 = time.perf_counter()
+            if not user_text:
+                elapsed = round(t1 - t0, 3)
+                yield json.dumps({"done": True, "user": "", "reply": "(не расслышал — скажи ещё раз)",
+                                  "latency": {"stt": elapsed, "first_audio": 0, "total": elapsed}}) + "\n"
+                return
+            yield json.dumps({"user": user_text}) + "\n"
+            # Optional profile data gets a small grace period after STT. A
+            # slow database cannot add a full second to a conversational turn.
+            try:
+                mem = await asyncio.wait_for(mem_task, timeout=0.12)
+            except asyncio.TimeoutError:
+                mem = {}
+        finally:
+            if not mem_task.done():
+                mem_task.cancel()
 
-        # Личная выжимка делает тьютора внимательнее к повторяющимся ошибкам
-        # именно этого ученика. Правило «одна короткая поправка за реплику»
-        # сохраняется — оно уже в SYSTEM_PROMPT.
-        mem = await mem_task
+        client = async_llm_client()
         # Характер персоны дописывается ПОСЛЕ базовых правил: правила формата
         # (без markdown, вопрос в конце) и ремесло собеседника должны пережить
         # любой характер, иначе сломается озвучка или сам разговор.
@@ -4920,92 +4897,104 @@ async def talk_stream(audio: UploadFile = File(...),
             )
             print("[memory] прошлый разговор подключён")
 
-        # Ретрай LLM (03.08.2026): на домашнем канале 2 запроса из 5 рвались с
-        # пустой ошибкой, и ученик молча терял свой ход. Повторяем ТОЛЬКО пока
-        # ученику не уехало ни одного ОЗВУЧЕННОГО предложения: после первого
-        # повтор проиграл бы начало ответа дважды — тогда честнее отдать ошибку.
-        #
-        # Условие уточнено 04.08.2026 после сквозного прогона: раньше повтор
-        # запрещался, как только приходил первый ТОКЕН. Обрыв в середине
-        # генерации (канал рвал соединение через 30 с, обычное дело из РФ)
-        # оставлял огрызок фразы, который не сложился в предложение и до
-        # ученика не доехал, — но повтор уже считался небезопасным, и человек
-        # получал «LLM ошибка» на ровном месте. Ловилось стабильно, на второй
-        # реплике каждого прогона.
-        _LLM_ATTEMPTS = 3
-        for attempt in range(_LLM_ATTEMPTS):
+        messages = [{"role": "system", "content": sys_prompt}, *past,
+                    {"role": "user", "content": user_text}]
+
+        async def speak(sentence: str) -> str:
             try:
-                # Повтор начинает ответ с чистого листа: недописанный огрызок
-                # прошлой попытки иначе склеился бы с новым текстом.
-                if attempt:
-                    reply_full, buf = "", ""
-                stream = await client.chat.completions.create(
-                    model=LLM_MODEL,
-                    messages=[
-                        {"role": "system", "content": sys_prompt},
-                        *past,
-                        {"role": "user", "content": user_text},
-                    ],
-                    max_tokens=reply_tokens(who),
-                    stream=True,
-                )
-                stream_usage = None
-                head_done = False
-                t_ask = time.time()
+                audio_bytes = await synthesize(sentence, who)
+                if not audio_bytes:
+                    raise ValueError("empty speech audio")
+            except Exception as exc:
+                raise TtsFailed(type(exc).__name__) from exc
+            return json.dumps({"text": sentence, "audio_b64": base64.b64encode(audio_bytes).decode()}) + "\n"
+
+        async def generate(head_ready, timings: dict) -> tuple[str, str]:
+            reply = ""
+            buf = ""
+            usage = None
+            asked = time.perf_counter()
+            stream = await client.chat.completions.create(
+                model=LLM_MODEL, messages=messages, max_tokens=reply_tokens(who), stream=True,
+            )
+            async with stream:
                 async for chunk in stream:
-                    # usage приезжает в последнем чанке стрима (если провайдер
-                    # его шлёт) — запоминаем для счётчика расхода.
                     if getattr(chunk, "usage", None) is not None:
-                        stream_usage = chunk.usage
+                        usage = chunk.usage
                     delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
                     if not delta:
                         continue
-                    if not reply_full:
-                        # Ожидание первого токена: сеть + очередь + префилл
-                        # промпта. Отделено от генерации намеренно — лечатся
-                        # они разным, и путать их значит чинить не то.
-                        _track_latency("conv_ttft", time.time() - t_ask)
+                    if not reply:
+                        timings["llm_first_token"] = time.perf_counter() - asked
+                    reply += delta
                     buf += delta
-                    reply_full += delta
-                    if not head_done:
-                        head, rest = _take_head(buf)
-                        if head:
-                            buf = rest
-                            head_done = True
-                            yield await emit(head)
-                # ХВОСТ — одним куском, а не по предложениям: в этом вся суть
-                # правки (см. _take_head). Пока голова звучит, хвост успевает
-                # синтезироваться, и стык остаётся незаметным.
-                tail = buf.strip()
-                if tail:
-                    yield await emit(tail)
-                # Учёт расхода: точно из usage, а если стрим его не отдал —
-                # оценкой по символам (~4 на токен): бюджету хватает ±20%.
-                if stream_usage is not None:
-                    _track_usage(llm_req=1,
-                                 llm_prompt_tokens=getattr(stream_usage, "prompt_tokens", 0) or 0,
-                                 llm_completion_tokens=getattr(stream_usage, "completion_tokens", 0) or 0)
-                else:
-                    approx_prompt = (len(sys_prompt) + sum(len(p["content"]) for p in past)
-                                     + len(user_text)) // 4
-                    _track_usage(llm_req=1, llm_prompt_tokens=approx_prompt,
-                                 llm_completion_tokens=max(1, len(reply_full) // 4))
-                break  # ответ дошёл целиком
-            except TtsFailed as e:
-                # У TTS свой запасной путь (edge -> Mistral); если не спас и он,
-                # повтор LLM не поможет — часть ответа уже могла прозвучать.
-                yield json.dumps({"error": f"TTS (edge-tts) ошибка: {e}"}) + "\n"
+                    if not head_ready.done():
+                        head, tail = _take_head(buf)
+                        if head and (spoken_head := _strip_md(head).strip()):
+                            buf = tail
+                            timings["llm_to_head"] = time.perf_counter() - asked
+                            head_ready.set_result(spoken_head)
+            reply = _strip_md(reply).strip()
+            if not reply:
+                raise RuntimeError("empty dialogue reply")
+            if usage is not None:
+                _track_usage(llm_req=1, llm_prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                             llm_completion_tokens=getattr(usage, "completion_tokens", 0) or 0)
+            else:
+                prompt_chars = sum(len(m["content"]) for m in messages)
+                _track_usage(llm_req=1, llm_prompt_tokens=prompt_chars // 4,
+                             llm_completion_tokens=max(1, len(reply) // 4))
+            if not head_ready.done():
+                timings["llm_to_head"] = time.perf_counter() - asked
+                head_ready.set_result(reply)
+                return reply, ""
+            # Start tail TTS as soon as generation finishes. The first TTS
+            # can still be in flight, but packets always leave in order.
+            tail = _strip_md(buf).strip()
+            return reply, await speak(tail) if tail else ""
+
+        emitted = False
+        for attempt in range(3):
+            timings = {}
+            head_ready = asyncio.get_running_loop().create_future()
+            generation = asyncio.create_task(generate(head_ready, timings))
+            try:
+                await asyncio.wait({head_ready, generation}, return_when=asyncio.FIRST_COMPLETED)
+                if not head_ready.done():
+                    await generation  # surface an LLM failure before the first sentence
+                head = head_ready.result()
+                synth_started = time.perf_counter()
+                first = asyncio.create_task(speak(head))
+                try:
+                    yield json.dumps({"preview": head}) + "\n"
+                    packet = await first
+                finally:
+                    first.cancel()
+                    await asyncio.gather(first, return_exceptions=True)
+                first_audio_at = time.perf_counter()
+                timings["tts_first"] = first_audio_at - synth_started
+                emitted = True
+                yield packet
+                reply_full, tail_packet = await generation
+                if tail_packet:
+                    yield tail_packet
+                break
+            except TtsFailed as exc:
+                note_failure("tts", str(exc))
+                yield json.dumps({"error": "Не удалось озвучить ответ. Попробуй ещё раз."}, ensure_ascii=False) + "\n"
                 return
-            except Exception as e:  # noqa: BLE001
-                can_retry = not emitted and attempt + 1 < _LLM_ATTEMPTS
-                print(f"[llm] стрим сорвался (попытка {attempt + 1}/{_LLM_ATTEMPTS}, "
-                      f"{type(e).__name__}: {str(e)[:80]}) — "
-                      + ("повторяю" if can_retry else "отдаю ошибку"))
-                if not can_retry:
-                    note_failure("llm", f"{type(e).__name__}: {str(e)[:80]}")
-                    yield json.dumps({"error": f"LLM ошибка ({LLM_MODEL}): {e}"}) + "\n"
+            except Exception as exc:
+                status = getattr(exc, "status_code", None)
+                permanent = status is not None and status < 500 and status != 429
+                if emitted or permanent or attempt == 2:
+                    note_failure("llm", type(exc).__name__)
+                    yield json.dumps({"error": "Не удалось завершить ответ. Попробуй ещё раз."}, ensure_ascii=False) + "\n"
                     return
-                await asyncio.sleep(1.0 * (attempt + 1))
+                print(f"[llm] повтора диалога {attempt + 1}: {type(exc).__name__}")
+            finally:
+                generation.cancel()
+                await asyncio.gather(generation, return_exceptions=True)
+            await asyncio.sleep(1.0 * (attempt + 1))
 
         # Реплика состоялась целиком — только теперь она считается занятием
         # (стрик + XP). Оборванные и ошибочные ходы в статистику не попадают.
@@ -5027,19 +5016,21 @@ async def talk_stream(audio: UploadFile = File(...),
         _collect_corpus_bg(x_device, "talk", "", data, "audio/webm",
                            float(len(data) / 16000.0), user_text, "", {})
 
-        t2 = time.time()
-        _track_latency("conv_answer", (first_audio_at or t2) - t0)
-        # first_audio — ОТ ПРИХОДА ЗАПРОСА, а не от конца распознавания.
-        # Старая метрика (от t1) показывала красивые 0.9с там, где ученик ждал
-        # 2.3с, и по ней принимались решения о скорости. Сеть и загрузка файла
-        # сюда всё равно не входят — это честный минимум ожидания, что виден
-        # серверу; фронт больше не складывает её со stt.
-        yield json.dumps(
-            {"done": True, "user": user_text, "reply": _strip_md(reply_full).strip(),
-             "latency": {"stt": round(t1 - t0, 2),
-                         "first_audio": round((first_audio_at or t2) - t0, 2),
-                         "total": round(t2 - t0, 2)}}
-        ) + "\n"
+        t2 = time.perf_counter()
+        latency = {"stt": t1 - t0, "first_audio": first_audio_at - t0, "total": t2 - t0,
+                   **timings}
+        # One background write per turn. Measure TTFT from before the SDK call,
+        # including connection, provider queue and prefill.
+        _track_usage(**{
+            key: value
+            for stage, seconds in (("conv_stt", latency["stt"]),
+                                   ("conv_ttft", timings.get("llm_first_token", 0.0)),
+                                   ("conv_tts", timings["tts_first"]),
+                                   ("conv_answer", latency["first_audio"]))
+            for key, value in ((f"lat_{stage}_ms", round(seconds * 1000)), (f"lat_{stage}_n", 1))
+        })
+        yield json.dumps({"done": True, "user": user_text, "reply": reply_full,
+                          "latency": {k: round(v, 3) for k, v in latency.items()}}) + "\n"
 
     return StreamingResponse(
         _observe_conversation(gen()),

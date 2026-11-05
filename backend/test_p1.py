@@ -80,6 +80,72 @@ class P1Tests(unittest.TestCase):
         self.assertIn({"conversation_failed": 1}, [c.kwargs for c in track.call_args_list])
         self.assertNotIn({"http_ok": 1}, [c.kwargs for c in track.call_args_list])
 
+    def test_conversation_overlaps_voice_and_generation_without_reordering(self):
+        from types import SimpleNamespace
+
+        head = "The park sounds peaceful on a rainy day."
+        tail = "What do you usually do there?"
+        first_started = asyncio.Event()
+        tail_started = asyncio.Event()
+
+        def chunk(text):
+            return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=text))])
+
+        class ModelStream:
+            closed = False
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                self.closed = True
+
+            async def __aiter__(self):
+                yield chunk(head)
+                await asyncio.wait_for(first_started.wait(), timeout=2)
+                yield chunk(" " + tail)
+
+        async def voice(sentence, _persona):
+            if sentence == head:
+                first_started.set()
+                await asyncio.wait_for(tail_started.wait(), timeout=2)
+            else:
+                self.assertEqual(sentence, tail)
+                tail_started.set()
+            return b"synthetic speech"
+
+        stream = ModelStream()
+        create = AsyncMock(return_value=stream)
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        with patch.object(main, "transcribe_auto", new=AsyncMock(return_value="I like the park")), \
+             patch.object(main, "async_llm_client", return_value=client), \
+             patch.object(main, "synthesize", side_effect=voice), \
+             patch.object(main, "_note_reply_bg"):
+            res = self.client.post("/talk_stream", headers=self.headers,
+                                   files={"audio": ("test.mp3", b"synthetic audio", "audio/mpeg")})
+
+        events = [json.loads(line) for line in res.text.splitlines()]
+        self.assertEqual(events[1], {"preview": head})
+        self.assertEqual([e["text"] for e in events if e.get("audio_b64")], [head, tail])
+        self.assertEqual(events[-1]["reply"], head + " " + tail)
+        self.assertTrue(events[-1]["done"])
+        self.assertTrue(stream.closed)
+        create.assert_awaited_once()
+
+    def test_exam_deadline_finishes_the_stream_without_a_grade(self):
+        async def timeout_response():
+            async def slow_judge():
+                await asyncio.Event().wait()
+
+            return [json.loads(chunk) async for chunk in
+                    main._json_with_heartbeat(slow_judge(), timeout=0.01) if chunk.strip()]
+
+        with patch.object(main, "_track_usage") as track:
+            rows = asyncio.run(timeout_response())
+        self.assertEqual(len(rows), 1)
+        self.assertIn("Балл не выставлен", rows[0]["detail"])
+        track.assert_called_once_with(analysis_failed=1)
+
     def test_registration_defaults_to_no_consent(self):
         settings = json.loads(storage.get_settings(self.user["id"]))
         self.assertIs(settings["corpus_consent"], False)
