@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import time
 from pathlib import Path
 
@@ -69,8 +70,11 @@ async def run(args):
 
     cases = json.loads(args.manifest.read_text(encoding="utf-8"))
     rows = []
-    if not main.os.environ.get("LLM_API_KEY"):
+    if not os.environ.get("LLM_API_KEY"):
         raise SystemExit("Configure LLM_API_KEY in this environment before running the evaluation.")
+    configuration = {"grade_model": main.GRADE_MODEL, "stt": main._task_stt_label(),
+                     "monologue_consensus": main.MONO_CONSENSUS,
+                     "monologue_recheck": main.MONOLOGUE_RECHECK}
     for case in cases:
         audio = args.manifest.parent / case["audio"]
         data = audio.read_bytes()
@@ -97,7 +101,8 @@ async def run(args):
                     row["error"] = type(exc).__name__
                 row["seconds"] = round(time.perf_counter() - started, 2)
                 rows.append(row)
-                args.output.write_text(json.dumps({"rows": rows, "summary": summarize(rows)},
+                args.output.write_text(json.dumps({"configuration": configuration, "rows": rows,
+                                                   "summary": summarize(rows)},
                                                   ensure_ascii=False, indent=2), encoding="utf-8")
                 print(json.dumps(row, ensure_ascii=False), flush=True)
                 await asyncio.sleep(1)
