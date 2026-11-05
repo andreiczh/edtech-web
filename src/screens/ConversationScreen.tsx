@@ -39,7 +39,7 @@ const CAPTIONS: Record<ConversationState, string> = {
 const MIN_TURNS_FOR_REVIEW = 3
 
 export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
-  const { state, toggle, transcript, reply, error, latency, turns, endSession, getHistory } =
+  const { state, toggle, transcript, reply, silentReply, error, latency, playbackDelay, turns, endSession, getHistory } =
     useConversation()
   /* Режим «чисто аудио» (настройка кабинета): карточка с текстом ответа не
      рисуется вовсе — только круги и голос, как в живом разговоре. Ошибки
@@ -68,9 +68,9 @@ export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
   /* Шапку с тумблером рисует App: она общая для верхних экранов и не
      пересоздаётся при переключении вкладок — в этом и есть «бесшовность». */
   return (
-    <div className="screenbody">
-      <div className="screen__body">
-        {((showText && reply) || error || reviewError) && (
+    <div className="screenbody conversation">
+      <div className="screen__body conversation__body">
+        {(((showText || silentReply) && reply) || error || reviewError) && (
           <div className="card2 answer scroll-soft" aria-live="polite">
             {error || reviewError ? (
               <p className="dialog__err">{error ?? reviewError}</p>
@@ -81,20 +81,13 @@ export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
                 {/* Слот под телеметрию: скорость сервера, стадии и расшифровка.
                     Пользователь просил оставить его видимым на время отладки. */}
                 <div className="answer__meta">
-                  {latency && (
+                  {playbackDelay !== null && <span>До воспроизведения <b>{playbackDelay.toFixed(2)} с</b></span>}
+                  {latency && latency.first_audio > 0 && (
                     <>
-                      {/* first_audio теперь считается сервером ОТ ПРИХОДА
-                          запроса (03.08.2026) — это и есть пауза, складывать
-                          со stt больше нельзя: задвоило бы распознавание. */}
-                      <span>
-                        пауза до ответа <b>{latency.first_audio.toFixed(2)}s</b>
-                      </span>
-                      <span>распознавание {latency.stt}s</span>
-                      <span>
-                        ответ и озвучка{' '}
-                        {Math.max(0, latency.first_audio - latency.stt).toFixed(2)}s
-                      </span>
-                      <span>сервер всего {latency.total}s</span>
+                      <span>Сервер до звука {latency.first_audio.toFixed(2)} с</span>
+                      <span>Распознавание {latency.stt.toFixed(2)} с</span>
+                      {latency.llm_to_head != null && <span>Первая фраза {latency.llm_to_head.toFixed(2)} с</span>}
+                      {latency.tts_first != null && <span>Озвучка фразы {latency.tts_first.toFixed(2)} с</span>}
                     </>
                   )}
                   {transcript && <span>распознано: «{transcript}»</span>}
@@ -140,7 +133,7 @@ export function ConversationScreen({ onFeedback }: { onFeedback: () => void }) {
           что. Левый слот отдан разбору — он появляется, только когда набралось
           что разбирать, чтобы кнопка никогда не жгла запрос впустую. */}
       <BottomBar
-        caption={CAPTIONS[state]}
+        caption={state === 'processing' && transcript ? 'Готовлю ответ…' : CAPTIONS[state]}
         onFeedback={onFeedback}
         onQuit={canReview ? runReview : undefined}
         quitLabel={reviewing ? 'Разбираю…' : 'Разбор'}

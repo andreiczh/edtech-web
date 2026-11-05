@@ -60,6 +60,7 @@ export interface ConversationApi {
   silentReply: boolean // ответ пришёл без звука (сервер не расслышал) — показать текст всегда
   error: string | null // текст последней ошибки (или null)
   latency: Record<string, number> | null // { stt, first_audio, total }
+  playbackDelay: number | null // seconds from stopping the microphone to playback
   /** Сколько раз ученик говорил: по этому числу решается, есть ли что разбирать. */
   turns: number
   /** Вся история сессии — вход разбора. Не state: копировать массив на каждую
@@ -83,6 +84,7 @@ export function useConversation(): ConversationApi {
   const audioInTurnRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [latency, setLatency] = useState<Record<string, number> | null>(null)
+  const [playbackDelay, setPlaybackDelay] = useState<number | null>(null)
   const [turns, setTurns] = useState(
     () => loadDialogHistory().filter((m) => m.role === 'user').length,
   )
@@ -120,6 +122,8 @@ export function useConversation(): ConversationApi {
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set())
   const decodeChainRef = useRef<Promise<void>>(Promise.resolve())
   const pendingRef = useRef(0)
+  const playbackVersion = useRef(0)
+  const stoppedAt = useRef(0)
   /** Память диалога: последние 10 реплик (5 обменов). Живёт в sessionStorage —
       переживает переключение вкладок ПРИЛОЖЕНИЯ (Conversation → ЕГЭ → назад
       раньше стирало историю: компонент размонтировался, и тьютор всё забывал),
@@ -130,6 +134,12 @@ export function useConversation(): ConversationApi {
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
+  }, [])
+
+  const notePlayback = useCallback((scheduledDelay = 0) => {
+    if (!stoppedAt.current) return
+    const seconds = (performance.now() - stoppedAt.current) / 1000 + scheduledDelay
+    setPlaybackDelay((previous) => previous ?? seconds)
   }, [])
 
   // Проиграть следующий чанк из очереди; когда очередь пуста и стрим завершён — в покой.
@@ -147,12 +157,17 @@ export function useConversation(): ConversationApi {
     // уже следующая фраза звучит тише, без перезапуска разговора.
     audio.volume = getSettings().volume
     audioRef.current = audio
+    audio.onplaying = () => {
+      if (audioRef.current === audio) notePlayback()
+    }
     audio.onended = () => {
+      if (audioRef.current !== audio) return
       audioRef.current = null
       playNext()
     }
     setState('speaking')
     audio.play().catch((e) => {
+      if (audioRef.current !== audio) return
       // НЕ глотать молча: при заблокированном автоплее или сбое декодирования
       // студент сидит в тишине, а на экране бодрое «пауза до ответа: 1.3s».
       // Замер латентности при этом становится фикцией — показываем причину.
@@ -160,7 +175,7 @@ export function useConversation(): ConversationApi {
       audioRef.current = null
       playNext() // но не застреваем — идём к следующему чанку
     })
-  }, [])
+  }, [notePlayback])
 
   /** Границы собственно речи в буфере, в секундах. Всё, что тише порога по
       краям, — подкладка кодека, её и срезаем. */
@@ -196,6 +211,7 @@ export function useConversation(): ConversationApi {
         nextStartRef.current = 0
       }
       const ctx = ctxRef.current
+      const version = playbackVersion.current
       void ctx.resume().catch(() => {})
 
       pendingRef.current += 1
@@ -204,15 +220,17 @@ export function useConversation(): ConversationApi {
       // Декодируем строго по очереди: чанки приходят по порядку, а
       // decodeAudioData асинхронный и без цепочки переставил бы фразы местами.
       decodeChainRef.current = decodeChainRef.current.then(async () => {
+        if (version !== playbackVersion.current) return
         try {
           const bin = atob(b64)
           const bytes = new Uint8Array(bin.length)
           for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
           const buf = await ctx.decodeAudioData(bytes.buffer)
+          if (version !== playbackVersion.current) return
 
           const [from, to] = speechBounds(buf)
           const dur = Math.max(0, to - from)
-          if (dur <= 0) return
+          if (dur <= 0) throw new Error('empty audio buffer')
 
           const src = ctx.createBufferSource()
           src.buffer = buf
@@ -224,6 +242,7 @@ export function useConversation(): ConversationApi {
           // предложениями, а не дыра от кодека.
           const when = Math.max(ctx.currentTime + 0.02, nextStartRef.current)
           src.start(when, from, dur)
+          notePlayback(Math.max(0, when - ctx.currentTime))
           nextStartRef.current = when + dur + 0.15
 
           sourcesRef.current.add(src)
@@ -235,7 +254,9 @@ export function useConversation(): ConversationApi {
             }
           }
         } catch (e) {
+          if (version !== playbackVersion.current) return
           pendingRef.current = Math.max(0, pendingRef.current - 1)
+          if (pendingRef.current === 0 && streamDoneRef.current) setState('idle')
           setError(
             `Звук не проигрался (${(e as Error)?.name ?? 'ошибка'}). ` +
               'Нажми на страницу и попробуй снова.',
@@ -243,11 +264,12 @@ export function useConversation(): ConversationApi {
         }
       })
     },
-    [playNext, speechBounds],
+    [notePlayback, playNext, speechBounds],
   )
 
   // Полностью гасим текущий ответ (barge-in / очистка): обрыв стрима, очередь, звук.
   const stopSpeaking = useCallback(() => {
+    playbackVersion.current += 1
     abortRef.current?.abort()
     abortRef.current = null
     queueRef.current = []
@@ -255,6 +277,7 @@ export function useConversation(): ConversationApi {
     streamDoneRef.current = false
     if (audioRef.current) {
       audioRef.current.onended = null
+      audioRef.current.onplaying = null
       audioRef.current.pause()
       audioRef.current.src = ''
       audioRef.current = null
@@ -285,6 +308,7 @@ export function useConversation(): ConversationApi {
       audioInTurnRef.current = false
       setTranscript('')
       setLatency(null)
+      setPlaybackDelay(null)
       queueRef.current = []
       playingRef.current = false
       streamDoneRef.current = false
@@ -304,6 +328,7 @@ export function useConversation(): ConversationApi {
       // Итог этой реплики — чтобы по done-чанку дописать её в историю диалога.
       let finalUser = ''
       let finalReply = ''
+      let spokenText = ''
 
       const runOnce = async () => {
         const fd = new FormData()
@@ -351,6 +376,7 @@ export function useConversation(): ConversationApi {
             if (!line) continue
             let msg: {
               user?: string
+              preview?: string
               text?: string
               audio_b64?: string
               reply?: string
@@ -366,8 +392,10 @@ export function useConversation(): ConversationApi {
             if (msg.error) throw new Error(msg.error)
             gotData = true
             if (msg.user != null) setTranscript(msg.user)
+            if (msg.preview && !spokenText) setReply(msg.preview)
             if (msg.text) {
-              setReply((r) => (r ? `${r} ${msg.text}` : (msg.text as string)))
+              spokenText = spokenText ? `${spokenText} ${msg.text}` : msg.text
+              setReply(spokenText)
               if (msg.audio_b64) {
                 audioInTurnRef.current = true
                 enqueueAudio(msg.audio_b64)
@@ -462,6 +490,7 @@ export function useConversation(): ConversationApi {
   }, [stopStream, streamTalk])
 
   const stopRecording = useCallback(() => {
+    stoppedAt.current = performance.now()
     recorderRef.current?.stop() // → onstop → streamTalk()
     recorderRef.current = null
   }, [])
@@ -504,6 +533,7 @@ export function useConversation(): ConversationApi {
     setTranscript('')
     setReply('')
     setLatency(null)
+    setPlaybackDelay(null)
   }, [stopSpeaking])
 
   // Очистка при размонтировании.
@@ -511,7 +541,11 @@ export function useConversation(): ConversationApi {
     return () => {
       stopSpeaking()
       stopStream()
-      recorderRef.current?.stop()
+      const recorder = recorderRef.current
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.onstop = null
+        recorder.stop()
+      }
     }
   }, [stopSpeaking, stopStream])
 
@@ -523,6 +557,7 @@ export function useConversation(): ConversationApi {
     silentReply,
     error,
     latency,
+    playbackDelay,
     turns,
     endSession: resetConversation,
     getHistory: () => historyRef.current,

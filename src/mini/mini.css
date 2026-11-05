@@ -1341,7 +1341,7 @@
    фон и кадр оболочки, карточки-инпуты, чёрная кнопка как «Начать практику». */
 .mini--auth { background: #f8f7f2; }
 .mini-auth { padding: calc(56 * var(--u)) calc(21.8 * var(--u)) calc(40 * var(--u)); box-sizing: border-box; }
-.mini-auth .authpage { min-height: 0; padding: 0; background: none; display: block; }
+.mini-auth .authpage { height: auto; padding: 0; background: none; display: block; }
 .mini-auth .authcol, .mini-auth .authcol--card { width: 100%; max-width: none; margin: 0; padding: 0; background: none; box-shadow: none; border: 0; }
 .mini-auth .auth2-title { margin: 0 0 calc(6 * var(--u)); font: 800 calc(30 * var(--u)) / 1.1 var(--inter) !important; letter-spacing: -0.01em; color: #11142c; text-align: left; }
 .mini-auth .auth2-sub { margin: 0 0 calc(16 * var(--u)); font: 400 calc(12.5 * var(--u)) / calc(17 * var(--u)) var(--inter); color: #525a77; text-align: left; }

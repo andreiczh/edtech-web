@@ -165,8 +165,7 @@ def aspect_recheck_prompt(numbers: list[int], brief: str,
     fields = ",\n  ".join(f'{{"n": {n}, "evidence": "<the student\'s exact words>", '
                           f'{_ASPECT_FIELDS[n]}}}' for n in numbers)
     error_ids = [e["id"] for e in errors or []]
-    checks = ", ".join(
-        f'{{"id": {i}, "valid": true, "reason": "<short explanation>"}}' for i in error_ids)
+    checks = ", ".join(f'{{"id": {i}, "valid": true}}' for i in error_ids)
     return (
         "You are the SENIOR examiner called in for a second opinion on the Russian "
         "EGE oral exam, Task 4 (a voice message about two photos). A first examiner "
@@ -182,7 +181,8 @@ def aspect_recheck_prompt(numbers: list[int], brief: str,
         "including candidates you reject. Do not omit rejected candidates. "
         f"Return EXACTLY {len(error_ids)} error_checks with ORIGINAL ids {error_ids}. "
         f"Return EXACTLY {len(numbers)} aspects with ORIGINAL numbers {numbers}. "
-        "Use empty arrays when there are no items. All flags must be JSON booleans.\n"
+        "Use empty arrays when there are no items. All flags must be JSON booleans. "
+        "Return only the listed fields. The original candidate already has an explanation.\n"
         f"Candidate errors: {json.dumps(errors or [], ensure_ascii=False)}\n\n"
         f"Aspects to re-examine:\n" + "\n".join(listed) + "\n\n"
         "Work from the transcript, not from the first examiner's opinion: FIND the "
@@ -663,25 +663,20 @@ def monologue_prompt(brief: str, photo_facts: list[str] | None = None) -> str:
         '  {"n": 1, "evidence": "<the student\'s words, English>", '
         '"described_first": true, "described_second": true, "difference_stated": true, '
         '"difference_generalised": true, "linked_to_topic": true, '
-        '"factual_error": false, "unintelligible": false, '
-        '"comment": "<по-русски, коротко>"},\n'
+        '"factual_error": false, "unintelligible": false},\n'
         '  {"n": 2, "evidence": "...", "named_first": true, "named_second": true, '
-        '"specific_first": true, "specific_second": true, "unintelligible": false, '
-        '"comment": "<по-русски, коротко>"},\n'
+        '"specific_first": true, "specific_second": true, "unintelligible": false},\n'
         '  {"n": 3, "evidence": "...", "named_first": true, "named_second": true, '
-        '"specific_first": true, "specific_second": true, "unintelligible": false, '
-        '"comment": "<по-русски, коротко>"},\n'
+        '"specific_first": true, "specific_second": true, "unintelligible": false},\n'
         '  {"n": 4, "evidence": "...", "opinion_explicit": true, "choice_stated": true, '
         '"justified": true, "plan_verb_form": "<the verb form the last bullet of the '
         'plan uses, e.g. you would prefer>", "student_verb_form": "<the verb form the '
-        'student used, e.g. I prefer>", "unintelligible": false, '
-        '"comment": "<по-русски, коротко>"}\n'
+        'student used, e.g. I prefer>", "unintelligible": false}\n'
         "], \"phrases\": <int>, "
         '"opening_with_address": true, "closing": true, '
         '"logic_errors": [{"quote": "<English>", "explanation": "<по-русски>"}], '
         '"lang_errors": [{"cat": "gram|lex", "quote": "<English>", "correction": '
-        '"<English>", "explanation": "<по-русски>", "grave": false}], '
-        '"summary": "<одно предложение по-русски: главное о работе>"}\n\n'
+        '"<English>", "explanation": "<по-русски>", "grave": false}]}\n\n'
         "What the flags mean:\n"
         "- described_first / described_second — the photo is actually described, not "
         "just mentioned;\n"
@@ -717,7 +712,7 @@ def monologue_prompt(brief: str, photo_facts: list[str] | None = None) -> str:
         "- unintelligible — the wording makes the aspect impossible to understand.\n\n"
         "Language mistakes alone must NOT turn a flag false: they are counted "
         "separately in lang_errors. List every language error you find, up to 10 — their "
-        "number decides that mark, so do not stop at the first few. Keep evidence, "
-        "comments and explanations SHORT (about ten words): the answer must fit in one "
-        "JSON object without being cut off."
+        "number decides that mark, so do not stop at the first few. Keep evidence "
+        "and explanations SHORT (about ten words). Return only the listed fields: "
+        "the application builds the aspect comments and summary from the final verdict."
     )

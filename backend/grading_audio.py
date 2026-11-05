@@ -47,13 +47,11 @@ def prepare(data: bytes, filename: str = "speech.webm") -> bytes:
     # Upload concurrency is independent; only one local VAD/decoder allocation
     # is allowed at a time on the 512 MiB deployment.
     with _VAD_LOCK:
-        return _prepare(data, filename)
+        from pathlib import Path
+        return _prepare(data, audio_check.to_pcm(data, Path(filename).suffix))
 
 
-def _prepare(data: bytes, filename: str) -> bytes:
-    from pathlib import Path
-
-    pcm = audio_check.to_pcm(data, Path(filename).suffix)
+def _prepare(data: bytes, pcm: np.ndarray | None) -> bytes:
     if pcm is None or len(pcm) < 30 * 16000:
         return data
     spans = speech_spans(pcm)
@@ -79,7 +77,7 @@ def _prepare(data: bytes, filename: str) -> bytes:
     return out.getvalue()
 
 
-def analyze_isolated(data: bytes, filename: str) -> tuple[dict, bytes]:
+def analyze_isolated(data: bytes, filename: str, *, compact: bool = True) -> tuple[dict, bytes]:
     """Release decoder/ONNX arenas after every upload, including native caches.
 
     A lock keeps simultaneous requests from creating simultaneous model workers.
@@ -98,16 +96,23 @@ def analyze_isolated(data: bytes, filename: str) -> tuple[dict, bytes]:
     env.update(OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
     with _VAD_LOCK:
         completed = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve()), Path(filename).suffix or ".webm"],
+            [sys.executable, str(Path(__file__).resolve()), Path(filename).suffix or ".webm",
+             "compact" if compact else "inspect"],
             input=data, capture_output=True, timeout=75, check=True, env=env)
     header, prepared = completed.stdout.split(b"\n", 1)
-    return json.loads(header), prepared
+    return json.loads(header), prepared or data
 
 
 if __name__ == "__main__":
     import json
     import sys
     data = sys.stdin.buffer.read()
-    sound = audio_check.inspect(data, sys.argv[1])
-    prepared = data if audio_check.silence_reason(sound) else _prepare(data, "speech" + sys.argv[1])
-    sys.stdout.buffer.write(json.dumps(sound).encode() + b"\n" + prepared)
+    pcm = audio_check.to_pcm(data, sys.argv[1])
+    sound = audio_check.inspect_pcm(pcm)
+    prepared = data
+    if sys.argv[2] == "compact" and audio_check.silence_reason(sound) is None:
+        prepared = _prepare(data, pcm)
+    # When there is no change, the parent already has the original bytes.
+    sys.stdout.buffer.write(json.dumps(sound).encode() + b"\n")
+    if prepared is not data:
+        sys.stdout.buffer.write(prepared)

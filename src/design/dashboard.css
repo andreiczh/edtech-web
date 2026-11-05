@@ -9,13 +9,24 @@
  */
 
 /* ------------------------------------------------------------------ Каркас */
+.app {
+  --desktop-max: 1640px;
+  --desktop-gutter: clamp(14px, 2vw, 28px);
+  --desktop-rail: 84px;
+  --desktop-gap: clamp(14px, 1.6vw, 24px);
+  --desktop-inset: max(var(--desktop-gutter), calc((100vw - var(--desktop-max)) / 2 + var(--desktop-gutter)));
+}
+
 .appgrid {
   flex: 1;
   min-height: 0;
+  width: min(100%, var(--desktop-max));
+  margin-inline: auto;
   display: grid;
-  grid-template-columns: 84px minmax(0, 1fr);
-  gap: 20px;
-  padding: clamp(12px, 2vh, 20px) 24px clamp(12px, 2vh, 20px) 20px;
+  grid-template-columns: var(--desktop-rail) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: var(--desktop-gap);
+  padding: clamp(10px, 2dvh, 20px) var(--desktop-gutter);
 }
 
 /* Внутри сетки у .screen свой padding из ui.css поверх padding сетки — вместе
@@ -568,12 +579,14 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  width: min(100%, 1180px);
+  margin-inline: auto;
 }
 /* Одна колонка: аккаунт и серия живут в шапке профиля, справа ничего нет. */
 .profpage__grid {
-  flex: 1;
-  min-height: 0;
+  flex: none;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 20px;
@@ -808,13 +821,15 @@
   display: flex;
   flex-direction: column;
   gap: clamp(10px, 1.6vh, 18px);
-  overflow: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 .statpage__tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
   gap: 16px;
 }
+.statpage > * { flex-shrink: 0; }
 .stattile {
   background: var(--card-solid);
   border: 1px solid var(--line);
@@ -876,8 +891,7 @@
   color: #f591b2;
 }
 .statpage__chartcard {
-  flex: 1;
-  min-height: 0;
+  flex: none;
   display: flex;
   flex-direction: column;
 }
@@ -907,10 +921,9 @@
   vertical-align: -1px;
 }
 .statpage__area {
-  flex: 1;
-  min-height: 0;
+  flex: none;
   width: 100%;
-  height: 100%;
+  height: clamp(176px, 26dvh, 280px);
   display: block;
 }
 .statpage__empty {
@@ -1220,22 +1233,20 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 .calpage__grid {
-  flex: 1;
-  min-height: 0;
+  flex: none;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
   gap: 20px;
-  align-items: stretch;
+  align-items: start;
 }
-/* Карточка месяца тянется на всю высоту, сетка дней делит остаток поровну —
-   календарь всегда целиком на экране, без прокрутки. */
 .calpage__grid > .calcard {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-width: 0;
 }
 .calside {
   align-self: start;
@@ -1250,6 +1261,7 @@
 }
 .calcard__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -1280,7 +1292,8 @@
   font-weight: 700;
   font-size: 13px;
   padding: 7px 14px;
-  min-width: 84px;
+  min-width: 44px;
+  min-height: 38px;
   text-align: center;
   border-radius: 999px;
   cursor: pointer;
@@ -1299,11 +1312,10 @@
   color: #121214;
 }
 .cal {
-  flex: 1;
-  min-height: 0;
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  grid-auto-rows: minmax(0, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-rows: auto;
+  grid-auto-rows: clamp(44px, 7dvh, 82px);
   gap: 6px;
   text-align: center;
 }
@@ -1489,34 +1501,6 @@
   }
 }
 
-
-/* One-pager — правило РАБОЧЕГО СТОЛА. На узких экранах колонки складываются
-   в столбик, никакая высота их не вместит — возвращаем страницам прокрутку,
-   а резиновым частям естественную высоту. */
-@media (max-width: 900px) {
-  .calpage,
-  .statpage,
-  .profpage {
-    overflow-y: auto;
-  }
-  .calpage__grid,
-  .calpage__grid > .calcard,
-  .cal,
-  .statpage__chartcard,
-  .statpage__area,
-  .profpage__grid {
-    flex: none;
-  }
-  .cal {
-    grid-auto-rows: auto;
-  }
-  .cal__day {
-    min-height: 44px;
-  }
-  .statpage__area {
-    height: auto;
-  }
-}
 
 /* Согласие на хранение записей — видимая строка в регистрации, не мелкий шрифт
    в условиях: голос это персональные данные, и вопрос должен быть заметен. */
@@ -2450,10 +2434,10 @@
    ========================================================================== */
 .railwrap {
   position: fixed;
-  left: 20px;
+  left: var(--desktop-inset);
   top: clamp(12px, 2vh, 20px);
   bottom: clamp(12px, 2vh, 20px);
-  width: 84px;
+  width: var(--desktop-rail);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -2564,19 +2548,11 @@
   color: #b3a2ff;
 }
 @media (prefers-reduced-motion: reduce) {
-  .rail__glass {
+  .rail__glass,
+  .railwrap .rail__btn {
     transition: none;
   }
 }
-/* На телефоне рейл и док — фиксированные бары снизу (правила выше), обёртка
-   не должна их ловить. */
-@media (max-width: 760px) {
-  .railwrap {
-    position: static;
-    display: contents;
-  }
-}
-
 /* Рейл 10.09 (вечер): два отдельных блока, как в утверждённом виде — меню по
    центру колонки, док темы отдельной плашкой внизу. Перебивает «склеенные»
    радиусы v3-слоя. */
@@ -2589,9 +2565,39 @@
 .railwrap .themedock::before {
   display: none;
 }
-@media (max-width: 760px) {
+@media (max-height: 540px) and (min-width: 761px) {
+  .app { --desktop-rail: 64px; }
+  .railwrap .rail, .railwrap .themedock {
+    width: 100%;
+    gap: 6px;
+    padding: 9px;
+  }
+  .railwrap .rail__btn { width: 44px; height: 44px; }
+}
+
+/* An active desktop conversation can stay mounted after narrowing the
+   window. Keep both docks reachable while that recording plays. */
+@media (max-width: 760px), (max-height: 360px) {
+  .appgrid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 8px var(--desktop-gutter) 70px;
+  }
+  .appgrid > .leftcol, .railwrap .lspacer { display: none; }
+  .railwrap {
+    inset: auto 8px 8px;
+    width: auto;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 8px;
+  }
   .railwrap .rail,
   .railwrap .themedock {
-    padding: 10px;
+    inset: auto;
+    width: auto;
+    flex-direction: row;
+    gap: 4px;
+    padding: 5px;
   }
+  .railwrap .rail__btn { width: clamp(36px, 10vw, 44px); height: 44px; }
 }
