@@ -4454,6 +4454,11 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
     _track_latency("task_stt", t1 - t0)
     _track_latency("task_prepare", prepared_at - t0)
     _track_latency("task_transcription", t1 - prepared_at)
+    audio_latency = {
+        "stt": round(t1 - t0, 2),
+        "prepare": round(prepared_at - t0, 2),
+        "transcription": round(t1 - prepared_at, 2),
+    }
     if not transcript_text:
         raise HTTPException(
             status_code=422, detail="Тишина — ничего не распознали. Запиши ответ ещё раз."
@@ -4493,8 +4498,8 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
         return {
             "transcript": transcript_text,
             "feedback": feedback,
-            "latency": {"stt": round(t1 - t0, 2), "llm": 0.0,
-                        "total": round(time.time() - t0, 2)},
+            "latency": {**audio_latency, "llm": 0.0, "judge": 0.0, "recheck": 0.0,
+                        "total": round(time.perf_counter() - t0, 2)},
         }
 
     prompt, ctx = _feedback_prompt(kind, payload, transcript_text, persona)
@@ -4646,9 +4651,7 @@ async def _task_feedback_work(kind: str, payload_raw: str, data: bytes,
         "transcript": transcript_text,
         "feedback": feedback,
         "latency": {
-            "stt": round(t1 - t0, 2),
-            "prepare": round(prepared_at - t0, 2),
-            "transcription": round(t1 - prepared_at, 2),
+            **audio_latency,
             "llm": round(t2 - t1, 2),
             "judge": round(graded_at - t1, 2),
             "recheck": round(rechecked_at - graded_at, 2),
@@ -4954,8 +4957,13 @@ async def talk_stream(audio: UploadFile = File(...),
             return reply, await speak(tail) if tail else ""
 
         emitted = False
+        llm_started = time.perf_counter()
         for attempt in range(3):
-            timings = {}
+            timings = {
+                "prepare_reply": llm_started - t1,
+                "llm_attempts": attempt + 1,
+                "llm_retry_time": time.perf_counter() - llm_started if attempt else 0.0,
+            }
             head_ready = asyncio.get_running_loop().create_future()
             generation = asyncio.create_task(generate(head_ready, timings))
             try:

@@ -115,7 +115,7 @@ class P1Tests(unittest.TestCase):
             return b"synthetic speech"
 
         stream = ModelStream()
-        create = AsyncMock(return_value=stream)
+        create = AsyncMock(side_effect=[OSError("synthetic stream failure"), stream])
         client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
         with patch.object(main, "transcribe_auto", new=AsyncMock(return_value="I like the park")), \
              patch.object(main, "async_llm_client", return_value=client), \
@@ -130,7 +130,11 @@ class P1Tests(unittest.TestCase):
         self.assertEqual(events[-1]["reply"], head + " " + tail)
         self.assertTrue(events[-1]["done"])
         self.assertTrue(stream.closed)
-        create.assert_awaited_once()
+        self.assertEqual(create.await_count, 2)
+        timings = events[-1]["latency"]
+        self.assertEqual(timings["llm_attempts"], 2)
+        self.assertGreaterEqual(timings["llm_retry_time"], 1.0)
+        self.assertGreaterEqual(timings["first_audio"], timings["llm_retry_time"])
 
     def test_exam_deadline_finishes_the_stream_without_a_grade(self):
         async def timeout_response():
@@ -269,6 +273,24 @@ class P1Tests(unittest.TestCase):
                        self.user["id"], "audit", 60, filename="test.mp3")) for _ in transcripts]
         self.assertEqual([r["feedback"]["score"] for r in results], [1, 1, 1])
         self.assertTrue(all(r["feedback"]["misread_words"] == 0 for r in results))
+
+    def test_early_exam_result_reports_monotonic_timing(self):
+        import grading_audio
+
+        with patch.object(grading_audio, "analyze_isolated", return_value=({}, b"audio")), \
+             patch.object(main.audio_check, "silence_reason", return_value=None), \
+             patch.object(main.audio_check, "recognition_failed", return_value=False), \
+             patch.object(main, "transcribe_for_task", new=AsyncMock(return_value="Hello.")):
+            result = asyncio.run(main._task_feedback_work(
+                "monologue", "{}", b"audio", self.user["id"], "audit", 3))
+
+        self.assertEqual(result["feedback"]["score"], 0)
+        timing = result["latency"]
+        self.assertEqual(timing["judge"], 0)
+        self.assertEqual(timing["recheck"], 0)
+        self.assertLessEqual(0, timing["stt"])
+        self.assertLessEqual(timing["stt"], timing["total"])
+        self.assertLess(timing["total"], 30)
 
     def test_reading_cannot_be_changed_by_model_claims(self):
         ref = "The children visit teachers and watch movies in the evening."
