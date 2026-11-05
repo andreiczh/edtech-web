@@ -3290,6 +3290,15 @@ async def _warmup():
             print(f"[startup] Загружаю faster-whisper:{name} (первый раз качает модель, подожди)...")
             await asyncio.to_thread(get_whisper, name)
         print("[startup] STT-модели готовы.")
+
+    # The HTTP pool is warm already, but the SDK creates its chat resources
+    # on first access. Pay that CPU cost before accepting the first voice turn.
+    if os.environ.get("LLM_API_KEY", "").strip():
+        try:
+            async_llm_client()
+        except Exception as exc:
+            print(f"[startup] клиент диалога не инициализирован ({type(exc).__name__})")
+
     if KEEP_AWAKE_URL:
         _spawn(_keep_awake_loop())
         print(f"[startup] самопинг раз в 10 мин на {KEEP_AWAKE_URL}, "
