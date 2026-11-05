@@ -100,7 +100,7 @@ export function ResultScreen40({
           {blob && <Player blob={blob} seconds={seconds} onProgress={onProgress} player={player} />}
         </div>
 
-        {feedback && <FeedbackCoach taskId={taskId} variant={variant} feedback={feedback} player={player} />}
+        {feedback && <FeedbackCoach taskId={taskId} variant={variant} feedback={feedback} player={player} hasRecording={Boolean(blob)} />}
 
         {failure && onRetry && <section className="x-card" aria-label="Повторная проверка">
           <p className="x-text">Можно отправить эту же запись ещё раз.</p>
