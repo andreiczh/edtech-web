@@ -169,6 +169,48 @@ class P1Tests(unittest.TestCase):
         self.assertIn("Балл не выставлен", rows[0]["detail"])
         track.assert_called_once_with(analysis_failed=1)
 
+    def test_evidence_maps_compacted_audio_to_the_original_recording(self):
+        feedback = {"criteria": [{"quote": "we see two children"}],
+                    "errors": [{"quote": "it is nice"}, {"quote": "these words are absent"}]}
+        segments = [{"text": "It is nice", "start": 0.3, "end": 1.4},
+                    {"text": "We see two children", "start": 2.8, "end": 4.0}]
+        main.speech_evidence.attach_spans(
+            feedback, "It is nice. We see two children. It is nice.", segments,
+            {"seconds": 32, "timeline": [(0, 2, 0), (2.5, 6.5, 24)]})
+        self.assertEqual(feedback["criteria"][0]["audio_span"], {"start": 24.3, "end": 25.5})
+        self.assertTrue(all("audio_span" not in item for item in feedback["errors"]))
+
+    def test_focused_retry_scores_only_the_selected_question_and_writes_no_exam_result(self):
+        response = {"criteria": [{"score": 1, "quote": "I visit the park. I ride my bike.",
+                                  "comment": "Две законченные фразы по теме."}]}
+        with patch.object(main.audio_check, "inspect", return_value={}), \
+             patch.object(main, "transcribe_for_task", new=AsyncMock(
+                 return_value="I visit the park. I ride my bike.")), \
+             patch.object(main, "_grade_task_text", new=AsyncMock(
+                 return_value=(response, {}, 0.1, 0.2))) as judge:
+            result = self.client.post("/task_feedback", headers=self.headers,
+                data={"kind": "interview", "payload": json.dumps({"questions": ["First?", "Second?"]}),
+                      "focus": json.dumps({"item": 1})},
+                files={"audio": ("practice.mp3", b"synthetic audio", "audio/mpeg")})
+        self.assertEqual(result.json()["practice"]["status"], "met")
+        judge.assert_awaited_once_with("interview", {"questions": ["Second?"], "ad": ""},
+                                      "I visit the park. I ride my bike.", focused=True)
+        main._remember.assert_not_called()
+        main._collect_corpus_bg.assert_not_called()
+
+    def test_playback_metrics_consume_one_token_and_keep_the_two_groups_separate(self):
+        tokens = main.voice_metrics.PlaybackTokens()
+        token = tokens.issue(self.user["id"], False)
+        headers = {**self.headers, "X-Playback-Token": token, "X-Playback-Ms": "1965"}
+        with patch.object(main, "_playback_tokens", tokens), patch.object(main, "_track_usage") as track:
+            self.assertEqual(self.client.post("/talk_metrics", headers=headers).status_code, 204)
+            self.assertEqual(self.client.post("/talk_metrics", headers=headers).status_code, 204)
+            track.assert_called_once_with(playback_first_2000=1)
+        sample = main.voice_metrics.summary({"playback_first_2000": 18, "playback_first_4000": 2,
+                                              "playback_followup_2000": 3})
+        self.assertEqual(sample["first"]["p90_upper_ms"], 2000)
+        self.assertIsNone(sample["followup"]["p90_upper_ms"])
+
     def test_registration_defaults_to_no_consent(self):
         settings = json.loads(storage.get_settings(self.user["id"]))
         self.assertIs(settings["corpus_consent"], False)

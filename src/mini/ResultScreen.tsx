@@ -14,7 +14,7 @@
  *    воспроизведением или нажатием.
  * Транскрипций IPA в системе нет — в карточке слова стоят сами слова.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 
 import { isFavorite, toggleFavorite, useFavorites } from '../ege2/favorites'
 import type { FeedbackError, TaskFeedback } from '../ege2/feedback'
@@ -116,12 +116,15 @@ export function Player({
   blob,
   seconds,
   onProgress,
+  player,
 }: {
   blob: Blob
   seconds: number
   onProgress: (f: number) => void
+  player?: RefObject<HTMLAudioElement | null>
 }) {
-  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const internalRef = useRef<HTMLAudioElement>(null)
+  const audioRef = player ?? internalRef
   const [url] = useState(() => URL.createObjectURL(blob))
   const [peaks, setPeaks] = useState<Peaks | null>(null)
   const [playing, setPlaying] = useState(false)

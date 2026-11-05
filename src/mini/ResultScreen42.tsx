@@ -8,7 +8,8 @@
  * критериев — названия ФИПИ; балл и текст — с сервера (ege_scoring: 4+3+3).
  * Подписи «ЗАДАНИЕ N» на этом экране в макете нет.
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import { FeedbackCoach } from '../components/FeedbackCoach'
 
 import type { TaskFeedback } from '../ege2/feedback'
 import type { TaskId, TaskVariant } from '../ege2/tasks'
@@ -57,6 +58,7 @@ export function ResultScreen42({
   const ringClass = feedback === null ? 'q-ring--none' : score ? '' : 'q-ring--zero'
   const [open, setOpen] = useState(0)
   const dispute = feedback ? disputeBase(taskId, variant, feedback, transcript) : null
+  const player = useRef<HTMLAudioElement>(null)
   const [, setProgress] = useState(0)
   const onProgress = useCallback((f: number) => setProgress(f), [])
 
@@ -91,8 +93,10 @@ export function ResultScreen42({
           ) : (
             <div className="q-fail">{failure ?? 'Разбор не выполнен.'}</div>
           )}
-          {blob && <Player blob={blob} seconds={seconds} onProgress={onProgress} />}
+          {blob && <Player blob={blob} seconds={seconds} onProgress={onProgress} player={player} />}
         </div>
+
+        {feedback && <FeedbackCoach taskId={taskId} variant={variant} feedback={feedback} player={player} />}
 
         {failure && onRetry && <section className="x-card" aria-label="Повторная проверка">
           <p className="x-text">Можно отправить эту же запись ещё раз.</p>

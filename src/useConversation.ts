@@ -124,6 +124,8 @@ export function useConversation(): ConversationApi {
   const pendingRef = useRef(0)
   const playbackVersion = useRef(0)
   const stoppedAt = useRef(0)
+  const playbackToken = useRef<string | null>(null)
+  const playbackNoted = useRef(false)
   /** Память диалога: последние 10 реплик (5 обменов). Живёт в sessionStorage —
       переживает переключение вкладок ПРИЛОЖЕНИЯ (Conversation → ЕГЭ → назад
       раньше стирало историю: компонент размонтировался, и тьютор всё забывал),
@@ -137,9 +139,23 @@ export function useConversation(): ConversationApi {
   }, [])
 
   const notePlayback = useCallback((scheduledDelay = 0) => {
-    if (!stoppedAt.current) return
+    if (!stoppedAt.current || playbackNoted.current) return
+    playbackNoted.current = true
     const seconds = (performance.now() - stoppedAt.current) / 1000 + scheduledDelay
-    setPlaybackDelay((previous) => previous ?? seconds)
+    setPlaybackDelay(seconds)
+    const token = playbackToken.current
+    playbackToken.current = null
+    if (token && document.visibilityState === 'visible') {
+      void fetch(`${BACKEND}/talk_metrics`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders(),
+          'X-Playback-Token': token,
+          'X-Playback-Ms': String(Math.max(1, Math.round(seconds * 1000))),
+        },
+        keepalive: true,
+      }).catch(() => {})
+    }
   }, [])
 
   // Проиграть следующий чанк из очереди; когда очередь пуста и стрим завершён — в покой.
@@ -242,7 +258,7 @@ export function useConversation(): ConversationApi {
           // предложениями, а не дыра от кодека.
           const when = Math.max(ctx.currentTime + 0.02, nextStartRef.current)
           src.start(when, from, dur)
-          notePlayback(Math.max(0, when - ctx.currentTime))
+          if (ctx.state === 'running') notePlayback(Math.max(0, when - ctx.currentTime))
           nextStartRef.current = when + dur + 0.15
 
           sourcesRef.current.add(src)
@@ -270,6 +286,7 @@ export function useConversation(): ConversationApi {
   // Полностью гасим текущий ответ (barge-in / очистка): обрыв стрима, очередь, звук.
   const stopSpeaking = useCallback(() => {
     playbackVersion.current += 1
+    playbackToken.current = null
     abortRef.current?.abort()
     abortRef.current = null
     queueRef.current = []
@@ -309,6 +326,8 @@ export function useConversation(): ConversationApi {
       setTranscript('')
       setLatency(null)
       setPlaybackDelay(null)
+      playbackToken.current = null
+      playbackNoted.current = false
       queueRef.current = []
       playingRef.current = false
       streamDoneRef.current = false
@@ -344,6 +363,7 @@ export function useConversation(): ConversationApi {
         // а не при монтировании — сменил персону в настройках, и уже следующая
         // реплика звучит новым голосом, без перезахода в разговор.
         fd.append('persona', getSettings().persona)
+        fd.append('measure_playback', '1')
         const res = await fetch(`${BACKEND}/talk_stream`, {
           method: 'POST',
           body: fd,
@@ -379,6 +399,7 @@ export function useConversation(): ConversationApi {
               preview?: string
               text?: string
               audio_b64?: string
+              playback_token?: string
               reply?: string
               error?: string
               done?: boolean
@@ -398,6 +419,7 @@ export function useConversation(): ConversationApi {
               setReply(spokenText)
               if (msg.audio_b64) {
                 audioInTurnRef.current = true
+                if (msg.playback_token) playbackToken.current = msg.playback_token
                 enqueueAudio(msg.audio_b64)
               }
             }

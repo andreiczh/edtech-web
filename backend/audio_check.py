@@ -39,17 +39,19 @@ class AudioTooLong(ValueError):
     pass
 
 
-def validate_duration(data: bytes) -> None:
+def validate_duration(data: bytes, max_seconds: float | None = None) -> None:
     """Bound decoded duration without retaining frames, even without metadata."""
+    if max_seconds is None:
+        max_seconds = MAX_AUDIO_SECONDS
     try:
         with av.open(io.BytesIO(data)) as c:
-            if c.duration is not None and c.duration / av.time_base > MAX_AUDIO_SECONDS:
-                raise AudioTooLong("audio exceeds six minutes")
+            if c.duration is not None and c.duration / av.time_base > max_seconds:
+                raise AudioTooLong("audio exceeds duration limit")
             seconds = 0.0
             for frame in c.decode(audio=0):
                 seconds += frame.samples / frame.sample_rate
-                if seconds > MAX_AUDIO_SECONDS:
-                    raise AudioTooLong("audio exceeds six minutes")
+                if seconds > max_seconds:
+                    raise AudioTooLong("audio exceeds duration limit")
     except AudioTooLong:
         raise
     except Exception:
@@ -130,7 +132,7 @@ def to_pcm(data: bytes, ext: str = ".webm") -> np.ndarray | None:
                 for f in rs.resample(frame):
                     samples += f.samples
                     if samples > MAX_AUDIO_SECONDS * 16000:
-                        raise AudioTooLong("audio exceeds six minutes")
+                        raise AudioTooLong("audio exceeds duration limit")
                     got.append(f.to_ndarray().reshape(-1))
             return got
 

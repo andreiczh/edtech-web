@@ -10,7 +10,8 @@
  * отказа. В макете незачтённого состояния нет; причина — единственное
  * добавление: без неё карточка ничему не учит.
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import { FeedbackCoach } from '../components/FeedbackCoach'
 
 import type { TaskFeedback } from '../ege2/feedback'
 import type { TaskId, TaskVariant } from '../ege2/tasks'
@@ -57,6 +58,7 @@ export function ResultScreen40({
   const ringClass = feedback === null ? 'q-ring--none' : score ? '' : 'q-ring--zero'
   // Плеер двигает ничего: у вопросов нет текста для подсветки. Заглушка нужна
   // самому плееру — он один на оба разбора.
+  const player = useRef<HTMLAudioElement>(null)
   const [, setProgress] = useState(0)
   const onProgress = useCallback((f: number) => setProgress(f), [])
 
@@ -95,8 +97,10 @@ export function ResultScreen40({
           ) : (
             <div className="q-fail">{failure ?? 'Разбор не выполнен.'}</div>
           )}
-          {blob && <Player blob={blob} seconds={seconds} onProgress={onProgress} />}
+          {blob && <Player blob={blob} seconds={seconds} onProgress={onProgress} player={player} />}
         </div>
+
+        {feedback && <FeedbackCoach taskId={taskId} variant={variant} feedback={feedback} player={player} />}
 
         {failure && onRetry && <section className="x-card" aria-label="Повторная проверка">
           <p className="x-text">Можно отправить эту же запись ещё раз.</p>
