@@ -83,26 +83,13 @@ def recheck_prompt(kind: str, items: list[dict], task_text: str,
     # же правилам», не вкладывая их, — и «старший эксперт» судил вслепую,
     # ссылаясь на выдуманное «правило 3.2» и заваливая чистые ответы.
     rules = _DIALOGUE_RULES if kind == "dialogue" else _INTERVIEW_RULES
-    if kind == "interview":
-        listed = "\n".join(
-            f'- n={it["n"]}: {it["point"]}\n  Candidate excerpt to verify: {it.get("heard", "")}\n'
-            f'  Mechanical clause hint (verify, not a verdict): {it.get("phrase_hint", "unknown")}'
-            for it in items
-        )
-        review_rule = ("Reconstruct the student's actual answer from the full transcript. "
-                       "For a zero, identify the missing question part, insufficient complete "
-                       "clauses, or a concrete elementary error that survives self-correction. "
-                       "Check for a valid continuous reading before treating a spoken fragment "
-                       "as a missing verb. Judge independently of the candidate excerpt.\n")
-    else:
-        listed = "\n".join(
-            f'- n={it["n"]}: {it["point"]}\n  first verdict: '
-            f'{"accepted" if it["accepted"] else "rejected"} ({it["reason"] or "no reason given"})'
-            f'\n  Verbatim answer: {it.get("heard", "")}\n  Mechanical clause hint '
-            f'(verify, not a verdict): {it.get("phrase_hint", "unknown")}'
-            for it in items
-        )
-        review_rule = ""
+    listed = "\n".join(
+        f'- n={it["n"]}: {it["point"]}\n  first verdict: '
+        f'{"accepted" if it["accepted"] else "rejected"} ({it["reason"] or "no reason given"})'
+        f'\n  Verbatim answer: {it.get("heard", "")}\n  Mechanical clause hint '
+        f'(verify, not a verdict): {it.get("phrase_hint", "unknown")}'
+        for it in items
+    )
     return (
         "You are the SENIOR examiner called in for a second opinion on the Russian "
         f"EGE oral exam. A first examiner has already marked the work; only the "
@@ -115,7 +102,7 @@ def recheck_prompt(kind: str, items: list[dict], task_text: str,
         f"{[it['n'] for it in items]}. No items may be omitted. "
         "Re-judge ONLY these items, carefully and by the rules above. You are the "
         "final word: do not split the difference, decide.\n"
-        + review_rule + strictness_block(persona) +
+        + strictness_block(persona) +
         "\nReturn ONLY this JSON:\n"
         '{"items": [{"n": <номер>, "accepted": true, "reason": "<по-русски, до 12 '
         "слов: какое правило и какие слова ученика — только из транскрипта, ничего "
@@ -454,11 +441,7 @@ _INTERVIEW_RULES = (
     "however sensible it sounds. «It's green» DOES contain a subject and a verb. "
     "A complete subordinate clause with a subject and a predicate also counts; "
     "punctuation inserted by speech recognition is not a sentence-count rule. "
-    "Read spoken lists as a whole: conjoined actions can share a subject, a modal, "
-    "or an introductory verb. A different form inside an intelligible list of "
-    "activities is not automatically an absent predicate. A phrase of purpose "
-    "can complete the preceding action without a new subject and verb. Ignore "
-    "immediately corrected false starts and benign repetitions.\n\n"
+    "Ignore false starts that were immediately corrected and benign spoken repetitions.\n\n"
     "CALIBRATION — how real examiners marked real answers:\n"
     "- «In Troitsk. It's a part of Moscow. Quite warm.» — REJECTED: one real sentence "
     "and two fragments.\n"
@@ -486,12 +469,11 @@ _INTERVIEW_RULES = (
     "Accept all reasonable readings of a broad question (e.g. a home description may "
     "include how convenient living there is). Distinguish devices from programmes, "
     "frequency from duration, and check stated time quantities for plausible content.\n\n"
-    "THE MARK IS HOLISTIC. One verified elementary lexico-grammatical error "
-    "is enough to reject an otherwise fluent answer. Give credit for relevant "
-    "ideas expressed in ordinary words, even if you would choose a different "
-    "idiom. A reason already given elsewhere in the answer satisfies 'why'. "
-    "Identify an actual missing part or elementary error before rejecting. "
-    "Watch for these clear cases:\n"
+    "THE MARK IS HOLISTIC AND ONE SLIP SINKS THE ANSWER. Fluency does not "
+    "compensate: a long, natural-sounding answer with ONE elementary error is "
+    "still 0. When torn between «sounds fine overall» and «there is a slip», "
+    "the slip wins. Watch specifically for the three slips real examiners "
+    "catch and models forgive:\n"
     "- a missing linking verb: «my mom always busy», «the weather hot in "
     "summer» — REJECTED however fluent the rest is;\n"
     "- subject-verb agreement: «our city need more buses», «he go to school» — "
